@@ -30,3 +30,11 @@ export function verifyEmail(token: string): Promise<void> {
 export function resendVerify(email: string): Promise<{ emailSent: boolean }> {
   return apiPost<{ emailSent: boolean }>('/auth/resend-verify', { email })
 }
+
+export function forgotPassword(email: string): Promise<{ emailSent: boolean }> {
+  return apiPost<{ emailSent: boolean }>('/auth/forgot-password', { email })
+}
+
+export function resetPassword(token: string, newPassword: string): Promise<void> {
+  return apiPost<void>('/auth/reset-password', { token, newPassword })
+}

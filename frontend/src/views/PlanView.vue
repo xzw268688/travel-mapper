@@ -52,6 +52,7 @@ const spotDialog = reactive({
 const spotTarget = ref<{ day: DayPlan; index: number } | null>(null)
 const moveDialog = reactive({ visible: false, targetIndex: 0 })
 const moveSource = ref<{ day: DayPlan; index: number } | null>(null)
+const dragSpot = ref<{ dayIndex: number; index: number } | null>(null)
 
 const countryName = computed(() =>
   countries.value.find((item) => item.code === country.value)?.nameZh || country.value
@@ -358,6 +359,32 @@ function moveSpotWithinDay(day: DayPlan, index: number, offset: number): void {
   day.spots[target] = swapped
 }
 
+function onSpotDragStart(dayIndex: number, index: number, event: DragEvent): void {
+  dragSpot.value = { dayIndex, index }
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', `spot-${dayIndex}-${index}`)
+  }
+}
+
+function onSpotDrop(dayIndex: number, targetIndex: number): void {
+  const source = dragSpot.value
+  dragSpot.value = null
+  const current = draft.value
+  if (!source || !current) return
+  if (source.dayIndex !== dayIndex) {
+    ElMessage.info('跨天移动请使用“移到…”菜单')
+    return
+  }
+  if (source.index === targetIndex) return
+  const spots = current.days[dayIndex]?.spots
+  if (!spots) return
+  const [spot] = spots.splice(source.index, 1)
+  if (spot) {
+    spots.splice(targetIndex, 0, spot)
+  }
+}
+
 function openMoveSpot(day: DayPlan, index: number): void {
   const current = draft.value
   if (!current || current.days.length < 2) {
@@ -516,7 +543,16 @@ function openSearch(): void {
           <el-button text size="small" type="primary" @click="openAddSpot(day)">+ 添加手动景点</el-button>
         </div>
         <el-empty v-if="day.spots.length === 0" description="当天暂无景点" :image-size="60" />
-        <div v-for="(spot, index) in day.spots" :key="spot.name + index" class="fallback-row">
+        <div
+          v-for="(spot, index) in day.spots"
+          :key="spot.name + index"
+          class="fallback-row draggable-row"
+          draggable="true"
+          title="拖拽可调整当天顺序"
+          @dragstart="onSpotDragStart(dayIndex, index, $event)"
+          @dragover.prevent
+          @drop="onSpotDrop(dayIndex, index)"
+        >
           <el-tag :type="spot.source === 'MANUAL' ? 'warning' : 'info'" size="small">
             {{ spot.source === 'MANUAL' ? '手动' : 'AI' }}
           </el-tag>
@@ -618,6 +654,7 @@ function openSearch(): void {
     </el-dialog>
 
     <el-dialog v-model="moveDialog.visible" title="移动景点到某天" width="420px">
+
       <el-select v-model="moveDialog.targetIndex" style="width: 100%">
         <el-option
           v-for="(day, index) in draft?.days || []"
@@ -633,3 +670,13 @@ function openSearch(): void {
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.draggable-row {
+  cursor: grab;
+}
+
+.draggable-row:active {
+  cursor: grabbing;
+}
+</style>

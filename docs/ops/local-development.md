@@ -99,9 +99,9 @@ npm run dev
 - `/notes` 游记：TipTap 图文编辑器（粘贴/拖拽上传、压缩、直传）、保存并跳转详情。
 - `/notes/:id` 游记详情/编辑：可见性、关联旅行、封面、分享管理、下架状态；也可在 `/notes` 按 ID 打开。
 - `/poster/:id?` 游记海报：确保分享令牌、地图足迹 Canvas 连线、统计、二维码与 PNG 下载。
-- `/expenses` 记账：表单、列表、按国家/旅行汇总。
-- `/admin/rates` 管理员汇率维护：新增币种会提示历史消费回填数量。
-- `/admin/notes` 管理员内容下架/恢复：按游记 ID 操作，下架会撤销全部分享链接。
+- `/expenses` 记账：新增/编辑/删除、筛选、分页、按国家/城市/旅行/日期汇总与图表。
+- `/profile` 个人中心：昵称/头像、额度、卡密兑换、注销；`/forgot-password`、`/reset-password` 找回密码。
+- 导航“管理”菜单（ADMIN）：用户、卡密、城市、官方链接、汇率、内容管理、AI 配置。
 - `/admin/settings` 管理员 LLM/搜索配置：填写 OpenAI 兼容 Base URL、模型与 API Key；Key 留空会保留原 Key。生成行程提示 `2012` 或 HTTP 503 时先检查这里。
 - `/share/:token` 公开只读分享页；分享链接与海报二维码均指向该路由。后端 API 返回的 `share.url` 仍是 `/s/{token}`（契约字段），前端展示与二维码统一使用 `/share/{token}`。
 - 开发环境预置管理员 `admin / Admin@123456`；管理员登录后导航栏显示“汇率”“内容管理”。

@@ -130,14 +130,63 @@ test('公开分享页无需登录即可访问', async ({ browser }) => {
 
 test('后台汇率与内容管理页面可访问', async ({ page }) => {
   await page.goto('/admin/rates')
-  await expect(page.getByText('汇率维护')).toBeVisible()
+  await expect(page.locator('.trip-title').getByText('汇率维护')).toBeVisible()
   await expect(page.locator('.el-table').getByText('CNY').first()).toBeVisible()
 
   await page.goto('/admin/notes')
-  await expect(page.getByText('内容下架与恢复')).toBeVisible()
+  await expect(page.locator('.trip-title').getByText('内容下架与恢复')).toBeVisible()
   await expect(page.getByPlaceholder('游记 ID')).toBeVisible()
 
   await page.goto('/admin/settings')
-  await expect(page.getByText('AI 行程模型（LLM）')).toBeVisible()
+  await expect(page.locator('.trip-title').getByText('AI 行程模型（LLM）')).toBeVisible()
   await expect(page.getByRole('button', { name: '保存 LLM 配置' })).toBeVisible()
+
+  await page.goto('/admin/users')
+  await expect(page.locator('.trip-title').getByText('用户管理')).toBeVisible()
+  await page.goto('/admin/cards')
+  await expect(page.locator('.trip-title').getByText('生成卡密')).toBeVisible()
+  await page.goto('/admin/cities')
+  await expect(page.locator('.trip-title').getByText('城市维护')).toBeVisible()
+  await page.goto('/admin/official-links')
+  await expect(page.locator('.trip-title').getByText('官方链接维护')).toBeVisible()
+})
+
+test('个人中心、卡密兑换与找回密码页面', async ({ page }) => {
+  await page.goto('/profile')
+  await expect(page.getByText('个人资料')).toBeVisible()
+  await expect(page.getByText('我的额度')).toBeVisible()
+  await expect(page.getByText('卡密兑换')).toBeVisible()
+
+  await page.goto('/forgot-password')
+  await expect(page.locator('.login-title').getByText('找回密码')).toBeVisible()
+  await page.goto('/reset-password')
+  await expect(page.locator('.login-title').getByText('重置密码')).toBeVisible()
+})
+
+test('记账新增、编辑、删除与汇总图表', async ({ page }) => {
+  const amount = String(900 + (Date.now() % 90)) + '.55'
+  const remark = `E2E 记账 ${Date.now()}`
+  await page.goto('/expenses')
+  await expect(page.getByText('记账').first()).toBeVisible()
+
+  await page.getByRole('button', { name: '记一笔' }).click()
+  const dialog = page.getByRole('dialog').filter({ hasText: '记一笔' })
+  await dialog.getByPlaceholder('如 125.00，可为负数').fill(amount)
+  await dialog.getByPlaceholder('备注（可选）').fill(remark)
+  await dialog.getByRole('button', { name: '保存消费' }).click()
+  await expect(page.getByText(remark)).toBeVisible()
+
+  const row = page.locator('.el-table__row').filter({ hasText: remark }).first()
+  await row.getByRole('button', { name: '编辑' }).click()
+  const editDialog = page.getByRole('dialog').filter({ hasText: '编辑消费' })
+  await editDialog.getByPlaceholder('如 125.00，可为负数').fill('999.99')
+  await editDialog.getByRole('button', { name: '保存消费' }).click()
+  const updatedRow = page.locator('.el-table__row').filter({ hasText: remark }).first()
+  await expect(updatedRow.getByText('999.99').first()).toBeVisible()
+
+  await expect(page.locator('.expense-chart canvas')).toBeVisible()
+
+  await updatedRow.getByRole('button', { name: '删除' }).click()
+  await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+  await expect(page.getByText(remark)).toHaveCount(0)
 })

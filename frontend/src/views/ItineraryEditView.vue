@@ -53,6 +53,7 @@ const spotDialog = reactive({
 })
 
 const moveDialog = reactive({ visible: false, spotId: 0, targetDayId: 0 })
+const dragSpot = ref<{ dayId: number; spotId: number; index: number } | null>(null)
 
 const dayDialog = reactive({
   visible: false,
@@ -243,6 +244,29 @@ async function moveSpotTo(spot: SpotView, targetDayId: number, targetIndex?: num
     ElMessage.error((err as Error).message || '移动失败')
   } finally {
     busy.value = false
+  }
+}
+
+function onSpotDragStart(day: DayView, spot: SpotView, index: number, event: DragEvent): void {
+  dragSpot.value = { dayId: day.dayId, spotId: spot.spotId, index }
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', String(spot.spotId))
+  }
+}
+
+async function onSpotDrop(day: DayView, targetIndex: number): Promise<void> {
+  const source = dragSpot.value
+  dragSpot.value = null
+  if (!source) return
+  if (source.dayId !== day.dayId) {
+    ElMessage.info('跨天移动请使用“移到…”菜单')
+    return
+  }
+  if (source.index === targetIndex) return
+  const spot = day.spots.find((item) => item.spotId === source.spotId)
+  if (spot) {
+    await moveSpotTo(spot, day.dayId, targetIndex)
   }
 }
 
@@ -437,7 +461,16 @@ function statusText(status: string): string {
             <el-button text type="danger" size="small" @click="removeDay(day)">删除本天</el-button>
           </div>
           <el-empty v-if="day.spots.length === 0" description="当天暂无景点" :image-size="60" />
-          <div v-for="(spot, index) in day.spots" :key="spot.spotId" class="fallback-row">
+          <div
+            v-for="(spot, index) in day.spots"
+            :key="spot.spotId"
+            class="fallback-row draggable-row"
+            draggable="true"
+            title="拖拽可调整当天顺序"
+            @dragstart="onSpotDragStart(day, spot, index, $event)"
+            @dragover.prevent
+            @drop="onSpotDrop(day, index)"
+          >
             <el-tag :type="spot.source === 'MANUAL' ? 'warning' : 'info'" size="small">
               {{ spot.source === 'MANUAL' ? '手动' : 'AI' }}
             </el-tag>
@@ -551,3 +584,13 @@ function statusText(status: string): string {
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.draggable-row {
+  cursor: grab;
+}
+
+.draggable-row:active {
+  cursor: grabbing;
+}
+</style>

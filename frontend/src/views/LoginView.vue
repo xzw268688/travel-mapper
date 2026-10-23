@@ -55,6 +55,9 @@ async function submit(): Promise<void> {
       </p>
       <div class="meta" style="margin-top: 8px; display: flex; justify-content: space-between">
         <router-link to="/register">注册新账号</router-link>
+        <router-link to="/forgot-password">忘记密码</router-link>
+      </div>
+      <div class="meta" style="margin-top: 6px; text-align: right">
         <router-link to="/verify-email">邮箱验证 / 重新发送</router-link>
       </div>
     </el-card>

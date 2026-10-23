@@ -56,3 +56,22 @@ export function apiPut<T>(url: string, data?: unknown): Promise<T> {
 export function apiDelete<T>(url: string, params?: Record<string, unknown>): Promise<T> {
   return unwrap<T>(http.delete(url, { params }))
 }
+
+export function apiPostWithHeaders<T>(
+  url: string,
+  data: unknown,
+  headers: Record<string, string>
+): Promise<T> {
+  return unwrap<T>(http.post(url, data, { headers }))
+}
+
+/** 下载 CSV 等二进制内容（自动携带 JWT）。 */
+export async function apiDownload(
+  url: string,
+  params?: Record<string, unknown>
+): Promise<{ blob: Blob; filename: string | null }> {
+  const response = await http.get(url, { params, responseType: 'blob' })
+  const disposition = response.headers['content-disposition'] as string | undefined
+  const match = disposition?.match(/filename="?([^";]+)"?/)
+  return { blob: response.data as Blob, filename: match ? match[1] : null }
+}
