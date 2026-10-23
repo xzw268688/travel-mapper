@@ -42,3 +42,6 @@ frontend/e2e/.auth.json
 frontend/e2e/.state.json
 frontend/test-results/
 frontend/playwright-report/
+
+# IDE
+.idea/
