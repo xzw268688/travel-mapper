@@ -28,6 +28,7 @@ function logout(): void {
         <router-link to="/polish">AI 润色</router-link>
         <router-link v-if="auth.user?.role === 'ADMIN'" to="/admin/rates">汇率</router-link>
         <router-link v-if="auth.user?.role === 'ADMIN'" to="/admin/notes">内容管理</router-link>
+        <router-link v-if="auth.user?.role === 'ADMIN'" to="/admin/settings">AI 配置</router-link>
       </nav>
       <div class="header-right">
         <span v-if="auth.user" class="user-name">{{ auth.user.nickname || auth.user.username }}</span>

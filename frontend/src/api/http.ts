@@ -22,6 +22,12 @@ http.interceptors.response.use(
         window.location.href = '/login'
       }
     }
+    // 非 2xx 时 axios 只给出 "Request failed with status code xxx"，
+    // 优先展示后端 ApiResponse 里的业务 message。
+    const message = error.response?.data?.message
+    if (typeof message === 'string' && message.trim()) {
+      error.message = message
+    }
     return Promise.reject(error)
   }
 )

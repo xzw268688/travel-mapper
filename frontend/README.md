@@ -26,7 +26,7 @@ npm run dev
 - `/notes/:id` 游记详情/编辑：封面、可见性、关联旅行、分享管理、下架状态；支持按 ID 打开和生成海报。
 - `/poster/:id?` 游记海报：自动确保分享令牌、拉取地图统计、Canvas 足迹连线、二维码、html2canvas 下载 PNG。
 - `/expenses` 记账：表单、列表、按国家/旅行汇总与未配置汇率提示。
-- `/admin/rates` 管理员汇率维护；`/admin/notes` 管理员内容下架/恢复（均需 ADMIN）。
+- `/admin/rates` 管理员汇率维护；`/admin/notes` 管理员内容下架/恢复；`/admin/settings` LLM/搜索配置（均需 ADMIN）。LLM 未配置时生成行程返回 `2012`。
 - `/share/:token` 公开只读分享页（无需登录，失效时展示“分享已失效”）；分享链接与海报二维码均指向该路由。
 
 ## 浏览器 E2E

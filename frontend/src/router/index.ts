@@ -12,6 +12,7 @@ import PosterView from '../views/PosterView.vue'
 import ExpensesView from '../views/ExpensesView.vue'
 import AdminRatesView from '../views/AdminRatesView.vue'
 import AdminNotesView from '../views/AdminNotesView.vue'
+import AdminSettingsView from '../views/AdminSettingsView.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -28,6 +29,7 @@ const router = createRouter({
     { path: '/expenses', name: 'expenses', component: ExpensesView },
     { path: '/admin/rates', name: 'admin-rates', component: AdminRatesView, meta: { admin: true } },
     { path: '/admin/notes', name: 'admin-notes', component: AdminNotesView, meta: { admin: true } },
+    { path: '/admin/settings', name: 'admin-settings', component: AdminSettingsView, meta: { admin: true } },
     { path: '/share/:token', name: 'share', component: ShareView, meta: { public: true } }
   ]
 })

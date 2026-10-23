@@ -136,4 +136,8 @@ test('后台汇率与内容管理页面可访问', async ({ page }) => {
   await page.goto('/admin/notes')
   await expect(page.getByText('内容下架与恢复')).toBeVisible()
   await expect(page.getByPlaceholder('游记 ID')).toBeVisible()
+
+  await page.goto('/admin/settings')
+  await expect(page.getByText('AI 行程模型（LLM）')).toBeVisible()
+  await expect(page.getByRole('button', { name: '保存 LLM 配置' })).toBeVisible()
 })
