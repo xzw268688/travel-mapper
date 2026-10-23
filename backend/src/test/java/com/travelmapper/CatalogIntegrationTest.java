@@ -30,6 +30,8 @@ class CatalogIntegrationTest extends AuthTestSupport {
         User user = createVerifiedUser("catalog");
         jdbcTemplate.update("UPDATE country SET status = 'DISABLED' WHERE code = 'AU'");
         jdbcTemplate.update("UPDATE city SET status = 'DISABLED' WHERE country_code = 'JP' AND city_code = 'SPK'");
+        jdbcTemplate.update("INSERT IGNORE INTO country (code, name_zh, name_en, continent, status, sort_order) "
+                + "VALUES ('ZQ', '空城市国', 'Empty City Land', 'ASIA', 'ENABLED', 999)");
         try {
             mockMvc.perform(withToken(get("/api/countries"), user))
                     .andExpect(status().isOk())
@@ -44,7 +46,8 @@ class CatalogIntegrationTest extends AuthTestSupport {
                     .andExpect(jsonPath("$.data[*].cityCode", org.hamcrest.Matchers.not(
                             org.hamcrest.Matchers.hasItem("SPK"))));
 
-            mockMvc.perform(withToken(get("/api/cities").param("countryCode", "US"), user))
+            // 没有任何城市的启用国家应返回空数组
+            mockMvc.perform(withToken(get("/api/cities").param("countryCode", "ZQ"), user))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data").isEmpty());
 
@@ -54,6 +57,7 @@ class CatalogIntegrationTest extends AuthTestSupport {
         } finally {
             jdbcTemplate.update("UPDATE country SET status = 'ENABLED' WHERE code = 'AU'");
             jdbcTemplate.update("UPDATE city SET status = 'ENABLED' WHERE country_code = 'JP' AND city_code = 'SPK'");
+            jdbcTemplate.update("DELETE FROM country WHERE code = 'ZQ'");
         }
     }
 

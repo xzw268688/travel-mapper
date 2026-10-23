@@ -36,7 +36,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-Flyway 会自动建表并写入种子数据。首次启动后：
+Flyway 会自动建表并写入种子数据；`V4__more_cities.sql` 额外预置常用中国地级市与热门外国城市。首次启动后：
 
 - 健康检查：`http://localhost:8080/actuator/health`
 - Swagger UI：`http://localhost:8080/swagger-ui.html`
