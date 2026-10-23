@@ -1,0 +1,195 @@
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #0f1720;
+  color: #e5e7eb;
+}
+
+.app-shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 20px;
+  background: #111827;
+  border-bottom: 1px solid #1f2937;
+}
+
+.brand {
+  font-weight: 700;
+  color: #fbbf24;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+
+nav {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+}
+
+nav a {
+  color: #9ca3af;
+  text-decoration: none;
+  padding: 6px 0;
+  border-bottom: 2px solid transparent;
+}
+
+nav a.router-link-active {
+  color: #f9fafb;
+  border-color: #fbbf24;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-name {
+  color: #d1d5db;
+  font-size: 14px;
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+}
+
+.map-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-canvas {
+  flex: 1;
+  min-height: 480px;
+  width: 100%;
+  touch-action: none;
+}
+
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  color: #9ca3af;
+  font-size: 13px;
+  border-top: 1px solid #1f2937;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.fallback-map {
+  padding: 20px;
+  overflow: auto;
+}
+
+.fallback-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid #1f2937;
+  cursor: pointer;
+}
+
+.fallback-row:hover {
+  background: #111827;
+}
+
+.drawer-section {
+  margin-bottom: 18px;
+}
+
+.trip-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.city-block {
+  margin: 12px 0;
+  padding: 12px;
+  background: #0b1220;
+  border-radius: 8px;
+}
+
+.city-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.meta {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.login-page {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.login-card {
+  width: min(420px, 100%);
+}
+
+.login-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.plan-page {
+  padding: 24px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.selector-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .app-header {
+    padding: 0 12px;
+    gap: 12px;
+  }
+
+  .map-canvas {
+    min-height: 60vh;
+  }
+
+  .plan-page {
+    padding: 12px;
+  }
+}

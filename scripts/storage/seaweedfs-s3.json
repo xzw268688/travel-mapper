@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "travelmapper",
+      "credentials": [
+        {
+          "accessKey": "test",
+          "secretKey": "test"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

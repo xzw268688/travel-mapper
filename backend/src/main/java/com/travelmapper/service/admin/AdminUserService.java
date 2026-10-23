@@ -1,0 +1,134 @@
+package com.travelmapper.service.admin;
+
+import com.travelmapper.common.api.BusinessException;
+import com.travelmapper.common.api.ErrorCode;
+import com.travelmapper.common.api.PageRequest;
+import com.travelmapper.common.api.PageResult;
+import com.travelmapper.common.security.UserStatusCache;
+import com.travelmapper.controller.admin.dto.AdminQuotaRequest;
+import com.travelmapper.controller.admin.dto.AdminQuotaResponse;
+import com.travelmapper.controller.admin.dto.AdminStatusRequest;
+import com.travelmapper.controller.admin.dto.AdminStatusResponse;
+import com.travelmapper.controller.admin.dto.AdminUserView;
+import com.travelmapper.repository.entity.User;
+import com.travelmapper.repository.enums.QuotaType;
+import com.travelmapper.repository.enums.UserStatus;
+import com.travelmapper.repository.mapper.UserMapper;
+import com.travelmapper.service.audit.AuditLogService;
+import com.travelmapper.service.quota.QuotaService;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+@Service
+public class AdminUserService {
+
+    private final JdbcTemplate jdbcTemplate;
+    private final UserMapper userMapper;
+    private final UserStatusCache userStatusCache;
+    private final QuotaService quotaService;
+    private final AuditLogService auditLogService;
+
+    public AdminUserService(JdbcTemplate jdbcTemplate, UserMapper userMapper,
+                            UserStatusCache userStatusCache, QuotaService quotaService,
+                            AuditLogService auditLogService) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.userMapper = userMapper;
+        this.userStatusCache = userStatusCache;
+        this.quotaService = quotaService;
+        this.auditLogService = auditLogService;
+    }
+
+    public PageResult<AdminUserView> list(String keyword, String status, PageRequest request) {
+        request.validate();
+        String keywordLike = keyword == null || keyword.isBlank() ? null : "%" + keyword.trim() + "%";
+        String statusFilter = status == null || status.isBlank() ? null : status.trim().toUpperCase(Locale.ROOT);
+        String where = " FROM `user` WHERE (? IS NULL OR username LIKE ? OR nickname LIKE ? OR email LIKE ?) "
+                + "AND (? IS NULL OR status = ?) ";
+
+        Long total = jdbcTemplate.queryForObject("SELECT COUNT(*)" + where, Long.class,
+                keywordLike, keywordLike, keywordLike, keywordLike, statusFilter, statusFilter);
+        List<AdminUserView> rows = jdbcTemplate.query(
+                "SELECT id, username, nickname, email, role, status, vip_expire_at, created_at"
+                        + where + " ORDER BY id DESC LIMIT ? OFFSET ?",
+                (rs, rowNum) -> {
+                    long id = rs.getLong("id");
+                    Timestamp vip = rs.getTimestamp("vip_expire_at");
+                    Timestamp created = rs.getTimestamp("created_at");
+                    return new AdminUserView(
+                            id,
+                            rs.getString("username"),
+                            rs.getString("nickname"),
+                            rs.getString("email"),
+                            rs.getString("role"),
+                            rs.getString("status"),
+                            vip == null ? null : vip.toLocalDateTime(),
+                            quotaService.freeUsedToday(id),
+                            quotaService.packBalance(id),
+                            created == null ? null : created.toLocalDateTime());
+                },
+                keywordLike, keywordLike, keywordLike, keywordLike, statusFilter, statusFilter,
+                request.getSize(), request.offset());
+        return PageResult.of(total == null ? 0 : total, request, rows);
+    }
+
+    @Transactional
+    public AdminStatusResponse updateStatus(Long adminId, Long userId, AdminStatusRequest request) {
+        User user = userMapper.selectByIdIncludingDeleted(userId);
+        if (user == null || user.getStatus() == UserStatus.DELETED) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "用户不存在或已注销");
+        }
+        UserStatus target;
+        try {
+            target = UserStatus.valueOf(request.getStatus().trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "status 必须为 NORMAL 或 BANNED");
+        }
+        if (target != UserStatus.NORMAL && target != UserStatus.BANNED) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "status 必须为 NORMAL 或 BANNED");
+        }
+        if (target == UserStatus.BANNED && user.getStatus() != UserStatus.BANNED) {
+            user.setTokenVersion((user.getTokenVersion() == null ? 1 : user.getTokenVersion()) + 1);
+        }
+        user.setStatus(target);
+        userMapper.updateById(user);
+        userStatusCache.evict(userId);
+        auditLogService.record(adminId, target == UserStatus.BANNED ? "USER_BAN" : "USER_UNBAN",
+                "USER", userId,
+                Map.of("status", target.name(), "reason", request.getReason() == null ? "" : request.getReason()),
+                null);
+        return new AdminStatusResponse(userId, target.name(), user.getTokenVersion());
+    }
+
+    @Transactional
+    public AdminQuotaResponse adjustQuota(Long adminId, Long userId, AdminQuotaRequest request) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "用户不存在");
+        }
+        QuotaType type;
+        try {
+            type = QuotaType.valueOf(request.getType().trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "type 必须为 AI_QUOTA 或 VIP");
+        }
+        if (type == QuotaType.AI_QUOTA) {
+            quotaService.adjustAiQuota(userId, request.getDelta(), request.getReason());
+        } else {
+            quotaService.adjustVip(userId, request.getDelta(), request.getReason());
+        }
+        User refreshed = userMapper.selectById(userId);
+        auditLogService.record(adminId, "USER_QUOTA", "USER", userId,
+                Map.of("type", type.name(), "delta", request.getDelta(), "reason", request.getReason()),
+                null);
+        return new AdminQuotaResponse(userId, type.name(),
+                quotaService.packBalance(userId),
+                refreshed == null ? null : refreshed.getVipExpireAt());
+    }
+}

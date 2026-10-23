@@ -1,0 +1,76 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: tm-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: travelmapper
+      MYSQL_USER: travelmapper
+      MYSQL_PASSWORD: travelmapper
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: tm-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Preferred local object storage (Design 4.1). If the image is unavailable in
+  # your registry, use the s3mock profile below and set the OSS endpoint to
+  # http://127.0.0.1:19090 in the admin config.
+  minio:
+    image: minio/minio:latest
+    container_name: tm-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb -p local/travelmapper || true;
+      exit 0;
+      "
+
+  # Fallback for environments where the MinIO image cannot be pulled.
+  # Start with: docker compose --profile s3mock up -d s3mock
+  s3mock:
+    image: adobe/s3mock:latest
+    container_name: tm-s3mock
+    profiles: ["s3mock"]
+    ports:
+      - "19090:9090"
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: travelmapper,travelmapper2
+
+volumes:
+  mysql-data:
+  redis-data:
+  minio-data:

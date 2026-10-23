@@ -1,0 +1,91 @@
+## Purpose
+
+定义游记文本的 AI 流式润色协议与取消/退回规则，使前端获得稳定的打字机体验，并保证主动取消、断网与部分输出三类场景的额度处理一致。
+
+## ADDED Requirements
+
+### Requirement: Polish request validation
+润色请求 MUST 包含 `requestId`、1–5000 字的 `text`；`style` MUST 为 `vivid`/`concise`/`elegant`（默认 `vivid`）；`target` MUST 为 `selected`/`full`（默认 `selected`）；可选的 `noteId` MUST 校验属于当前用户。
+
+#### Scenario: Empty text is rejected
+- **WHEN** 用户提交空文本
+- **THEN** 系统返回 `2001`，不扣额度
+
+#### Scenario: Other user's noteId is rejected
+- **WHEN** 请求携带他人的 `noteId`
+- **THEN** 系统返回 `2004` 或 `2003`，不进入润色
+
+#### Scenario: Style defaults to vivid
+- **WHEN** 请求未提供 `style`
+- **THEN** 系统按 `vivid` 处理
+
+### Requirement: Quota deduction for polish
+润色 MUST 在建立流式连接前完成额度检查与扣减，并与行程生成共享免费额度；额度不足 MUST 返回 `2011`，MUST NOT 调用 LLM。
+
+#### Scenario: Exhausted quota blocks polish
+- **WHEN** 用户当日额度已用完
+- **THEN** 接口返回 `2011`，不建立 SSE 流
+
+#### Scenario: VIP does not consume free quota
+- **WHEN** VIP 用户在有效期内润色
+- **THEN** 免费计数与次数包余额不变
+
+### Requirement: SSE event protocol
+成功响应 MUST 为 `text/event-stream`，并按顺序发送可选 `meta`、若干 `delta`、以及 `done`/`cancelled`/`error` 之一；`meta` MUST 包含 `requestId` 与 `quotaSource`；`delta` MUST 包含文本增量；`done` MUST 包含 `totalChars`；`error` MUST 包含错误码与用户可读消息。
+
+#### Scenario: Normal stream completes
+- **WHEN** 润色正常结束
+- **THEN** 前端依次收到 `meta`、多个 `delta` 和 `done`，按序拼接得到完整文本
+
+#### Scenario: Error terminates stream
+- **WHEN** LLM 在输出前报错
+- **THEN** 发送 `error` 事件并结束流，按规则退回额度
+
+#### Scenario: Proxy does not buffer
+- **WHEN** 请求经过 Nginx
+- **THEN** SSE 路径关闭缓冲，首个字符 P95 小于 1.5 秒
+
+### Requirement: Cancellation endpoint
+`POST /api/ai/cancel` MUST 幂等：重复取消同一 `requestId` 返回成功；只对当前用户且已登记的 `requestId` 写取消标志；不存在或非本人的 `requestId` MUST 仍返回成功但不写标志；取消标志 TTL 为 5 分钟。
+
+#### Scenario: Repeated cancel succeeds
+- **WHEN** 用户两次取消同一 `requestId`
+- **THEN** 两次均返回成功，取消标志只写一次
+
+#### Scenario: Cannot cancel another user's request
+- **WHEN** 用户尝试取消他人的 `requestId`
+- **THEN** 接口返回成功，但不写取消标志，其他用户的流不受影响
+
+#### Scenario: Stream stops on cancel
+- **WHEN** 服务端在每个 chunk 前检测到取消标志
+- **THEN** 停止生成并发送 `cancelled` 事件
+
+### Requirement: Refund boundaries
+用户主动取消 MUST NOT 退回额度；未输出任何有效内容即断网 MUST 退回额度；已输出部分流式内容后断开 MUST NOT 退回额度；异常且未输出任何内容 MUST 退回额度；同一 `requestId` 的退回 MUST 幂等。
+
+#### Scenario: Active cancel keeps charge
+- **WHEN** 用户点击“取消生成”并调用 `/api/ai/cancel`
+- **THEN** 流停止并发送 `cancelled`，本次额度不退回
+
+#### Scenario: Disconnect before output refunds
+- **WHEN** 连接在收到任何 `delta` 前断开且未调用取消接口
+- **THEN** 本次扣减被退回
+
+#### Scenario: Disconnect after partial output keeps charge
+- **WHEN** 已经输出至少一个 `delta` 后连接断开
+- **THEN** 本次额度不退回
+
+#### Scenario: Repeated refund is idempotent
+- **WHEN** 同一 `requestId` 的退回逻辑被触发两次
+- **THEN** 第二次不产生额外退回
+
+### Requirement: Frontend streaming behavior
+前端 MUST 使用 `fetch` + `ReadableStream` 而非 `EventSource`；收到 `delta` MUST 逐字拼接渲染；点击“取消生成” MUST 先调用 `/api/ai/cancel` 再 abort fetch；仅关闭页面/断网 MUST NOT 调用取消接口。
+
+#### Scenario: Typewriter rendering
+- **WHEN** 前端收到多个 `delta`
+- **THEN** 文本按顺序逐块追加，呈现打字机效果
+
+#### Scenario: Cancel sequence
+- **WHEN** 用户点击“取消生成”
+- **THEN** 前端先发送取消请求，再中断 fetch 连接

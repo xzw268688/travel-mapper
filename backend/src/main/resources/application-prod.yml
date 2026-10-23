@@ -1,0 +1,7 @@
+app:
+  security:
+    # JWT is delivered by change-02. Until then, production must not trust dev identity headers.
+    admin-stub-enabled: false
+logging:
+  level:
+    com.travelmapper: INFO

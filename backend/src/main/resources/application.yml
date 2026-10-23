@@ -1,0 +1,98 @@
+spring:
+  application:
+    name: travelmapper
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/travelmapper?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:travelmapper}
+    password: ${DB_PASSWORD:travelmapper}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+  flyway:
+    enabled: true
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration}
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:25}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:false}
+          starttls:
+            enable: ${MAIL_SMTP_STARTTLS:false}
+  jackson:
+    # Keep nulls so response shapes match the API contract (e.g. "vipExpireAt": null).
+    time-zone: Asia/Shanghai
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+server:
+  port: ${SERVER_PORT:8080}
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    default-enum-type-handler: com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+  health:
+    mail:
+      enabled: ${MAIL_HEALTH_ENABLED:false}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+  group-configs:
+    - group: admin-config
+      paths-to-match: /api/admin/config/**
+      packages-to-scan: com.travelmapper.controller.admin
+
+app:
+  security:
+    admin-stub-enabled: ${ADMIN_STUB_ENABLED:true}
+    jwt-secret: ${TRAVELMAPPER_JWT_SECRET:}
+    jwt-ttl-seconds: ${TRAVELMAPPER_JWT_TTL:604800}
+  mail:
+    enabled: ${MAIL_ENABLED:false}
+    from: ${MAIL_FROM:no-reply@travelmapper.local}
+  crypto:
+    aes-key: ${TRAVELMAPPER_AES_KEY:}
+  storage:
+    upload-ttl-seconds: 300
+    download-ttl-seconds: 600
+    share-max-ttl-seconds: 3600
+    orphan-cleanup-cron: "0 30 3 * * *"
+  search:
+    connect-timeout-seconds: 3
+    read-timeout-seconds: 5
+  rate-limit:
+    enabled: true

@@ -1,0 +1,6 @@
+app:
+  security:
+    admin-stub-enabled: true
+logging:
+  level:
+    com.travelmapper: DEBUG
