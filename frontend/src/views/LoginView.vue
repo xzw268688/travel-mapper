@@ -53,6 +53,10 @@ async function submit(): Promise<void> {
       <p class="meta" style="margin-top: 16px">
         开发环境预置管理员 admin / Admin@123456。普通用户需先注册并完成邮箱验证。
       </p>
+      <div class="meta" style="margin-top: 8px; display: flex; justify-content: space-between">
+        <router-link to="/register">注册新账号</router-link>
+        <router-link to="/verify-email">邮箱验证 / 重新发送</router-link>
+      </div>
     </el-card>
   </div>
 </template>

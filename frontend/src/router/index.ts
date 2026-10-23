@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import LoginView from '../views/LoginView.vue'
+import RegisterView from '../views/RegisterView.vue'
+import VerifyEmailView from '../views/VerifyEmailView.vue'
 import MapView from '../views/MapView.vue'
 import PlanView from '../views/PlanView.vue'
 import ItineraryEditView from '../views/ItineraryEditView.vue'
@@ -19,6 +21,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: LoginView },
+    { path: '/register', name: 'register', component: RegisterView, meta: { public: true } },
+    { path: '/verify-email', name: 'verify-email', component: VerifyEmailView, meta: { public: true } },
     { path: '/', name: 'map', component: MapView },
     { path: '/plan', name: 'plan', component: PlanView },
     { path: '/itineraries/:id', name: 'itinerary-edit', component: ItineraryEditView },

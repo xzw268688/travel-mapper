@@ -24,7 +24,8 @@ Playwright 会自动启动 Vite 开发服务器（`http://localhost:5173`，已�
 - 行程编辑：景点新增/编辑/跨天移动/删除，天修改/新增/删除。
 - 游记：TipTap 创建、保存、创建分享、海报渲染与 PNG 下载。
 - 公开分享页免登录访问。
-- 后台汇率与内容管理页面可访问。
+- 后台汇率、内容管理、AI 配置页面可访问。
+- 注册 → 从 Docker MySQL 读取验证令牌 → 验证邮箱 → 登录（`auth.spec.ts`）。
 
 ## 数据准备与清理
 
@@ -42,5 +43,8 @@ Playwright 会自动启动 Vite 开发服务器（`http://localhost:5173`，已�
 | `E2E_API_BASE` | `http://localhost:8080` | 后端地址 |
 | `E2E_FRONTEND_ORIGIN` | `http://localhost:5173` | 用于生成登录 storageState |
 | `E2E_ADMIN_ACCOUNT` / `E2E_ADMIN_PASSWORD` | `admin` / `Admin@123456` | 管理员账号 |
+| `E2E_MYSQL_CONTAINER` | `tm-mysql` | 注册测试读取验证令牌的 MySQL 容器 |
+| `E2E_MYSQL_ROOT_PASSWORD` | `root` | MySQL root 密码 |
+| `E2E_MYSQL_DATABASE` | `travelmapper` | 数据库名 |
 
 `e2e/.auth.json`、`e2e/.state.json` 为运行期文件，已加入 `.gitignore`。

@@ -61,7 +61,7 @@ SELECT token, type, expire_at FROM email_token
 WHERE email = 'you@example.com' ORDER BY id DESC;
 ```
 
-注册后调用 `POST /api/auth/verify-email`，再登录。普通用户访问 `/api/admin/**` 返回 403 `4002`。
+前端 `/register` 可直接注册，注册后跳转 `/verify-email`。开发期 `MAIL_ENABLED=false` 时邮件不会发送，验证令牌写入 `email_token` 表，可查询后粘贴到验证页；验证成功后登录。普通用户访问 `/api/admin/**` 返回 403 `4002`。
 
 ## LLM / 搜索配置
 
