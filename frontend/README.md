@@ -40,7 +40,7 @@ npm run test:e2e:headed
 
 ## 地图底图
 
-`VITE_WORLD_GEO_URL` 指向世界 GeoJSON。当前默认值仅用于开发；上线前必须按 SRS 7.3 确认底图合规来源与审图号，确认不了则使用国家列表降级视图。底图加载失败时会自动切换为国家列表。
+默认使用本地 `public/world.json`（ECharts 4 的世界地图 GeoJSON，约 1MB），不再依赖外部 CDN；可用 `VITE_WORLD_GEO_URL` 覆盖。上线前仍必须按 SRS 7.3 确认底图合规来源与审图号。底图加载失败时会自动切换为国家列表，列出全部国家（未点亮国家为灰色，同样可点击查看详情）。
 
 ## 移动端
 

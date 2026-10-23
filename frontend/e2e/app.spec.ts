@@ -17,6 +17,9 @@ test.describe.configure({ mode: 'serial' })
 test('地图 → 国家抽屉 → 打开行程编辑页', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('TravelMapper').first()).toBeVisible()
+  // 本地 world.json 应让 ECharts 正常渲染，不再降级
+  await expect(page.locator('.map-canvas canvas')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('地图底图加载失败，已切换为国家列表')).toHaveCount(0)
 
   const japanTag = page.locator('.map-legend .el-tag').filter({ hasText: '日本' }).first()
   await expect(japanTag).toBeVisible({ timeout: 20_000 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
@@ -21,9 +21,8 @@ const fallback = ref(false)
 const loading = ref(false)
 const openedItineraries = new Set<number>()
 
-const WORLD_GEO_URL =
-  import.meta.env.VITE_WORLD_GEO_URL ||
-  'https://geo.datav.aliyun.com/areas_v3/bound/world.json'
+// 默认使用本地 GeoJSON，避免依赖外部 CDN；生产环境仍需按 SRS 7.3 确认底图来源与审图号。
+const WORLD_GEO_URL = import.meta.env.VITE_WORLD_GEO_URL || '/world.json'
 
 let chart: echarts.ECharts | null = null
 let geoFeatures: any[] = []
@@ -44,8 +43,30 @@ const GEO_ALIASES: Record<string, string> = {
 const statusColor = (stat?: CountryStat): string =>
   stat?.status === 'GREEN' ? '#2e7d32' : stat?.status === 'YELLOW' ? '#f9a825' : '#37474f'
 
-const statusLabel = (stat?: CountryStat): string =>
+const statusLabel = (stat?: { status?: string }): string =>
   stat?.status === 'GREEN' ? '已完成' : stat?.status === 'YELLOW' ? '计划中' : '未点亮'
+
+const fallbackCountries = computed(() => {
+  const statByCode = new Map(stats.value.map((stat) => [stat.countryCode, stat]))
+  return countries.value
+    .map((country) => {
+      const stat = statByCode.get(country.code)
+      return {
+        countryCode: country.code,
+        countryName: country.nameZh,
+        status: stat?.status ?? 'GRAY',
+        itineraryCount: stat?.itineraryCount ?? 0,
+        noteCount: stat?.noteCount ?? 0,
+        totalCount: stat?.totalCount ?? 0,
+        expired: stat?.expired ?? false
+      }
+    })
+    .sort(
+      (left, right) =>
+        right.totalCount - left.totalCount ||
+        left.countryName.localeCompare(right.countryName, 'zh-CN')
+    )
+})
 
 const statusTagType = (status: string): 'success' | 'warning' | 'info' =>
   status === 'GREEN' ? 'success' : status === 'YELLOW' ? 'warning' : 'info'
@@ -210,9 +231,10 @@ onBeforeUnmount(() => {
         show-icon
         title="地图底图加载失败，已切换为国家列表"
       />
-      <el-empty v-if="stats.length === 0" description="还没有点亮任何国家" />
+      <el-empty v-if="fallbackCountries.length === 0" description="国家目录为空" />
+      <div v-else class="meta" style="margin: 8px 0">点击任意国家查看详情；未点亮国家显示为灰色。</div>
       <div
-        v-for="stat in stats"
+        v-for="stat in fallbackCountries"
         :key="stat.countryCode"
         class="fallback-row"
         @click="openCountry(stat.countryCode)"
