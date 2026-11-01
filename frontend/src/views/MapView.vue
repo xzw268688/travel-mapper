@@ -308,13 +308,19 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-for="trip in drawer.trips" :key="trip.tripId" class="drawer-section">
-          <div class="trip-title">
-            <el-link type="primary" :underline="false" @click="router.push(`/trips/${trip.tripId}`)">
-              {{ trip.tripName }}
-            </el-link>
-            <span class="meta">¥{{ trip.subtotalCny }}</span>
+          <!-- 只有一次旅行时省略旅行层，直接展示城市与内容 -->
+          <template v-if="drawer.trips.length > 1">
+            <div class="trip-title">
+              <el-link type="primary" :underline="false" @click="router.push(`/trips/${trip.tripId}`)">
+                {{ trip.tripName }}
+              </el-link>
+              <span class="meta">¥{{ trip.subtotalCny }}</span>
+            </div>
+            <div class="meta">{{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }}</div>
+          </template>
+          <div v-else class="meta" style="margin-bottom: 8px">
+            {{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }} · 本次花费 ¥{{ trip.subtotalCny }}
           </div>
-          <div class="meta">{{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }}</div>
           <div v-if="trip.cities.length === 0" class="meta">暂无城市分组</div>
           <div v-for="city in trip.cities" :key="trip.tripId + '-' + city.cityCode" class="city-block">
             <div class="city-head">

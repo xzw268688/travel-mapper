@@ -20,6 +20,12 @@ export default async function globalTeardown(): Promise<void> {
     if (state.itineraryId) {
       await ctx.delete(`/api/itinerary/${state.itineraryId}`, { headers }).catch(() => undefined)
     }
+    // 行程删除后旅行会变空，一并清理，避免测试数据在开发库里累积。
+    if (state.tripId) {
+      await ctx
+        .delete(`/api/trips/${state.tripId}?force=true`, { headers })
+        .catch(() => undefined)
+    }
   } finally {
     await ctx.dispose()
     fs.rmSync(STATE_FILE, { force: true })
