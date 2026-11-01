@@ -323,6 +323,27 @@ class TripIntegrationTest extends AuthTestSupport {
                 .andExpect(jsonPath("$.code").value(4002));
     }
 
+    @Test
+    void expenseThenLaterItineraryShareOneArchive() throws Exception {
+        User user = createVerifiedUser("backfill");
+        LocalDate day = LocalDate.now().minusDays(2);
+
+        mockMvc.perform(withToken(post("/api/expenses"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"countryCode\":\"JP\",\"currency\":\"JPY\",\"amount\":\"100.00\","
+                                + "\"category\":\"FOOD\",\"expenseDate\":\"" + day + "\"}"))
+                .andExpect(status().isOk());
+        Long expenseTrip = jdbcTemplate.queryForObject(
+                "SELECT trip_id FROM expense WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                Long.class, user.getId());
+        assertThat(expenseTrip).isNotNull();
+
+        // 10 天后才保存行程：应归入同一个归档（向前窗口 30 天）
+        Trip later = tripService.attachOrCreate(user.getId(), null, "JP", null,
+                day.plusDays(10), day.plusDays(12));
+        assertThat(later.getId()).isEqualTo(expenseTrip);
+    }
+
     private Itinerary insertItinerary(User user, Long tripId, String countryCode, String title,
                                       LocalDate start, LocalDate end) {
         Itinerary itinerary = new Itinerary();

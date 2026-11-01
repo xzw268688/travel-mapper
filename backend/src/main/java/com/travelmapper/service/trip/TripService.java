@@ -177,10 +177,10 @@ public class TripService {
     }
 
     /**
-     * 按日期自动归类：落在旅行区间内，或结束后 trailingDays 天内。
-     * 多个命中时取距离最近、结束日期最晚的一次。
+     * 按日期匹配归档：记录日期与归档区间的前后距离 ≤ windowDays 天即命中。
+     * 多个命中时取距离最小、结束日期最晚的一次。
      */
-    public Trip resolveForDate(Long userId, String countryCode, LocalDate date, int trailingDays) {
+    public Trip resolveForDate(Long userId, String countryCode, LocalDate date, int windowDays) {
         List<Trip> trips = tripMapper.selectList(new LambdaQueryWrapper<Trip>()
                 .eq(Trip::getUserId, userId)
                 .eq(Trip::getCountryCode, countryCode));
@@ -192,22 +192,30 @@ public class TripService {
             }
             long distance;
             if (date.isBefore(trip.getStartDate())) {
-                continue;
-            } else if (!date.isAfter(trip.getEndDate())) {
-                distance = 0;
+                distance = ChronoUnit.DAYS.between(date, trip.getStartDate());
+            } else if (date.isAfter(trip.getEndDate())) {
+                distance = ChronoUnit.DAYS.between(trip.getEndDate(), date);
             } else {
-                long after = ChronoUnit.DAYS.between(trip.getEndDate(), date);
-                if (after > trailingDays) {
-                    continue;
-                }
-                distance = after;
+                distance = 0;
             }
-            if (distance < bestDistance) {
+            if (distance > windowDays) {
+                continue;
+            }
+            if (distance < bestDistance
+                    || (distance == bestDistance && best != null
+                    && trip.getEndDate().isAfter(best.getEndDate()))) {
                 best = trip;
                 bestDistance = distance;
             }
         }
         return best;
+    }
+
+    /** 匹配不到归档时新建一个单日归档，保证游记/消费也能形成归档。 */
+    public Trip resolveOrCreateForDate(Long userId, String countryCode, LocalDate date) {
+        Trip matched = resolveForDate(userId, countryCode, date, GROUPING_WINDOW_DAYS);
+        return matched != null ? matched
+                : createForItinerary(userId, countryCode, date, date, null);
     }
 
     public Trip attachOrCreate(Long userId, Long tripId, String rawCountryCode, String tripName,

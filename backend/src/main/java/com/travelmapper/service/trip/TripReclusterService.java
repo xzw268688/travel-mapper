@@ -166,22 +166,18 @@ public class TripReclusterService {
         for (TravelNote note : notes) {
             LocalDate date = note.getCreatedAt() == null
                     ? LocalDate.now() : note.getCreatedAt().toLocalDate();
-            Trip trip = tripService.resolveForDate(note.getUserId(), note.getCountryCode(),
-                    date, TripService.GROUPING_WINDOW_DAYS);
-            if (trip != null) {
-                note.setTripId(trip.getId());
-                noteMapper.updateById(note);
-            }
+            Trip trip = tripService.resolveOrCreateForDate(
+                    note.getUserId(), note.getCountryCode(), date);
+            note.setTripId(trip.getId());
+            noteMapper.updateById(note);
         }
         List<Expense> expenses = expenseMapper.selectList(
                 new LambdaQueryWrapper<Expense>().isNull(Expense::getTripId));
         for (Expense expense : expenses) {
-            Trip trip = tripService.resolveForDate(expense.getUserId(),
-                    expense.getCountryCode(), expense.getExpenseDate(), 0);
-            if (trip != null) {
-                expense.setTripId(trip.getId());
-                expenseMapper.updateById(expense);
-            }
+            Trip trip = tripService.resolveOrCreateForDate(
+                    expense.getUserId(), expense.getCountryCode(), expense.getExpenseDate());
+            expense.setTripId(trip.getId());
+            expenseMapper.updateById(expense);
         }
     }
 }

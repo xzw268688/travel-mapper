@@ -137,10 +137,10 @@ public class NoteService {
                     throw new BusinessException(ErrorCode.PARAM_INVALID, "旅行国家与游记不一致");
                 }
             } else {
-                // 未手动指定时按创建日期自动归组；旅行结束后 30 天内仍算同一趟。
-                Trip matched = tripService.resolveForDate(
-                        userId, countryCode, LocalDate.now(), TripService.GROUPING_WINDOW_DAYS);
-                tripId = matched == null ? null : matched.getId();
+                // 未指定时按创建日期自动匹配归档；没有归档就新建，保证不会留在未归组。
+                Trip matched = tripService.resolveOrCreateForDate(
+                        userId, countryCode, LocalDate.now());
+                tripId = matched.getId();
             }
         }
 

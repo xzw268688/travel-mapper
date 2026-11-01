@@ -170,15 +170,15 @@ class NoteShareIntegrationTest extends AuthTestSupport {
                 .andExpect(status().isOk()).andReturn();
         assertThat(data(autoResult).path("tripId").asLong()).isEqualTo(tripId);
 
-        // 该国没有任何旅行：保持未归组
-        Map<String, Object> ungrouped = noteBody("未归组", "<p>x</p>", List.of(), null);
-        ungrouped.put("countryCode", "US");
-        ungrouped.put("cityCode", "NYC");
-        MvcResult ungroupedResult = mockMvc.perform(withToken(post("/api/notes"), user)
-                        .contentType(MediaType.APPLICATION_JSON).content(json(ungrouped)))
+        // 该国没有归档：自动新建一个单日归档，不再留在未归组
+        Map<String, Object> autoCreated = noteBody("自动归档", "<p>x</p>", List.of(), null);
+        autoCreated.put("countryCode", "US");
+        autoCreated.put("cityCode", "NYC");
+        MvcResult createdResult = mockMvc.perform(withToken(post("/api/notes"), user)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(autoCreated)))
                 .andExpect(status().isOk()).andReturn();
-        assertThat(data(ungroupedResult).path("tripId").isNull()).isTrue();
-        assertThat(data(ungroupedResult).path("tripInherited").asBoolean()).isFalse();
+        assertThat(data(createdResult).path("tripId").isNull()).isFalse();
+        assertThat(data(createdResult).path("tripInherited").asBoolean()).isFalse();
     }
 
     @Test

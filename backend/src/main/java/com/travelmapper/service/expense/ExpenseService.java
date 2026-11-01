@@ -84,10 +84,9 @@ public class ExpenseService {
             }
         }
         if (request.getItineraryId() == null && tripId == null) {
-            // 未指定旅行时按消费日期自动归类；不匹配则为未归组。
-            Trip matched = tripService.resolveForDate(
-                    userId, context.countryCode(), request.getExpenseDate(), 0);
-            tripId = matched == null ? null : matched.getId();
+            // 未指定归档时按消费日期匹配；没有归档就新建。
+            tripId = tripService.resolveOrCreateForDate(
+                    userId, context.countryCode(), request.getExpenseDate()).getId();
         }
         BigDecimal snapshot = findRate(currency);
         Expense expense = new Expense();
