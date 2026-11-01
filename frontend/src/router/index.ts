@@ -2,13 +2,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
-import VerifyEmailView from '../views/VerifyEmailView.vue'
-import ForgotPasswordView from '../views/ForgotPasswordView.vue'
 import ResetPasswordView from '../views/ResetPasswordView.vue'
+import AdminLoginView from '../views/AdminLoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import MapView from '../views/MapView.vue'
 import PlanView from '../views/PlanView.vue'
 import ItineraryEditView from '../views/ItineraryEditView.vue'
+import TripDetailView from '../views/TripDetailView.vue'
 import PolishView from '../views/PolishView.vue'
 import NotesView from '../views/NotesView.vue'
 import NoteDetailView from '../views/NoteDetailView.vue'
@@ -23,19 +23,21 @@ import AdminCardsView from '../views/AdminCardsView.vue'
 import AdminCitiesView from '../views/AdminCitiesView.vue'
 import AdminLinksView from '../views/AdminLinksView.vue'
 import { useAuthStore } from '../stores/auth'
+import { getStoredToken } from '../utils/authStorage'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/login', name: 'login', component: LoginView },
-    { path: '/register', name: 'register', component: RegisterView, meta: { public: true } },
-    { path: '/verify-email', name: 'verify-email', component: VerifyEmailView, meta: { public: true } },
-    { path: '/forgot-password', name: 'forgot-password', component: ForgotPasswordView, meta: { public: true } },
-    { path: '/reset-password', name: 'reset-password', component: ResetPasswordView, meta: { public: true } },
+    { path: '/login', name: 'login', component: LoginView, meta: { bare: true } },
+    { path: '/register', name: 'register', component: RegisterView, meta: { public: true, bare: true } },
+    { path: '/forgot-password', redirect: '/reset-password' },
+    { path: '/reset-password', name: 'reset-password', component: ResetPasswordView, meta: { public: true, bare: true } },
+    { path: '/admin/login', name: 'admin-login', component: AdminLoginView, meta: { public: true, bare: true } },
     { path: '/profile', name: 'profile', component: ProfileView },
     { path: '/', name: 'map', component: MapView },
     { path: '/plan', name: 'plan', component: PlanView },
     { path: '/itineraries/:id', name: 'itinerary-edit', component: ItineraryEditView },
+    { path: '/trips/:id', name: 'trip-detail', component: TripDetailView },
     { path: '/polish', name: 'polish', component: PolishView },
     { path: '/notes', name: 'notes', component: NotesView },
     { path: '/notes/:id', name: 'note-detail', component: NoteDetailView },
@@ -56,7 +58,7 @@ router.beforeEach(async (to) => {
   if (to.meta.public) {
     return true
   }
-  const token = localStorage.getItem('tm_token')
+  const token = getStoredToken()
   if (to.name !== 'login' && !token) {
     return { name: 'login' }
   }

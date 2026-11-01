@@ -66,6 +66,11 @@ export default async function globalSetup(): Promise<void> {
       '创建 E2E 行程'
     )
 
+    const itineraryDetail = await unwrap(
+      await ctx.get(`/api/itinerary/${saved.itineraryId}`, { headers }),
+      '读取 E2E 行程详情'
+    )
+
     const noteTitle = `E2E 分享游记 ${stamp}`
     const note = await unwrap(
       await ctx.post('/api/notes', {
@@ -98,6 +103,8 @@ export default async function globalSetup(): Promise<void> {
           token,
           itineraryId: saved.itineraryId,
           itineraryTitle,
+          tripId: itineraryDetail.tripId,
+          tripName: itineraryDetail.tripName,
           noteId: note.id,
           noteTitle,
           shareToken: share.token

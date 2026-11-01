@@ -7,6 +7,7 @@ import { getCountries } from '../api/catalog'
 import { getCountryDrawer, getMapStats } from '../api/map'
 import type { Country, CountryDrawer, CountryStat } from '../api/types'
 import { useMapStore } from '../stores/map'
+import worldNamesZh from '../assets/world-names-zh.json'
 
 const router = useRouter()
 const mapStore = useMapStore()
@@ -38,6 +39,19 @@ const GEO_ALIASES: Record<string, string> = {
   Vietnam: 'VN',
   Czechia: 'CZ',
   'United Kingdom': 'GB'
+}
+
+/**
+ * 地图名称解析：目录中文名 → 内置对照表 → 底图原名。
+ * 只做显示翻译，不参与任何业务判断。
+ */
+function countryNameOf(name: string): string {
+  const aliasCode = GEO_ALIASES[name]
+  const country = countryByName.get(name) ?? (aliasCode ? countryByCode.get(aliasCode) : undefined)
+  if (country) {
+    return country.nameZh
+  }
+  return (worldNamesZh as Record<string, string>)[name] ?? name
 }
 
 const statusColor = (stat?: CountryStat): string =>
@@ -115,9 +129,10 @@ async function initMap(): Promise<void> {
       tooltip: {
         trigger: 'item',
         formatter: (params: any) => {
+          const label = countryNameOf(String(params.name ?? ''))
           const stat = params.data?.stat as CountryStat | undefined
-          if (!stat) return `${params.name}<br/>暂无记录`
-          return `${stat.countryName}<br/>行程 ${stat.itineraryCount} · 游记 ${stat.noteCount} · 总计 ${stat.totalCount}${stat.expired ? '<br/>计划已过期' : ''}`
+          if (!stat) return `${label}<br/>暂无记录`
+          return `${label}<br/>行程 ${stat.itineraryCount} · 游记 ${stat.noteCount} · 总计 ${stat.totalCount}${stat.expired ? '<br/>计划已过期' : ''}`
         }
       },
       series: [
@@ -128,7 +143,13 @@ async function initMap(): Promise<void> {
           scaleLimit: { min: 1, max: 8 },
           itemStyle: { areaColor: '#37474f', borderColor: '#546e7a', borderWidth: 0.6 },
           emphasis: {
-            label: { show: true, color: '#ffffff' },
+            label: {
+              show: true,
+              color: '#ffffff',
+              textBorderColor: '#1f2d3d',
+              textBorderWidth: 3,
+              formatter: (params: any) => countryNameOf(String(params.name ?? ''))
+            },
             itemStyle: { areaColor: '#ffd54f' }
           },
           select: { disabled: true },
@@ -224,6 +245,11 @@ onBeforeUnmount(() => {
   <div class="map-page" v-loading="loading">
     <div ref="chartEl" class="map-canvas" v-show="!fallback"></div>
 
+    <div class="map-topbar">
+      <strong>旅迹地图</strong>
+      <span>把走过的路，留在地图上</span>
+    </div>
+
     <div v-if="fallback" class="fallback-map">
       <el-alert
         type="warning"
@@ -283,7 +309,10 @@ onBeforeUnmount(() => {
 
         <div v-for="trip in drawer.trips" :key="trip.tripId" class="drawer-section">
           <div class="trip-title">
-            {{ trip.tripName }} <span class="meta">¥{{ trip.subtotalCny }}</span>
+            <el-link type="primary" :underline="false" @click="router.push(`/trips/${trip.tripId}`)">
+              {{ trip.tripName }}
+            </el-link>
+            <span class="meta">¥{{ trip.subtotalCny }}</span>
           </div>
           <div class="meta">{{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }}</div>
           <div v-if="trip.cities.length === 0" class="meta">暂无城市分组</div>

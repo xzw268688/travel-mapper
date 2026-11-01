@@ -10,8 +10,6 @@ import com.travelmapper.service.card.CardKeyService;
 import com.travelmapper.service.config.ConfigService;
 import com.travelmapper.service.quota.QuotaService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
@@ -29,12 +27,6 @@ public abstract class AuthTestSupport extends AbstractIntegrationTest {
 
     @Autowired
     protected JwtService jwtService;
-
-    @Autowired
-    protected JdbcTemplate jdbcTemplate;
-
-    @Autowired
-    protected StringRedisTemplate redis;
 
     @Autowired
     protected QuotaService quotaService;
@@ -79,7 +71,14 @@ public abstract class AuthTestSupport extends AbstractIntegrationTest {
     }
 
     protected void clearEmailRateLimit(String email) {
-        redis.delete("rate:email:" + email.toLowerCase());
+        String normalized = email.toLowerCase();
+        String day = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai"))
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+        redis.delete("rate:email:" + normalized);
+        redis.delete("auth:code:gap:" + normalized);
+        redis.delete("auth:code:daily:" + normalized + ":" + day);
+        redis.delete("auth:code:verify:" + normalized);
+        redis.delete("auth:code:reset:" + normalized);
     }
 
     protected long count(String table, String where, Object... args) {

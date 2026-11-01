@@ -27,7 +27,7 @@ Playwright 会自动启动 Vite 开发服务器（`http://localhost:5173`，已�
 - 后台用户、卡密、城市、官方链接、汇率、内容管理、AI 配置页面可访问。
 - 个人中心、卡密兑换入口、找回/重置密码页面。
 - 记账新增/编辑/删除与汇总图表。
-- 注册 → 从 Docker MySQL 读取验证令牌 → 验证邮箱 → 登录（`auth.spec.ts`）。
+- 注册（邮箱下填验证码）→ 自动登录；找回密码；管理员入口与普通用户被拒；保持登录的存储策略；验证页与昵称已移除（`auth.spec.ts`）。
 
 ## 数据准备与清理
 
@@ -38,6 +38,14 @@ Playwright 会自动启动 Vite 开发服务器（`http://localhost:5173`，已�
 
 运行结束后 `global-teardown.ts` 通过 API 删除这两条数据。UI 测试中创建的游记会在用例内删除。
 
+## 视觉验收截图
+
+```bash
+npx playwright test e2e/screens.spec.ts
+```
+
+在 `test-results/screens/` 输出登录、注册、地图、规划、游记、记账、个人中心、后台的桌面（1440）与手机（390）宽度截图，用于人工检查布局与间距。
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -45,7 +53,9 @@ Playwright 会自动启动 Vite 开发服务器（`http://localhost:5173`，已�
 | `E2E_API_BASE` | `http://localhost:8080` | 后端地址 |
 | `E2E_FRONTEND_ORIGIN` | `http://localhost:5173` | 用于生成登录 storageState |
 | `E2E_ADMIN_ACCOUNT` / `E2E_ADMIN_PASSWORD` | `admin` / `Admin@123456` | 管理员账号 |
-| `E2E_MYSQL_CONTAINER` | `tm-mysql` | 注册测试读取验证令牌的 MySQL 容器 |
+| `E2E_BACKEND_LOG` | 无 | 后端日志路径；未设置时跳过需要验证码的用例 |
+| `E2E_REDIS_CONTAINER` | `tm-redis` | 用例内清理发码限流键 |
+| `E2E_MYSQL_CONTAINER` | `tm-mysql` | 备用：MySQL 容器 |
 | `E2E_MYSQL_ROOT_PASSWORD` | `root` | MySQL root 密码 |
 | `E2E_MYSQL_DATABASE` | `travelmapper` | 数据库名 |
 

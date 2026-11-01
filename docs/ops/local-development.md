@@ -54,14 +54,13 @@ curl -X POST http://localhost:8080/api/auth/login \
 curl -H 'Authorization: Bearer <token>' http://localhost:8080/api/user/profile
 ```
 
-开发期 `MAIL_ENABLED=false`，验证/找回密码令牌会写入 `email_token` 表，不打印在日志中：
+开发期 `MAIL_ENABLED=false`，注册验证与找回密码的 6 位验证码只打印在后端日志中，不写入数据库：
 
-```sql
-SELECT token, type, expire_at FROM email_token
-WHERE email = 'you@example.com' ORDER BY id DESC;
+```
+[auth-dev] scene=VERIFY email=you@example.com code=123456 expiresIn=600s
 ```
 
-前端 `/register` 可直接注册，注册后跳转 `/verify-email`。开发期 `MAIL_ENABLED=false` 时邮件不会发送，验证令牌写入 `email_token` 表，可查询后粘贴到验证页；验证成功后登录。普通用户访问 `/api/admin/**` 返回 403 `4002`。
+前端 `/register` 在邮箱下方直接填 6 位验证码，注册成功自动登录。注册与找回密码使用邮箱验证码；开发期 `MAIL_ENABLED=false` 时邮件不会发送，验证码只打印在后端日志（`[auth-dev] scene=... email=... code=...`），按日志填写即可。管理员后台入口为 `/admin/login`。普通用户访问 `/api/admin/**` 返回 403 `4002`。
 
 ## LLM / 搜索配置
 
@@ -90,7 +89,7 @@ cp .env.example .env
 npm run dev
 ```
 
-开发服务器 `http://localhost:5173`，`/api` 自动代理到 `http://localhost:8080`。
+开发服务器 `http://localhost:5173`，`/api` 默认代理到 `http://localhost:8080`；可用 `VITE_API_TARGET=http://localhost:8090` 指向另一个后端实例。
 
 - `/` 世界地图：三态着色、悬浮计数、点击国家打开旅行/城市抽屉。
 - `/plan` AI 行程规划：生成、草稿微调（天/景点增删改排、跨天移动）、保存、行前准备/清单/官方链接。
@@ -177,8 +176,10 @@ S3Mock 不强制私有访问，私有桶用例会自动跳过。MinIO 镜像/Win
 
 ```bash
 cd frontend
-npm run test:e2e
+E2E_BACKEND_LOG='D:/path/to/backend.log' npm run test:e2e
 ```
+
+`E2E_BACKEND_LOG` 指向后端日志文件时，注册/找回密码用例会从中读取 `[auth-dev] ... code=...`；未设置时跳过这些用例。
 
 详见 `frontend/e2e/README.md`。
 

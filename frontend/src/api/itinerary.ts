@@ -48,6 +48,8 @@ export interface GenerateResponse {
 export interface SaveRequest {
   countryCode: string
   title: string
+  tripId?: number | null
+  tripName?: string
   startDate: string
   endDate: string
   guides: GuideLink[]

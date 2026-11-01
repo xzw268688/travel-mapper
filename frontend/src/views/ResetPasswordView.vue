@@ -1,82 +1,169 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { resetPassword } from '../api/auth'
+import { resetPassword, sendCode } from '../api/auth'
+import AuthShell from '../components/AuthShell.vue'
 
 const route = useRoute()
 const router = useRouter()
-const token = ref('')
+const email = ref('')
+const code = ref('')
 const password = ref('')
 const confirmPassword = ref('')
-const loading = ref(false)
+const sending = ref(false)
+const submitting = ref(false)
+const cooldown = ref(0)
+const emailError = ref('')
+const codeError = ref('')
+const passwordError = ref('')
+const confirmError = ref('')
+const formError = ref('')
+const hint = ref('')
+let timer: number | undefined
 
 onMounted(() => {
-  if (route.query.token) {
-    token.value = String(route.query.token)
+  email.value = String(route.query.email || '')
+})
+
+onBeforeUnmount(() => {
+  if (timer) {
+    window.clearInterval(timer)
   }
 })
 
-async function submit(): Promise<void> {
-  if (!token.value.trim()) {
-    ElMessage.warning('请输入重置令牌')
+function validEmail(): boolean {
+  emailError.value = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())
+    ? ''
+    : '请输入正确的邮箱'
+  return !emailError.value
+}
+
+async function requestCode(): Promise<void> {
+  formError.value = ''
+  if (!validEmail()) {
     return
   }
-  if (!/^(?=.*[A-Za-z])(?=.*\d).{8,32}$/.test(password.value)) {
-    ElMessage.warning('密码必须为 8-32 位且同时包含字母与数字')
-    return
-  }
-  if (password.value !== confirmPassword.value) {
-    ElMessage.warning('两次输入的密码不一致')
-    return
-  }
-  loading.value = true
+  sending.value = true
   try {
-    await resetPassword(token.value.trim(), password.value)
-    ElMessage.success('密码已重置，请使用新密码登录')
-    await router.push('/login')
+    await sendCode(email.value.trim(), 'RESET')
+    hint.value = '如果该邮箱已注册，验证码将发送到邮箱；开发环境请查看后端服务日志。'
+    startCooldown()
   } catch (error) {
-    ElMessage.error((error as Error).message || '重置失败')
+    formError.value = (error as Error).message || '发送失败'
   } finally {
-    loading.value = false
+    sending.value = false
   }
+}
+
+async function submit(): Promise<void> {
+  formError.value = ''
+  if (!validEmail()) {
+    return
+  }
+  codeError.value = /^\d{6}$/.test(code.value.trim()) ? '' : '请输入 6 位数字验证码'
+  passwordError.value = /^(?=.*[A-Za-z])(?=.*\d).{8,32}$/.test(password.value)
+    ? ''
+    : '密码必须为 8-32 位且同时包含字母与数字'
+  confirmError.value = password.value === confirmPassword.value ? '' : '两次输入的密码不一致'
+  if (codeError.value || passwordError.value || confirmError.value) {
+    return
+  }
+  submitting.value = true
+  try {
+    await resetPassword(email.value.trim(), code.value.trim(), password.value)
+    await router.push({ name: 'login', query: { reset: '1' } })
+  } catch (error) {
+    formError.value = (error as Error).message || '重置失败'
+  } finally {
+    submitting.value = false
+  }
+}
+
+function startCooldown(): void {
+  cooldown.value = 60
+  if (timer) {
+    window.clearInterval(timer)
+  }
+  timer = window.setInterval(() => {
+    cooldown.value -= 1
+    if (cooldown.value <= 0 && timer) {
+      window.clearInterval(timer)
+      timer = undefined
+    }
+  }, 1000)
 }
 </script>
 
 <template>
-  <div class="login-page">
-    <el-card class="login-card">
-      <template #header><div class="login-title">重置密码</div></template>
-      <el-form label-position="top" @submit.prevent="submit">
-        <el-form-item label="重置令牌" required>
-          <el-input v-model="token" placeholder="邮件或 email_token 表中的令牌" />
-        </el-form-item>
-        <el-form-item label="新密码" required>
+  <AuthShell title="找回密码" subtitle="验证邮箱后设置新密码">
+    <el-alert
+      v-if="formError"
+      type="error"
+      :closable="false"
+      show-icon
+      :title="formError"
+      style="margin-bottom: 16px"
+    />
+    <el-alert
+      v-else-if="hint"
+      type="success"
+      :closable="false"
+      show-icon
+      :title="hint"
+      style="margin-bottom: 16px"
+    />
+    <el-form label-position="top" @submit.prevent="submit">
+      <el-form-item label="邮箱" required :error="emailError">
+        <el-input v-model="email" autocomplete="email" @input="emailError = ''" />
+      </el-form-item>
+      <el-form-item label="验证码" required :error="codeError">
+        <div style="display: flex; gap: 8px; width: 100%">
           <el-input
-            v-model="password"
-            type="password"
-            show-password
-            autocomplete="new-password"
-            placeholder="8-32 位，需同时包含字母和数字"
+            v-model="code"
+            maxlength="6"
+            placeholder="6 位数字"
+            @input="codeError = ''"
           />
-        </el-form-item>
-        <el-form-item label="确认新密码" required>
-          <el-input
-            v-model="confirmPassword"
-            type="password"
-            show-password
-            autocomplete="new-password"
-            @keyup.enter="submit"
-          />
-        </el-form-item>
-        <el-button type="primary" :loading="loading" style="width: 100%" @click="submit">
-          重置密码
-        </el-button>
-      </el-form>
-      <div class="meta" style="margin-top: 16px; display: flex; justify-content: space-between">
-        <router-link to="/forgot-password">重新获取令牌</router-link>
-        <router-link to="/login">返回登录</router-link>
-      </div>
-    </el-card>
-  </div>
+          <el-button :loading="sending" :disabled="cooldown > 0" @click="requestCode">
+            {{ cooldown > 0 ? `${cooldown}s` : '发送验证码' }}
+          </el-button>
+        </div>
+      </el-form-item>
+      <el-form-item label="新密码" required :error="passwordError">
+        <el-input
+          v-model="password"
+          type="password"
+          show-password
+          autocomplete="new-password"
+          placeholder="8-32 位，需同时包含字母和数字"
+          @input="passwordError = ''"
+        />
+      </el-form-item>
+      <el-form-item label="确认新密码" required :error="confirmError">
+        <el-input
+          v-model="confirmPassword"
+          type="password"
+          show-password
+          autocomplete="new-password"
+          @input="confirmError = ''"
+          @keyup.enter="submit"
+        />
+      </el-form-item>
+      <el-button type="primary" :loading="submitting" style="width: 100%" @click="submit">
+        重置密码
+      </el-button>
+    </el-form>
+    <div class="meta auth-links">
+      <router-link to="/login">返回登录</router-link>
+      <router-link to="/register">注册新账号</router-link>
+    </div>
+  </AuthShell>
 </template>
+
+<style scoped>
+.auth-links {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 18px;
+}
+</style>

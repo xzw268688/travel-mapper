@@ -1,13 +1,19 @@
 package com.travelmapper.service.trip;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.controller.trip.dto.TripDeleteResponse;
+import com.travelmapper.controller.trip.dto.TripDetailView;
 import com.travelmapper.controller.trip.dto.TripRenameResponse;
 import com.travelmapper.controller.trip.dto.TripView;
+import com.travelmapper.repository.entity.Expense;
 import com.travelmapper.repository.entity.Itinerary;
+import com.travelmapper.repository.entity.TravelNote;
 import com.travelmapper.repository.entity.Trip;
+import com.travelmapper.repository.mapper.ExpenseMapper;
 import com.travelmapper.repository.mapper.ItineraryMapper;
+import com.travelmapper.repository.mapper.TravelNoteMapper;
 import com.travelmapper.repository.mapper.TripMapper;
 import com.travelmapper.service.catalog.CatalogService;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,18 +33,91 @@ import java.util.Map;
 public class TripService {
 
     private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
+    private static final int RECENT_EXPENSE_LIMIT = 10;
 
     private final TripMapper tripMapper;
     private final ItineraryMapper itineraryMapper;
+    private final TravelNoteMapper travelNoteMapper;
+    private final ExpenseMapper expenseMapper;
     private final CatalogService catalogService;
     private final JdbcTemplate jdbcTemplate;
 
     public TripService(TripMapper tripMapper, ItineraryMapper itineraryMapper,
+                       TravelNoteMapper travelNoteMapper, ExpenseMapper expenseMapper,
                        CatalogService catalogService, JdbcTemplate jdbcTemplate) {
         this.tripMapper = tripMapper;
         this.itineraryMapper = itineraryMapper;
+        this.travelNoteMapper = travelNoteMapper;
+        this.expenseMapper = expenseMapper;
         this.catalogService = catalogService;
         this.jdbcTemplate = jdbcTemplate;
+    }
+
+    /** 旅行详情：概览 + 行程/游记全量 + 最近 10 条消费。 */
+    public TripDetailView detail(Long userId, Long tripId) {
+        Trip trip = tripMapper.selectById(tripId);
+        if (trip == null || !userId.equals(trip.getUserId())) {
+            throw new BusinessException(ErrorCode.TRIP_NOT_FOUND);
+        }
+        List<Itinerary> itineraryList = itineraryMapper.selectList(
+                new LambdaQueryWrapper<Itinerary>()
+                        .eq(Itinerary::getTripId, tripId)
+                        .orderByDesc(Itinerary::getStartDate)
+                        .orderByDesc(Itinerary::getId));
+        List<TravelNote> noteList = travelNoteMapper.selectList(
+                new LambdaQueryWrapper<TravelNote>()
+                        .eq(TravelNote::getTripId, tripId)
+                        .orderByDesc(TravelNote::getCreatedAt)
+                        .orderByDesc(TravelNote::getId));
+        ExpenseMapper.TripSummary totals = expenseMapper.selectTripSummary(userId, tripId);
+        List<String> unconfigured = expenseMapper.selectUnconfiguredCurrencies(
+                userId, null, tripId, null, null);
+        List<Expense> recent = expenseMapper.selectList(
+                new LambdaQueryWrapper<Expense>()
+                        .eq(Expense::getUserId, userId)
+                        .eq(Expense::getTripId, tripId)
+                        .orderByDesc(Expense::getExpenseDate)
+                        .orderByDesc(Expense::getId)
+                        .last("LIMIT " + RECENT_EXPENSE_LIMIT));
+
+        LocalDate today = LocalDate.now();
+        List<TripDetailView.ItineraryItem> itineraries = itineraryList.stream()
+                .map(item -> new TripDetailView.ItineraryItem(
+                        item.getId(), item.getTitle(), item.getStartDate(), item.getEndDate(),
+                        item.getStatus() == null ? "SAVED" : item.getStatus().name(),
+                        item.getEndDate() != null && item.getEndDate().isBefore(today)))
+                .toList();
+        List<TripDetailView.NoteItem> notes = noteList.stream()
+                .map(note -> new TripDetailView.NoteItem(
+                        note.getId(), note.getTitle(),
+                        note.getVisibility() == null ? "PRIVATE" : note.getVisibility().name(),
+                        note.getCityCode(),
+                        catalogService.cityName(note.getCountryCode(), note.getCityCode()),
+                        Boolean.TRUE.equals(note.getTakedown()),
+                        note.getCreatedAt()))
+                .toList();
+        List<TripDetailView.ExpenseItem> expenses = recent.stream()
+                .map(item -> new TripDetailView.ExpenseItem(
+                        item.getId(), item.getExpenseDate(),
+                        item.getCategory() == null ? null : item.getCategory().name(),
+                        money(item.getAmount()),
+                        item.getCurrency(),
+                        item.getAmountCny() == null ? null : money(item.getAmountCny()),
+                        item.getExchangeRateSnapshot() == null,
+                        item.getRemark()))
+                .toList();
+        int expenseCount = totals == null || totals.getExpenseCount() == null
+                ? 0 : totals.getExpenseCount().intValue();
+        BigDecimal totalCny = totals == null || totals.getTotalCny() == null
+                ? BigDecimal.ZERO : totals.getTotalCny();
+        return new TripDetailView(
+                trip.getId(), trip.getName(), trip.getCountryCode(),
+                catalogService.countryName(trip.getCountryCode()),
+                trip.getStartDate(), trip.getEndDate(),
+                new TripDetailView.Summary(
+                        itineraryList.size(), noteList.size(), expenseCount, money(totalCny),
+                        !unconfigured.isEmpty(), unconfigured),
+                itineraries, notes, expenses);
     }
 
     @Transactional

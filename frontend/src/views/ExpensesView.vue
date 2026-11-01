@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import CountryCitySelector from '../components/CountryCitySelector.vue'
 import { getCities, getCountries } from '../api/catalog'
-import { getTrips } from '../api/trips'
+import { getTripDetail, getTrips } from '../api/trips'
 import {
   createExpense,
   deleteExpense,
@@ -15,6 +16,8 @@ import {
   type ExpenseSummary
 } from '../api/expenses'
 import type { City, Country, TripView } from '../api/types'
+
+const route = useRoute()
 
 const CATEGORIES = [
   { value: 'TRANSPORT', label: '交通' },
@@ -70,6 +73,7 @@ const form = reactive({
   remark: ''
 })
 
+const pendingTripId = ref<number | null>(null)
 const chartEl = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
 
@@ -78,6 +82,16 @@ onMounted(async () => {
     countries.value = await getCountries()
     if (!countries.value.some((item) => item.code === form.country)) {
       form.country = countries.value[0]?.code || ''
+    }
+    const queryTrip = Number(route.query.tripId)
+    if (Number.isInteger(queryTrip) && queryTrip > 0) {
+      try {
+        const trip = await getTripDetail(queryTrip)
+        filters.countryCode = trip.countryCode
+        pendingTripId.value = trip.id
+      } catch {
+        // 旅行不存在时忽略预选
+      }
     }
     await Promise.all([loadAll(), loadFormTrips()])
   } catch (error) {
@@ -109,6 +123,13 @@ watch(
         const [cities, trips] = await Promise.all([getCities(code), getTrips(code)])
         filterCities.value = cities
         filterTrips.value = trips
+        if (pendingTripId.value) {
+          filters.tripId = filterTrips.value.some((trip) => trip.id === pendingTripId.value)
+            ? pendingTripId.value
+            : null
+          pendingTripId.value = null
+          await loadAll()
+        }
       } catch {
         filterCities.value = []
         filterTrips.value = []

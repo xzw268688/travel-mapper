@@ -1,18 +1,19 @@
 import { apiPost } from './http'
 import type { LoginResponse } from './types'
 
+export type CodeScene = 'VERIFY' | 'RESET'
+
 export interface RegisterRequest {
   username: string
   email: string
   password: string
   nickname?: string
   agreeTerms: boolean
+  code: string
 }
 
 export interface RegisterResponse {
   userId: number
-  emailSent: boolean
-  verifyExpireAt: string
 }
 
 export function login(account: string, password: string): Promise<LoginResponse> {
@@ -23,18 +24,10 @@ export function register(body: RegisterRequest): Promise<RegisterResponse> {
   return apiPost<RegisterResponse>('/auth/register', body)
 }
 
-export function verifyEmail(token: string): Promise<void> {
-  return apiPost<void>('/auth/verify-email', { token })
+export function sendCode(email: string, scene: CodeScene): Promise<{ emailSent: boolean }> {
+  return apiPost<{ emailSent: boolean }>('/auth/send-code', { email, scene })
 }
 
-export function resendVerify(email: string): Promise<{ emailSent: boolean }> {
-  return apiPost<{ emailSent: boolean }>('/auth/resend-verify', { email })
-}
-
-export function forgotPassword(email: string): Promise<{ emailSent: boolean }> {
-  return apiPost<{ emailSent: boolean }>('/auth/forgot-password', { email })
-}
-
-export function resetPassword(token: string, newPassword: string): Promise<void> {
-  return apiPost<void>('/auth/reset-password', { token, newPassword })
+export function resetPassword(email: string, code: string, newPassword: string): Promise<void> {
+  return apiPost<void>('/auth/reset-password', { email, code, newPassword })
 }

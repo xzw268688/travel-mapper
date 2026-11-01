@@ -115,19 +115,16 @@ class CardIntegrationTest extends AuthTestSupport {
     void fullRegisterVerifyLoginQuotaRedeemFlow() throws Exception {
         String username = unique("e2e");
         String email = username + "@example.com";
+        mockMvc.perform(post("/api/auth/send-code")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("email", email, "scene", "VERIFY"))))
+                .andExpect(status().isOk());
+        String verifyCode = capturingMail.lastCode(email);
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("username", username, "email", email,
-                                "password", DEFAULT_PASSWORD, "agreeTerms", true))))
-                .andExpect(status().isOk());
-        Long userId = jdbcTemplate.queryForObject(
-                "SELECT id FROM user WHERE username = ?", Long.class, username);
-        String verifyToken = jdbcTemplate.queryForObject(
-                "SELECT token FROM email_token WHERE user_id = ? AND type = 'VERIFY' "
-                        + "ORDER BY id DESC LIMIT 1", String.class, userId);
-        mockMvc.perform(post("/api/auth/verify-email")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("token", verifyToken))))
+                                "password", DEFAULT_PASSWORD, "agreeTerms", true,
+                                "code", verifyCode))))
                 .andExpect(status().isOk());
 
         MvcResult login = mockMvc.perform(post("/api/auth/login")

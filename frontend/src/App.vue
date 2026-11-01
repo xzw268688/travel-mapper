@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+const bare = computed(() => Boolean(route.meta.bare))
+const displayName = computed(
+  () => auth.user?.nickname || auth.user?.username || '个人中心'
+)
+const avatarInitial = computed(() => displayName.value.slice(0, 1).toUpperCase())
 
 onMounted(() => {
   void auth.loadProfile()
@@ -18,12 +24,26 @@ function logout(): void {
 function openAdmin(path: string): void {
   void router.push(path)
 }
+
+function onUserCommand(command: string): void {
+  if (command === 'logout') {
+    logout()
+    return
+  }
+  void router.push(command)
+}
 </script>
 
 <template>
-  <div class="app-shell">
-    <header class="app-header">
-      <div class="brand" @click="router.push('/')">TravelMapper</div>
+  <div class="app-shell" :class="{ 'app-shell-bare': bare }">
+    <header v-if="!bare" class="app-header">
+      <div class="brand" @click="router.push('/')">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <span class="brand-name">旅迹地图</span>
+          <span class="brand-sub">TravelMapper</span>
+        </span>
+      </div>
       <nav v-if="auth.isAuthenticated">
         <router-link to="/">世界地图</router-link>
         <router-link to="/plan">规划行程</router-link>
@@ -46,11 +66,21 @@ function openAdmin(path: string): void {
         </el-dropdown>
       </nav>
       <div class="header-right">
-        <router-link v-if="auth.isAuthenticated" to="/profile" class="user-name">
-          {{ auth.user?.nickname || auth.user?.username || '个人中心' }}
-        </router-link>
-        <el-button v-if="auth.isAuthenticated" text @click="logout">退出</el-button>
-        <router-link v-else to="/login">登录</router-link>
+        <el-dropdown v-if="auth.isAuthenticated" trigger="click" @command="onUserCommand">
+          <button type="button" class="user-menu" aria-label="账户菜单">
+            <span class="user-avatar">{{ avatarInitial }}</span>
+            <span class="user-name">{{ displayName }}</span>
+            <span class="user-caret">▾</span>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="/profile">个人中心</el-dropdown-item>
+              <el-dropdown-item command="/profile">我的额度与卡密</el-dropdown-item>
+              <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <router-link v-else to="/login" class="login-link">登录</router-link>
       </div>
     </header>
     <main class="app-main">

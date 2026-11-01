@@ -40,7 +40,7 @@ class MapIntegrationTest extends AuthTestSupport {
         assertThat(jp.path("itineraryCount").asInt()).isEqualTo(1);
 
         long unexpiredId = insertItinerary(user, null, "JP", "进行中行程",
-                LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 30));
+                LocalDate.now().minusDays(3), LocalDate.now().plusDays(3));
         jp = findCountry(stats(user), "JP");
         assertThat(jp.path("status").asText()).isEqualTo("YELLOW");
         assertThat(jp.path("expired").asBoolean()).isFalse();

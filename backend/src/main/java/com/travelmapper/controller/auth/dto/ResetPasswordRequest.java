@@ -1,5 +1,6 @@
 package com.travelmapper.controller.auth.dto;
 
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import lombok.Data;
@@ -8,7 +9,12 @@ import lombok.Data;
 public class ResetPasswordRequest {
 
     @NotBlank
-    private String token;
+    @Email
+    private String email;
+
+    @NotBlank
+    @Pattern(regexp = "\\d{6}", message = "验证码必须为 6 位数字")
+    private String code;
 
     @NotBlank
     @Pattern(regexp = "^(?=.*[A-Za-z])(?=.*\\d).{8,32}$",

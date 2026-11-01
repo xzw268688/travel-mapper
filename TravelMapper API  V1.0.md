@@ -1,6 +1,6 @@
-# 🔌 接口文档：TravelMapper V1.0（P0 契约）
+# 🔌 接口文档：旅迹地图 V1.0（P0 契约）
 
-> 基于《TravelMapper V1.0 需求规格说明书（补丁版）》与《概要设计文档 V1.0（修订版）》编写。  
+> 基于《旅迹地图 V1.0 需求规格说明书（补丁版）》与《概要设计文档 V1.0（修订版）》编写。  
 > 本文档是前后端并行开发的契约：字段名、错误码、状态码一旦确认，改动需同步更新本文档并 commit。  
 > 范围：P0 全部接口 + P1 的记账与润色接口（设计文档已给出，一并纳入，便于前端提前排期）。  
 > 不在本文档范围：后台 UI 交互细节、前端组件结构、数据库 DDL。
@@ -137,7 +137,7 @@ Idempotency-Key: <uuid>
 | 1001 | 用户名或密码错误 | 401 | 登录 |
 | 1002 | 邮箱未验证 | 403 | 登录 |
 | 1003 | 账号已被封禁 | 403 | 任意需登录接口 |
-| 1004 | 验证/重置令牌无效或过期 | 400 | 邮箱验证、重置密码 |
+| 1004 | 验证码无效或已过期 | 400 | 邮箱验证、重置密码 |
 | 1005 | 邮件发送过于频繁 | 429 | 注册、重发验证、找回密码 |
 | 1006 | JWT 无效或过期 | 401 | Token 失效 |
 | 1007 | 账号已注销 | 403 | 任意需登录接口 |
@@ -191,8 +191,9 @@ Idempotency-Key: <uuid>
 | `username` | string | 是 | 4–20 位，字母/数字/下划线，唯一 |
 | `email` | string | 是 | 合法邮箱，唯一 |
 | `password` | string | 是 | 8–32 位，至少含字母与数字 |
-| `nickname` | string | 否 | 1–20 字，缺省取 `username` |
+| `nickname` | string | 否 | 1–20 字，缺省取 `username`（当前前端不传） |
 | `agreeTerms` | boolean | 是 | 必须为 `true`，否则 `2001` |
+| `code` | string | 是 | 邮箱验证码，6 位数字；由 `POST /auth/send-code` 的 `VERIFY` 场景获取 |
 
 **响应**
 
@@ -201,50 +202,57 @@ Idempotency-Key: <uuid>
   "code": 0,
   "message": "ok",
   "data": {
-    "userId": 12,
-    "emailSent": true,
-    "verifyExpireAt": "2025-06-01T12:30:00"
+    "userId": 12
   }
 }
 ```
 
-**说明**：注册成功即发送验证邮件；**未验证不能登录**（`1002`）。同一邮箱 60 秒内重复发信 → `1005`。
+**说明**：
+
+- 注册前必须先通过 `POST /auth/send-code`（`scene=VERIFY`）获取验证码。
+- 服务端先校验用户名/邮箱唯一，再校验验证码；验证码有效才创建账号，账号创建即已激活。
+- 验证码错误/过期返回 `1004`；用户名或邮箱重复返回 `1008` 且不消耗验证码。
+- 注册成功后不再发送邮件。
 
 **错误**：`2001`、`1005`、`1008`（用户名或邮箱已存在）
 
 ---
 
-### 3.2 邮箱验证
+### 3.2 发送邮箱验证码
 
-`POST /auth/verify-email` ｜ 无需鉴权
-
-**请求**
-
-```json
-{ "token": "e3f2..." }
-```
-
-**响应**：`data: null`，`code: 0`
-
-**错误**：`1004`（无效/过期/已使用）
-
----
-
-### 3.3 重发验证邮件
-
-`POST /auth/resend-verify` ｜ 无需鉴权
+`POST /auth/send-code` ｜ 无需鉴权
 
 **请求**
 
 ```json
-{ "email": "traveler@example.com" }
+{
+  "email": "traveler@example.com",
+  "scene": "VERIFY"
+}
 ```
+
+| 字段 | 说明 |
+|---|---|
+| `email` | 目标邮箱 |
+| `scene` | `VERIFY`（注册验证）或 `RESET`（找回密码） |
 
 **响应**：`data: { "emailSent": true }`
 
-**错误**：`1005`（60 秒限流）
+**错误**：`2001`（参数非法）、`1005`（60 秒间隔或每日 10 次超限）、`5004`（同一 IP 每小时 20 次超限）
 
-**说明**：邮箱已存在但未验证时才发送；不泄露"邮箱是否已注册"（始终返回 `emailSent: true`）。
+**说明**：
+
+- 验证码为 6 位数字，10 分钟内有效，同一邮箱同场景只保留最新一个。
+- `VERIFY` 场景：未注册邮箱会收到验证码（注册前校验）；已注册且已验证的邮箱不发码。
+- `RESET` 场景：只有存在且未注销的账号会收到验证码。
+- 无论邮箱是否存在都返回成功，防止账号枚举。
+- 开发环境（`MAIL_ENABLED=false`）验证码只打印在后端日志：`[auth-dev] scene=... email=... code=...`。
+
+---
+
+### 3.3 邮箱验证（已并入注册）
+
+邮箱验证在 `POST /auth/register` 提交时完成，**不再提供独立的验证接口**。验证码错误、过期、已使用或试错超过 5 次时，注册接口返回 `1004`。
 
 ---
 
@@ -294,19 +302,9 @@ Idempotency-Key: <uuid>
 
 ---
 
-### 3.5 找回密码（发送重置令牌）
+### 3.5 找回密码
 
-`POST /auth/forgot-password` ｜ 无需鉴权
-
-**请求**
-
-```json
-{ "email": "traveler@example.com" }
-```
-
-**响应**：`data: { "emailSent": true }`
-
-**错误**：`1005`
+`POST /auth/send-code`（`scene=RESET`）发送验证码，见 3.2；随后调用 3.6 重置密码。
 
 **说明**：无论邮箱是否存在都返回成功，防账号枚举。
 
@@ -320,14 +318,15 @@ Idempotency-Key: <uuid>
 
 ```json
 {
-  "token": "r9a1...",
+  "email": "traveler@example.com",
+  "code": "123456",
   "newPassword": "NewAbc123456"
 }
 ```
 
 **响应**：`data: null`
 
-**错误**：`1004`、`2001`
+**错误**：`1004`（验证码错误/过期/超次）、`2001`
 
 **说明**：重置成功后该用户所有已签发 JWT 立即失效（`tokenVersion` +1），需重新登录。
 
@@ -569,6 +568,56 @@ Idempotency-Key: <uuid>
 ```
 
 **错误**：`2017`（存在挂载数据且 `force` 不为 `true`）、`2015`
+
+---
+
+### 4.5 旅行详情聚合
+
+`GET /trips/{id}` ｜ 需鉴权
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 101,
+    "name": "日本 · 2025-06",
+    "countryCode": "JP",
+    "countryName": "日本",
+    "startDate": "2025-06-01",
+    "endDate": "2025-06-07",
+    "summary": {
+      "itineraryCount": 2,
+      "noteCount": 1,
+      "expenseCount": 30,
+      "expenseCny": "8000.00",
+      "hasUnconfiguredCurrency": false,
+      "unconfiguredCurrencies": []
+    },
+    "itineraries": [
+      { "id": 201, "title": "东京三日", "startDate": "2025-06-01", "endDate": "2025-06-03",
+        "status": "SAVED", "expired": true }
+    ],
+    "notes": [
+      { "id": 301, "title": "东京散步", "visibility": "PRIVATE", "cityCode": "TYO",
+        "cityName": "东京", "takedown": false, "createdAt": "2025-06-10T10:00:00" }
+    ],
+    "recentExpenses": [
+      { "id": 401, "expenseDate": "2025-06-02", "category": "FOOD", "amount": "1200.00",
+        "currency": "JPY", "amountCny": "57.60", "rateMissing": false, "remark": "拉面" }
+    ]
+  }
+}
+```
+
+**说明**：
+
+- 行程与游记返回该旅行下全部未删除记录；消费只返回最近 10 条。
+- `summary.expenseCount` 与 `summary.expenseCny` 统计该旅行全部消费（含未返回的明细）。
+- 未配置汇率的消费不计入合计，币种通过 `unconfiguredCurrencies` 返回。
+- 非本人或不存在旅行返回 `2015`。
 
 **说明**
 
@@ -2856,10 +2905,8 @@ location /api/ai/polish/stream {
 | 模块 | 方法 | 路径 | 鉴权 | 额度 |
 |---|---|---|---|---|
 | 认证 | POST | `/auth/register` | 否 | — |
-| 认证 | POST | `/auth/verify-email` | 否 | — |
-| 认证 | POST | `/auth/resend-verify` | 否 | — |
+| 认证 | POST | `/auth/send-code` | 否 | — |
 | 认证 | POST | `/auth/login` | 否 | — |
-| 认证 | POST | `/auth/forgot-password` | 否 | — |
 | 认证 | POST | `/auth/reset-password` | 否 | — |
 | 认证 | POST | `/auth/logout` | 是 | — |
 | 用户 | GET | `/user/profile` | 是 | — |
@@ -2868,6 +2915,7 @@ location /api/ai/polish/stream {
 | 国家 | GET | `/countries` | 是 | — |
 | 城市 | GET | `/cities` | 是 | — |
 | 旅行 | GET | `/trips` | 是 | — |
+| 旅行 | GET | `/trips/{id}` | 是 | 详情聚合（行程/游记/最近消费） |
 | 旅行 | PUT | `/trips/{id}` | 是 | — |
 | 旅行 | DELETE | `/trips/{id}` | 是 | — |
 | 地图 | GET | `/map/stats` | 是 | — |
@@ -2931,6 +2979,8 @@ location /api/ai/polish/stream {
 | 版本 | 修订内容 | 原因 |
 |---|---|---|
 | V1.0 | 初版：68 个接口 + 错误码 + SSE 协议 + 枚举 + 速查表 | 设计文档第 10 章计划 |
+| V1.2 旅行聚合 | 新增 `GET /trips/{id}` 旅行详情聚合接口；记账/游记/行程支持带旅行上下文 | 行程、游记、记账同属一次旅行（change-09） |
+| V1.1 认证验证码 | 注册验证与找回密码由长令牌改为 6 位邮箱验证码：新增 `POST /auth/send-code`；注册接口增加 `code`（校验通过才创建已激活账号）；`reset-password` 改为 `{email, code, newPassword}`；删除 `/auth/verify-email`、`/auth/resend-verify` 与 `/auth/forgot-password`；注册响应改为 `{userId}`；`1004` 文案改为“验证码无效或已过期” | 认证体验对齐常见网站（change-06） |
 | 一致性修订 | ① 补 `GET /countries`、`/itinerary/{id}/days` 增删改、`DELETE /admin/cities/{id}`；② 6.5 引用编号 6.9→6.7；③ 抽屉 `ungrouped` 补入**行程**，明确多城市行程在每个城市下各出现一次；④ `expenses` 列表接口纳入；⑤ 修正 `date` 字段命名（原混用 `visitDate`）；⑥ 登录响应补 `plan`，明确 VIP 不是角色；⑦ 12.11 明确调增写入 `quota_pack`；⑧ 12.14 区分"新增币种回填"与"修改币种不回填"；⑨ 6.7 明确扣费前预校验手动景点上限；⑩ 6.8 明确草稿页不调接口；⑪ 6.3/9.1/10.1 补跨国家挂载校验与行程优先规则 | 四份文档交叉审查与深度语义校验 |
 
 ---

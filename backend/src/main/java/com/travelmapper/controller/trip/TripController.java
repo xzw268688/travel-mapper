@@ -3,6 +3,7 @@ package com.travelmapper.controller.trip;
 import com.travelmapper.common.api.ApiResponse;
 import com.travelmapper.common.security.CurrentUser;
 import com.travelmapper.controller.trip.dto.TripDeleteResponse;
+import com.travelmapper.controller.trip.dto.TripDetailView;
 import com.travelmapper.controller.trip.dto.TripRenameRequest;
 import com.travelmapper.controller.trip.dto.TripRenameResponse;
 import com.travelmapper.controller.trip.dto.TripView;
@@ -34,6 +35,11 @@ public class TripController {
     @GetMapping
     public ApiResponse<List<TripView>> list(@RequestParam String countryCode) {
         return ApiResponse.ok(tripService.list(CurrentUser.id(), countryCode));
+    }
+
+    @GetMapping("/{id}")
+    public ApiResponse<TripDetailView> detail(@PathVariable Long id) {
+        return ApiResponse.ok(tripService.detail(CurrentUser.id(), id));
     }
 
     @PutMapping("/{id}")

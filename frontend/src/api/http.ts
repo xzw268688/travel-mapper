@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { clearStoredToken, getStoredToken } from '../utils/authStorage'
 
 const http = axios.create({
   baseURL: '/api',
@@ -6,7 +7,7 @@ const http = axios.create({
 })
 
 http.interceptors.request.use((config) => {
-  const token = localStorage.getItem('tm_token')
+  const token = getStoredToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -17,7 +18,7 @@ http.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('tm_token')
+      clearStoredToken()
       if (window.location.pathname !== '/login') {
         window.location.href = '/login'
       }

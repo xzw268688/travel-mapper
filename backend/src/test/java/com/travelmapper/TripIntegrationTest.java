@@ -209,6 +209,52 @@ class TripIntegrationTest extends AuthTestSupport {
                 .isEqualTo(ErrorCode.TRIP_NOT_FOUND);
     }
 
+    @Test
+    void tripDetailAggregatesChildrenAndCapsRecentExpenses() throws Exception {
+        User user = createVerifiedUser("triphub");
+        LocalDate start = LocalDate.now().plusDays(1);
+        Trip trip = tripService.createForItinerary(user.getId(), "JP",
+                start, start.plusDays(2), "东京三日");
+        insertItinerary(user, trip.getId(), "JP", "第一天", start, start.plusDays(2));
+        insertItinerary(user, trip.getId(), "JP", "第二天", start, start.plusDays(1));
+
+        jdbcTemplate.update("INSERT INTO travel_note (user_id, trip_id, country_code, city_code, "
+                        + "title, content, content_text, visibility, takedown, deleted) "
+                        + "VALUES (?, ?, 'JP', 'TYO', '箱根一日', '<p>x</p>', 'x', 'PRIVATE', 0, 0)",
+                user.getId(), trip.getId());
+
+        for (int i = 0; i < 30; i++) {
+            boolean unconfigured = i % 6 == 0;
+            jdbcTemplate.update("INSERT INTO expense (user_id, trip_id, country_code, city_code, "
+                            + "currency, amount, exchange_rate_snapshot, category, expense_date, remark) "
+                            + "VALUES (?, ?, 'JP', 'TYO', ?, 100.00, ?, 'FOOD', ?, ?)",
+                    user.getId(), trip.getId(), unconfigured ? "XYZ" : "JPY",
+                    unconfigured ? null : new java.math.BigDecimal("0.048000"),
+                    start, "perf-" + i);
+        }
+
+        mockMvc.perform(withToken(get("/api/trips/" + trip.getId()), user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("东京三日"))
+                .andExpect(jsonPath("$.data.countryName").value("日本"))
+                .andExpect(jsonPath("$.data.summary.itineraryCount").value(2))
+                .andExpect(jsonPath("$.data.summary.noteCount").value(1))
+                .andExpect(jsonPath("$.data.summary.expenseCount").value(30))
+                .andExpect(jsonPath("$.data.summary.hasUnconfiguredCurrency").value(true))
+                .andExpect(jsonPath("$.data.summary.unconfiguredCurrencies[0]").value("XYZ"))
+                .andExpect(jsonPath("$.data.itineraries.length()").value(2))
+                .andExpect(jsonPath("$.data.notes.length()").value(1))
+                .andExpect(jsonPath("$.data.recentExpenses.length()").value(10));
+
+        User other = createVerifiedUser("triphub2");
+        mockMvc.perform(withToken(get("/api/trips/" + trip.getId()), other))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(2015));
+        mockMvc.perform(withToken(get("/api/trips/99999999"), user))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(2015));
+    }
+
     private Itinerary insertItinerary(User user, Long tripId, String countryCode, String title,
                                       LocalDate start, LocalDate end) {
         Itinerary itinerary = new Itinerary();

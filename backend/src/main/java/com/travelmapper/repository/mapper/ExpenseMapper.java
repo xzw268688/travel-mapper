@@ -64,6 +64,20 @@ public interface ExpenseMapper extends BaseMapper<Expense> {
                                               @Param("from") LocalDate from,
                                               @Param("to") LocalDate to);
 
+    @Select("""
+            SELECT COUNT(*) AS expenseCount,
+                   COALESCE(SUM(amount_cny), 0) AS totalCny
+            FROM expense
+            WHERE user_id = #{userId} AND trip_id = #{tripId} AND deleted = 0
+            """)
+    TripSummary selectTripSummary(@Param("userId") Long userId, @Param("tripId") Long tripId);
+
+    @Data
+    class TripSummary {
+        private Long expenseCount;
+        private BigDecimal totalCny;
+    }
+
     @Data
     class SummaryRow {
         private String countryCode;

@@ -10,7 +10,7 @@ public enum ErrorCode {
     USERNAME_OR_PASSWORD(1001, "用户名或密码错误", 401),
     EMAIL_NOT_VERIFIED(1002, "邮箱未验证", 403),
     ACCOUNT_BANNED(1003, "账号已被封禁", 403),
-    TOKEN_INVALID(1004, "验证/重置令牌无效或过期", 400),
+    TOKEN_INVALID(1004, "验证码无效或已过期", 400),
     EMAIL_SEND_TOO_FREQUENT(1005, "邮件发送过于频繁", 429),
     JWT_INVALID(1006, "JWT 无效或过期", 401),
     ACCOUNT_DELETED(1007, "账号已注销", 403),

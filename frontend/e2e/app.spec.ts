@@ -5,6 +5,8 @@ interface E2EState {
   token: string
   itineraryId: number
   itineraryTitle: string
+  tripId: number
+  tripName: string
   noteId: number
   noteTitle: string
   shareToken: string
@@ -16,7 +18,7 @@ test.describe.configure({ mode: 'serial' })
 
 test('地图 → 国家抽屉 → 打开行程编辑页', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByText('TravelMapper').first()).toBeVisible()
+  await expect(page.getByText('旅迹地图').first()).toBeVisible()
   // 本地 world.json 应让 ECharts 正常渲染，不再降级
   await expect(page.locator('.map-canvas canvas')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('地图底图加载失败，已切换为国家列表')).toHaveCount(0)
@@ -31,6 +33,32 @@ test('地图 → 国家抽屉 → 打开行程编辑页', async ({ page }) => {
 
   await expect(page).toHaveURL(new RegExp(`/itineraries/${state.itineraryId}$`))
   await expect(page.getByText(`编辑行程 #${state.itineraryId}`)).toBeVisible()
+})
+
+test('旅行详情聚合与录入联动', async ({ page }) => {
+  await page.goto(`/trips/${state.tripId}`)
+  await expect(page.locator('.trip-title').first()).toHaveText(state.tripName)
+  await expect(page.getByText(state.itineraryTitle).first()).toBeVisible()
+
+  await page
+    .locator('.trip-hub-row')
+    .filter({ hasText: state.itineraryTitle })
+    .first()
+    .click()
+  await expect(page).toHaveURL(new RegExp(`/itineraries/${state.itineraryId}$`))
+
+  // 记账页自动按旅行筛选
+  const expenseRequest = page.waitForRequest(
+    (request) =>
+      request.url().includes('/api/expenses?') &&
+      request.url().includes(`tripId=${state.tripId}`)
+  )
+  await page.goto(`/expenses?tripId=${state.tripId}`)
+  await expenseRequest
+
+  // 游记页预选该旅行
+  await page.goto(`/notes?tripId=${state.tripId}`)
+  await expect(page.locator('.el-select').nth(2)).toContainText(state.tripName.slice(0, 2))
 })
 
 test('行程编辑：景点与天的增删改', async ({ page }) => {
@@ -154,13 +182,14 @@ test('后台汇率与内容管理页面可访问', async ({ page }) => {
 test('个人中心、卡密兑换与找回密码页面', async ({ page }) => {
   await page.goto('/profile')
   await expect(page.getByText('个人资料')).toBeVisible()
-  await expect(page.getByText('我的额度')).toBeVisible()
+  await expect(page.getByText('我的额度', { exact: true })).toBeVisible()
   await expect(page.getByText('卡密兑换')).toBeVisible()
 
+  // /forgot-password 已重定向到合并后的单页流程
   await page.goto('/forgot-password')
-  await expect(page.locator('.login-title').getByText('找回密码')).toBeVisible()
-  await page.goto('/reset-password')
-  await expect(page.locator('.login-title').getByText('重置密码')).toBeVisible()
+  await expect(page).toHaveURL(/\/reset-password$/)
+  await expect(page.locator('.auth-title').getByText('找回密码')).toBeVisible()
+  await expect(page.getByRole('button', { name: '发送验证码' })).toBeVisible()
 })
 
 test('记账新增、编辑、删除与汇总图表', async ({ page }) => {

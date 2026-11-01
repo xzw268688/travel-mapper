@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCities, getCountries } from '../api/catalog'
 import {
@@ -17,11 +17,13 @@ import {
   type ChecklistItem,
   type OfficialLinkResponse
 } from '../api/prep'
-import type { City, Country } from '../api/types'
+import type { City, Country, TripView } from '../api/types'
+import { getTripDetail, getTrips } from '../api/trips'
 import { useMapStore } from '../stores/map'
 import { newRequestId } from '../utils/uuid'
 
 const router = useRouter()
+const route = useRoute()
 const mapStore = useMapStore()
 
 const countries = ref<Country[]>([])
@@ -41,6 +43,9 @@ const savedStatus = ref('')
 const checklist = ref<ChecklistItem[]>([])
 const officialLinks = ref<OfficialLinkResponse | null>(null)
 const openItineraryId = ref('')
+const trips = ref<TripView[]>([])
+const saveTripId = ref<number | null>(null)
+const pendingTripId = ref<number | null>(null)
 
 const spotDialog = reactive({
   visible: false,
@@ -65,6 +70,19 @@ onMounted(async () => {
       country.value = countries.value[0]?.code || ''
     }
     await loadCities()
+    await loadTrips()
+    const queryTrip = Number(route.query.tripId)
+    if (Number.isInteger(queryTrip) && queryTrip > 0) {
+      try {
+        const trip = await getTripDetail(queryTrip)
+        country.value = trip.countryCode
+        pendingTripId.value = trip.id
+        await loadCities()
+        await loadTrips()
+      } catch {
+        // 旅行不存在时忽略预选
+      }
+    }
   } catch (error) {
     ElMessage.error((error as Error).message || '加载国家失败')
   }
@@ -72,8 +90,28 @@ onMounted(async () => {
 
 watch(country, async () => {
   cityCodes.value = []
+  saveTripId.value = null
   await loadCities()
+  await loadTrips()
 })
+
+async function loadTrips(): Promise<void> {
+  if (!country.value) {
+    trips.value = []
+    return
+  }
+  try {
+    trips.value = await getTrips(country.value)
+  } catch {
+    trips.value = []
+  }
+  if (pendingTripId.value) {
+    saveTripId.value = trips.value.some((item) => item.id === pendingTripId.value)
+      ? pendingTripId.value
+      : null
+    pendingTripId.value = null
+  }
+}
 
 async function loadCities(): Promise<void> {
   if (!country.value) return
@@ -156,6 +194,7 @@ async function save(): Promise<void> {
     const result = await saveItinerary({
       countryCode: draft.value.countryCode,
       title: draftTitle.value.trim(),
+      tripId: saveTripId.value,
       startDate: draft.value.startDate,
       endDate: draft.value.endDate,
       guides: draft.value.guides,
@@ -489,6 +528,14 @@ function openSearch(): void {
           <el-input v-model="draftTitle" maxlength="50" show-word-limit style="width: 320px" />
           <el-tag v-if="draft.deduplicated" type="info">60 秒去重结果</el-tag>
           <span class="meta">扣费来源 {{ draft.quota.source }} · 今日已用 {{ draft.quota.freeUsedToday }}/{{ draft.quota.freeLimit }}</span>
+          <el-select v-model="saveTripId" clearable placeholder="保存到新旅行" style="width: 220px">
+            <el-option
+              v-for="trip in trips"
+              :key="trip.id"
+              :label="`归到：${trip.name}`"
+              :value="trip.id"
+            />
+          </el-select>
           <el-button type="success" :loading="saving" @click="save">保存行程</el-button>
           <el-button v-if="savedId" type="primary" plain @click="router.push(`/itineraries/${savedId}`)">
             打开已保存行程

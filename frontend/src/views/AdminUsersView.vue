@@ -149,9 +149,9 @@ function formatTime(value: string | null): string {
     <el-card style="margin-top: 16px" v-loading="loading">
       <el-table :data="users" stripe>
         <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="username" label="用户名" width="150" />
-        <el-table-column prop="nickname" label="昵称" width="120" />
-        <el-table-column prop="email" label="邮箱" min-width="200" />
+        <el-table-column prop="username" label="用户名" width="140" />
+        <el-table-column prop="nickname" label="昵称" width="110" />
+        <el-table-column prop="email" label="邮箱" min-width="210" show-overflow-tooltip />
         <el-table-column prop="role" label="角色" width="90" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
@@ -160,12 +160,12 @@ function formatTime(value: string | null): string {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="freeUsedToday" label="今日免费" width="100" />
+        <el-table-column prop="freeUsedToday" label="今日免费" width="90" />
         <el-table-column prop="packBalance" label="次数包" width="90" />
-        <el-table-column label="VIP 到期" width="150">
+        <el-table-column label="VIP 到期" width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ formatTime(row.vipExpireAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
             <el-button
               text

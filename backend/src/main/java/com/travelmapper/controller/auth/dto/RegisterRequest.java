@@ -29,4 +29,8 @@ public class RegisterRequest {
 
     @NotNull
     private Boolean agreeTerms;
+
+    @NotBlank
+    @Pattern(regexp = "\\d{6}", message = "验证码必须为 6 位数字")
+    private String code;
 }

@@ -3,7 +3,6 @@ package com.travelmapper.service.auth;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
-import com.travelmapper.common.ratelimit.RedisRateLimiter;
 import com.travelmapper.common.security.JwtService;
 import com.travelmapper.common.security.UserStatusCache;
 import com.travelmapper.controller.auth.dto.EmailSentResponse;
@@ -15,9 +14,7 @@ import com.travelmapper.controller.auth.dto.ResetPasswordRequest;
 import com.travelmapper.controller.auth.dto.UserView;
 import com.travelmapper.controller.user.dto.ProfileResponse;
 import com.travelmapper.controller.user.dto.UpdateProfileRequest;
-import com.travelmapper.repository.entity.EmailToken;
 import com.travelmapper.repository.entity.User;
-import com.travelmapper.repository.enums.EmailTokenType;
 import com.travelmapper.repository.enums.Role;
 import com.travelmapper.repository.enums.UserStatus;
 import com.travelmapper.repository.mapper.UserMapper;
@@ -28,7 +25,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Locale;
 
@@ -38,25 +34,21 @@ public class AuthService {
 
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
-    private final EmailTokenService emailTokenService;
-    private final EmailSender emailSender;
+    private final EmailCodeService emailCodeService;
     private final JwtService jwtService;
-    private final RedisRateLimiter rateLimiter;
     private final LoginAttemptService loginAttemptService;
     private final UserStatusCache userStatusCache;
     private final QuotaService quotaService;
 
     public AuthService(UserMapper userMapper, PasswordEncoder passwordEncoder,
-                       EmailTokenService emailTokenService, EmailSender emailSender,
-                       JwtService jwtService, RedisRateLimiter rateLimiter,
+                       EmailCodeService emailCodeService,
+                       JwtService jwtService,
                        LoginAttemptService loginAttemptService, UserStatusCache userStatusCache,
                        QuotaService quotaService) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
-        this.emailTokenService = emailTokenService;
-        this.emailSender = emailSender;
+        this.emailCodeService = emailCodeService;
         this.jwtService = jwtService;
-        this.rateLimiter = rateLimiter;
         this.loginAttemptService = loginAttemptService;
         this.userStatusCache = userStatusCache;
         this.quotaService = quotaService;
@@ -76,9 +68,8 @@ public class AuthService {
         if (usernameCount > 0 || emailCount > 0) {
             throw new BusinessException(ErrorCode.ACCOUNT_ALREADY_EXISTS);
         }
-        if (!rateLimiter.tryAcquire("rate:email:" + email, 1, 60)) {
-            throw new BusinessException(ErrorCode.EMAIL_SEND_TOO_FREQUENT);
-        }
+        // 先查重、再校验验证码：用户名/邮箱冲突时不消耗验证码。
+        emailCodeService.verify(email, EmailCodeService.Scene.VERIFY, request.getCode());
 
         User user = new User();
         user.setUsername(username);
@@ -89,7 +80,7 @@ public class AuthService {
         user.setAvatarPreset("preset_01");
         user.setRole(Role.USER);
         user.setStatus(UserStatus.NORMAL);
-        user.setEmailVerified(false);
+        user.setEmailVerified(true);
         user.setTokenVersion(1);
         try {
             userMapper.insert(user);
@@ -97,41 +88,35 @@ public class AuthService {
             throw new BusinessException(ErrorCode.ACCOUNT_ALREADY_EXISTS);
         }
 
-        EmailToken token = emailTokenService.create(
-                user.getId(), email, EmailTokenType.VERIFY, Duration.ofMinutes(30));
-        boolean sent = send(email, "验证你的 TravelMapper 邮箱",
-                "你的验证令牌：" + token.getToken() + "，30 分钟内有效。");
-        return new RegisterResponse(user.getId(), sent, token.getExpireAt());
+        return new RegisterResponse(user.getId());
     }
 
-    @Transactional
-    public void verifyEmail(String rawToken) {
-        EmailToken token = emailTokenService.consume(rawToken, EmailTokenType.VERIFY);
-        User user = userMapper.selectById(token.getUserId());
-        if (user == null) {
-            throw new BusinessException(ErrorCode.TOKEN_INVALID);
-        }
-        user.setEmailVerified(true);
-        userMapper.updateById(user);
-    }
-
-    @Transactional
-    public EmailSentResponse resendVerify(String rawEmail) {
+    /**
+     * 发送验证码：无论邮箱是否存在都返回成功，避免账号枚举。
+     */
+    public EmailSentResponse sendCode(String rawEmail, String rawScene, String clientIp) {
         String email = normalizeEmail(rawEmail);
-        if (!rateLimiter.tryAcquire("rate:email:" + email, 1, 60)) {
-            throw new BusinessException(ErrorCode.EMAIL_SEND_TOO_FREQUENT);
+        EmailCodeService.Scene scene;
+        try {
+            scene = EmailCodeService.Scene.valueOf(rawScene.trim().toUpperCase(Locale.ROOT));
+        } catch (Exception ex) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "scene 必须为 VERIFY 或 RESET");
         }
+        emailCodeService.checkSendLimits(email, clientIp);
         User user = userMapper.selectOne(
                 new LambdaQueryWrapper<User>().eq(User::getEmail, email));
-        if (user != null
-                && !Boolean.TRUE.equals(user.getEmailVerified())
-                && user.getStatus() == UserStatus.NORMAL) {
-            EmailToken token = emailTokenService.create(
-                    user.getId(), email, EmailTokenType.VERIFY, Duration.ofMinutes(30));
-            send(email, "验证你的 TravelMapper 邮箱",
-                    "你的验证令牌：" + token.getToken() + "，30 分钟内有效。");
+        boolean eligible;
+        if (scene == EmailCodeService.Scene.VERIFY) {
+            // 注册前校验：未注册邮箱需要收码；已注册且已验证的邮箱不再发码。
+            eligible = user == null
+                    || (user.getStatus() == UserStatus.NORMAL
+                    && !Boolean.TRUE.equals(user.getEmailVerified()));
+        } else {
+            eligible = user != null && user.getStatus() == UserStatus.NORMAL;
         }
-        // Never disclose whether the email is registered.
+        if (eligible) {
+            emailCodeService.issue(email, scene);
+        }
         return new EmailSentResponse(true);
     }
 
@@ -169,26 +154,11 @@ public class AuthService {
     }
 
     @Transactional
-    public EmailSentResponse forgotPassword(String rawEmail) {
-        String email = normalizeEmail(rawEmail);
-        if (!rateLimiter.tryAcquire("rate:email:" + email, 1, 60)) {
-            throw new BusinessException(ErrorCode.EMAIL_SEND_TOO_FREQUENT);
-        }
+    public void resetPassword(ResetPasswordRequest request) {
+        String email = normalizeEmail(request.getEmail());
+        emailCodeService.verify(email, EmailCodeService.Scene.RESET, request.getCode());
         User user = userMapper.selectOne(
                 new LambdaQueryWrapper<User>().eq(User::getEmail, email));
-        if (user != null && user.getStatus() == UserStatus.NORMAL) {
-            EmailToken token = emailTokenService.create(
-                    user.getId(), email, EmailTokenType.RESET, Duration.ofMinutes(30));
-            send(email, "重置你的 TravelMapper 密码",
-                    "你的重置令牌：" + token.getToken() + "，30 分钟内有效。");
-        }
-        return new EmailSentResponse(true);
-    }
-
-    @Transactional
-    public void resetPassword(ResetPasswordRequest request) {
-        EmailToken token = emailTokenService.consume(request.getToken(), EmailTokenType.RESET);
-        User user = userMapper.selectById(token.getUserId());
         if (user == null) {
             throw new BusinessException(ErrorCode.TOKEN_INVALID);
         }
@@ -251,15 +221,5 @@ public class AuthService {
 
     private String normalizeEmail(String email) {
         return email.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private boolean send(String to, String subject, String body) {
-        try {
-            emailSender.send(to, subject, body);
-            return true;
-        } catch (Exception ex) {
-            log.error("email send failed subject={}", subject, ex);
-            return false;
-        }
     }
 }

@@ -45,3 +45,6 @@ frontend/playwright-report/
 
 # IDE
 .idea/
+
+# Playwright stray output at repo root
+test-results/

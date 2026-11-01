@@ -39,29 +39,35 @@ class AuthIntegrationTest extends AuthTestSupport {
     void registerVerifyLoginAndProfileFlow() throws Exception {
         String username = unique("flow");
         String email = username + "@example.com";
+        // 注册前先给未注册邮箱发码
+        mockMvc.perform(post("/api/auth/send-code")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("email", email, "scene", "VERIFY"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.emailSent").value(true));
+        String verifyCode = capturingMail.lastCode(email);
+        assertThat(verifyCode).hasSize(6);
+
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("username", username, "email", email,
                                 "password", DEFAULT_PASSWORD, "nickname", "测试用户",
-                                "agreeTerms", true))))
+                                "agreeTerms", true, "code", verifyCode))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.userId").isNumber())
-                .andExpect(jsonPath("$.data.emailSent").value(true))
-                .andExpect(jsonPath("$.data.verifyExpireAt").isString());
+                .andExpect(jsonPath("$.data.emailSent").doesNotExist());
 
         Long userId = jdbcTemplate.queryForObject(
                 "SELECT id FROM user WHERE username = ?", Long.class, username);
-        String verifyToken = jdbcTemplate.queryForObject(
-                "SELECT token FROM email_token WHERE user_id = ? AND type = 'VERIFY' "
-                        + "ORDER BY id DESC LIMIT 1", String.class, userId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT email_verified FROM user WHERE id = ?", Boolean.class, userId)).isTrue();
 
-        mockMvc.perform(post("/api/auth/verify-email")
+        // 同一验证码不可复用：换一个未注册邮箱也应失败
+        mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("token", verifyToken))))
-                .andExpect(status().isOk());
-        mockMvc.perform(post("/api/auth/verify-email")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("token", verifyToken))))
+                        .content(json(Map.of("username", unique("flow2"), "email",
+                                unique("flow2") + "@example.com", "password", DEFAULT_PASSWORD,
+                                "agreeTerms", true, "code", verifyCode))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(1004));
 
@@ -105,21 +111,17 @@ class AuthIntegrationTest extends AuthTestSupport {
     }
 
     @Test
-    void unverifiedAndDuplicateAndInvalidRegistrationAreRejected() throws Exception {
-        String username = unique("unverified");
+    void duplicateAndInvalidRegistrationAreRejected() throws Exception {
+        String username = unique("dupreg");
         String email = username + "@example.com";
+        String code = requestVerifyCode(email);
         Map<String, Object> body = Map.of("username", username, "email", email,
-                "password", DEFAULT_PASSWORD, "agreeTerms", true);
+                "password", DEFAULT_PASSWORD, "agreeTerms", true, "code", code);
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON).content(json(body)))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("account", username, "password", DEFAULT_PASSWORD))))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value(1002));
-
+        // 重复注册：先查重，不消耗验证码
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON).content(json(body)))
                 .andExpect(status().isConflict())
@@ -128,23 +130,42 @@ class AuthIntegrationTest extends AuthTestSupport {
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"a\",\"email\":\"valid@example.com\","
-                                + "\"password\":\"Password123\",\"agreeTerms\":true}"))
+                                + "\"password\":\"Password123\",\"agreeTerms\":true,\"code\":\"123456\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(2001));
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"validname\",\"email\":\"valid2@example.com\","
-                                + "\"password\":\"short\",\"agreeTerms\":true}"))
+                                + "\"password\":\"short\",\"agreeTerms\":true,\"code\":\"123456\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(2001));
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"validname\",\"email\":\"valid3@example.com\","
-                                + "\"password\":\"Password123\",\"agreeTerms\":false}"))
+                                + "\"password\":\"Password123\",\"agreeTerms\":false,\"code\":\"123456\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(2001));
+
+        // 缺少验证码直接 2001
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"validname\",\"email\":\"valid4@example.com\","
+                                + "\"password\":\"Password123\",\"agreeTerms\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(2001));
+    }
+
+    @Test
+    void unverifiedAccountCannotLogin() throws Exception {
+        User user = createVerifiedUser("unverified");
+        jdbcTemplate.update("UPDATE user SET email_verified = 0 WHERE id = ?", user.getId());
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("account", user.getUsername(), "password", DEFAULT_PASSWORD))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(1002));
     }
 
     @Test
@@ -182,18 +203,18 @@ class AuthIntegrationTest extends AuthTestSupport {
                 .path("data").path("token").asText();
 
         clearEmailRateLimit(user.getEmail());
-        mockMvc.perform(post("/api/auth/forgot-password")
+        mockMvc.perform(post("/api/auth/send-code")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("email", user.getEmail()))))
+                        .content(json(Map.of("email", user.getEmail(), "scene", "RESET"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.emailSent").value(true));
-        String resetToken = jdbcTemplate.queryForObject(
-                "SELECT token FROM email_token WHERE user_id = ? AND type = 'RESET' "
-                        + "ORDER BY id DESC LIMIT 1", String.class, user.getId());
+        String resetCode = capturingMail.lastCode(user.getEmail());
+        assertThat(resetCode).hasSize(6);
 
         mockMvc.perform(post("/api/auth/reset-password")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("token", resetToken, "newPassword", "NewPassword456"))))
+                        .content(json(Map.of("email", user.getEmail(), "code", resetCode,
+                                "newPassword", "NewPassword456"))))
                 .andExpect(status().isOk());
 
         mockMvc.perform(get("/api/user/profile").header("Authorization", "Bearer " + oldToken))
@@ -207,7 +228,8 @@ class AuthIntegrationTest extends AuthTestSupport {
 
         mockMvc.perform(post("/api/auth/reset-password")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("token", resetToken, "newPassword", "Another789"))))
+                        .content(json(Map.of("email", user.getEmail(), "code", resetCode,
+                                "newPassword", "Another789"))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(1004));
     }
@@ -388,39 +410,68 @@ class AuthIntegrationTest extends AuthTestSupport {
     void emailSendIsRateLimitedAndResendDoesNotRevealRegistration() throws Exception {
         String username = unique("mail");
         String email = username + "@example.com";
+        String code = requestVerifyCode(email);
+
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("username", username, "email", email,
-                                "password", DEFAULT_PASSWORD, "agreeTerms", true))))
+                                "password", DEFAULT_PASSWORD, "agreeTerms", true,
+                                "code", code))))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/auth/resend-verify")
+        mockMvc.perform(post("/api/auth/send-code")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("email", email))))
+                        .content(json(Map.of("email", email, "scene", "VERIFY"))))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.code").value(1005));
 
         String unknown = unique("unknown") + "@example.com";
         clearEmailRateLimit(unknown);
-        mockMvc.perform(post("/api/auth/resend-verify")
+        mockMvc.perform(post("/api/auth/send-code")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("email", unknown))))
+                        .content(json(Map.of("email", unknown, "scene", "RESET"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.emailSent").value(true));
+        assertThat(capturingMail.lastCode(unknown)).isNull();
     }
 
     @Test
-    void expiredVerificationTokenIsRejected() throws Exception {
-        User user = createVerifiedUser("expired");
-        jdbcTemplate.update("UPDATE user SET email_verified = 0 WHERE id = ?", user.getId());
-        String token = UUID.randomUUID().toString().replace("-", "")
-                + UUID.randomUUID().toString().replace("-", "");
-        jdbcTemplate.update("INSERT INTO email_token (user_id, email, token, type, expire_at, used) "
-                        + "VALUES (?, ?, ?, 'VERIFY', DATE_SUB(NOW(), INTERVAL 1 MINUTE), 0)",
-                user.getId(), user.getEmail(), token);
-        mockMvc.perform(post("/api/auth/verify-email")
+    void expiredVerificationCodeIsRejected() throws Exception {
+        String username = unique("expired");
+        String email = username + "@example.com";
+        String code = requestVerifyCode(email);
+        // 模拟过期：直接删除 Redis 验证码键
+        redis.delete("auth:code:verify:" + email);
+
+        mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("token", token))))
+                        .content(json(Map.of("username", username, "email", email,
+                                "password", DEFAULT_PASSWORD, "agreeTerms", true, "code", code))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(1004));
+        assertThat(count("user", "username = ?", username)).isZero();
+    }
+
+    @Test
+    void wrongCodeFiveTimesInvalidatesVerificationCode() throws Exception {
+        String username = unique("attempts");
+        String email = username + "@example.com";
+        String code = requestVerifyCode(email);
+        String wrong = code.equals("000000") ? "111111" : "000000";
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(post("/api/auth/register")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json(Map.of("username", username, "email", email,
+                                    "password", DEFAULT_PASSWORD, "agreeTerms", true,
+                                    "code", wrong))))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value(1004));
+        }
+        // 达到 5 次后验证码作废，即使输入正确码也无法注册
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("username", username, "email", email,
+                                "password", DEFAULT_PASSWORD, "agreeTerms", true, "code", code))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(1004));
     }
@@ -434,6 +485,7 @@ class AuthIntegrationTest extends AuthTestSupport {
         request.setEmail(email);
         request.setPassword(DEFAULT_PASSWORD);
         request.setAgreeTerms(true);
+        request.setCode(requestVerifyCode(email));
 
         ExecutorService pool = Executors.newFixedThreadPool(2);
         CountDownLatch start = new CountDownLatch(1);
@@ -509,5 +561,15 @@ class AuthIntegrationTest extends AuthTestSupport {
                 .andExpect(jsonPath("$.data.freeUsedToday").value(0))
                 .andExpect(jsonPath("$.data.packBalance").value(0))
                 .andExpect(jsonPath("$.data.resetAt").isString());
+    }
+
+    private String requestVerifyCode(String email) throws Exception {
+        mockMvc.perform(post("/api/auth/send-code")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("email", email, "scene", "VERIFY"))))
+                .andExpect(status().isOk());
+        String code = capturingMail.lastCode(email);
+        assertThat(code).hasSize(6);
+        return code;
     }
 }

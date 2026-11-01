@@ -284,7 +284,7 @@ function formatDate(value: string | null): string {
     <div v-if="share" class="poster-stage">
       <div ref="posterRef" class="poster">
         <div class="poster-head">
-          <span class="poster-brand">TravelMapper</span>
+          <span class="poster-brand">旅迹地图</span>
           <span class="poster-slogan">把走过的路，留在地图上</span>
         </div>
 

@@ -3,18 +3,28 @@ import { computed, ref } from 'vue'
 import { login as loginApi } from '../api/auth'
 import { apiGet } from '../api/http'
 import type { LoginResponse, UserView } from '../api/types'
+import { clearStoredToken, getStoredToken, storeToken } from '../utils/authStorage'
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string>(localStorage.getItem('tm_token') ?? '')
+  const token = ref<string>(getStoredToken())
   const user = ref<UserView | null>(null)
   const isAuthenticated = computed(() => Boolean(token.value))
 
-  async function login(account: string, password: string): Promise<LoginResponse> {
+  async function login(
+    account: string,
+    password: string,
+    remember = true
+  ): Promise<LoginResponse> {
     const response = await loginApi(account, password)
     token.value = response.token
     user.value = response.user
-    localStorage.setItem('tm_token', response.token)
+    storeToken(response.token, remember)
     return response
+  }
+
+  /** 管理员入口使用：角色不符时立即清除登录态。 */
+  function rejectNonAdmin(): void {
+    logout()
   }
 
   async function loadProfile(): Promise<void> {
@@ -38,8 +48,8 @@ export const useAuthStore = defineStore('auth', () => {
   function logout(): void {
     token.value = ''
     user.value = null
-    localStorage.removeItem('tm_token')
+    clearStoredToken()
   }
 
-  return { token, user, isAuthenticated, login, loadProfile, logout }
+  return { token, user, isAuthenticated, login, rejectNonAdmin, loadProfile, logout }
 })
