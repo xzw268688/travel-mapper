@@ -301,6 +301,47 @@ nav a.router-link-active {
   margin-bottom: 18px;
 }
 
+.archive-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.archive-card:hover {
+  border-color: var(--tm-brand);
+  box-shadow: var(--tm-shadow);
+}
+
+.archive-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.archive-head strong {
+  font-size: 15px;
+}
+
+.archive-link {
+  color: var(--tm-brand);
+  font-size: 13px;
+}
+
+.archive-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--tm-text-secondary);
+}
+
 .trip-title {
   font-weight: 600;
   color: var(--tm-text);

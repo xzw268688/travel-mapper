@@ -32,7 +32,7 @@ const CATEGORIES = [
 const GROUP_OPTIONS = [
   { value: 'country', label: '按国家' },
   { value: 'city', label: '按城市' },
-  { value: 'trip', label: '按旅行' },
+  { value: 'trip', label: '按归档' },
   { value: 'date', label: '按日期' },
   { value: 'country,city', label: '国家 + 城市' }
 ]
@@ -402,7 +402,7 @@ function todayString(): string {
         </el-select>
         <el-select
           v-model="filters.tripId"
-          placeholder="全部旅行"
+          placeholder="全部归档"
           clearable
           filterable
           :disabled="!filters.countryCode"
@@ -515,8 +515,8 @@ function todayString(): string {
         <el-form-item label="国家/城市" required>
           <CountryCitySelector v-model:country="form.country" v-model:city="form.city" />
         </el-form-item>
-        <el-form-item label="旅行">
-          <el-select v-model="form.tripId" clearable filterable placeholder="不关联旅行" style="width: 100%">
+        <el-form-item label="归档">
+          <el-select v-model="form.tripId" clearable filterable placeholder="不关联归档" style="width: 100%">
             <el-option v-for="trip in formTrips" :key="trip.id" :label="tripLabel(trip)" :value="trip.id" />
           </el-select>
         </el-form-item>

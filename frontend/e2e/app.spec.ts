@@ -29,8 +29,13 @@ test('地图 → 国家抽屉 → 打开行程编辑页', async ({ page }) => {
 
   const drawer = page.locator('.el-drawer')
   await expect(drawer).toBeVisible()
-  await drawer.getByText(state.itineraryTitle).click()
+  // 空未归组不再渲染占位文案
+  await expect(drawer.getByText('暂无未归组数据')).toHaveCount(0)
 
+  await drawer.locator('.archive-card').first().click()
+  await expect(page).toHaveURL(/\/trips\/\d+$/)
+
+  await page.locator('.trip-hub-row').filter({ hasText: state.itineraryTitle }).first().click()
   await expect(page).toHaveURL(new RegExp(`/itineraries/${state.itineraryId}$`))
   await expect(page.getByText(`编辑行程 #${state.itineraryId}`)).toBeVisible()
 })

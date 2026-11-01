@@ -20,7 +20,6 @@ const drawerVisible = ref(false)
 const drawerSize = ref(window.innerWidth < 640 ? '92%' : '480px')
 const fallback = ref(false)
 const loading = ref(false)
-const openedItineraries = new Set<number>()
 
 // 默认使用本地 GeoJSON，避免依赖外部 CDN；生产环境仍需按 SRS 7.3 确认底图来源与审图号。
 const WORLD_GEO_URL = import.meta.env.VITE_WORLD_GEO_URL || '/world.json'
@@ -59,6 +58,20 @@ const statusColor = (stat?: CountryStat): string =>
 
 const statusLabel = (stat?: { status?: string }): string =>
   stat?.status === 'GREEN' ? '已完成' : stat?.status === 'YELLOW' ? '计划中' : '未点亮'
+
+const hasUngrouped = computed(() => {
+  const ungrouped = drawer.value?.ungrouped
+  if (!ungrouped) return false
+  return ungrouped.itineraries.length + ungrouped.notes.length + ungrouped.expenses.length > 0
+})
+
+function tripItineraryCount(trip: CountryDrawer['trips'][number]): number {
+  return trip.cities.reduce((total, city) => total + city.itineraries.length, 0)
+}
+
+function tripNoteCount(trip: CountryDrawer['trips'][number]): number {
+  return trip.cities.reduce((total, city) => total + city.notes.length, 0)
+}
 
 const fallbackCountries = computed(() => {
   const statByCode = new Map(stats.value.map((stat) => [stat.countryCode, stat]))
@@ -207,17 +220,11 @@ watch(
 
 async function openCountry(code: string): Promise<void> {
   try {
-    openedItineraries.clear()
     drawer.value = await getCountryDrawer(code)
     drawerVisible.value = true
   } catch (error) {
     ElMessage.error((error as Error).message || '加载国家详情失败')
   }
-}
-
-function openItinerary(id: number): void {
-  openedItineraries.add(id)
-  void router.push(`/itineraries/${id}`)
 }
 
 function resizeChart(): void {
@@ -307,86 +314,27 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div v-for="trip in drawer.trips" :key="trip.tripId" class="drawer-section">
-          <!-- 只有一次旅行时省略旅行层，直接展示城市与内容 -->
-          <template v-if="drawer.trips.length > 1">
-            <div class="trip-title">
-              <el-link type="primary" :underline="false" @click="router.push(`/trips/${trip.tripId}`)">
-                {{ trip.tripName }}
-              </el-link>
-              <span class="meta">¥{{ trip.subtotalCny }}</span>
-            </div>
-            <div class="meta">{{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }}</div>
-          </template>
-          <div v-else class="meta" style="margin-bottom: 8px">
-            {{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }} · 本次花费 ¥{{ trip.subtotalCny }}
+        <div v-for="trip in drawer.trips" :key="trip.tripId" class="archive-card" @click="router.push(`/trips/${trip.tripId}`)">
+          <div class="archive-head">
+            <strong>{{ trip.tripName }}</strong>
+            <span class="archive-link">查看全部 ›</span>
           </div>
-          <div v-if="trip.cities.length === 0" class="meta">暂无城市分组</div>
-          <div v-for="city in trip.cities" :key="trip.tripId + '-' + city.cityCode" class="city-block">
-            <div class="city-head">
-              <strong>{{ city.cityName }}</strong>
-              <el-tag
-                :type="city.cityLabel === 'COMPLETED' ? 'success' : 'warning'"
-                size="small"
-              >
-                {{ city.cityLabel === 'COMPLETED' ? '已完成' : '计划中' }}
-              </el-tag>
-              <span class="meta">花费 ¥{{ city.expenseCny }}</span>
-            </div>
-            <div v-for="itinerary in city.itineraries" :key="city.cityCode + '-' + itinerary.id">
-              <el-link type="primary" :underline="false" @click="openItinerary(itinerary.id)">
-                {{ itinerary.title }}
-              </el-link>
-              <span class="meta"> {{ itinerary.startDate }} ~ {{ itinerary.endDate }}</span>
-              <el-tag v-if="itinerary.expired" type="info" size="small">已过期</el-tag>
-            </div>
-            <div
-              v-for="note in city.notes"
-              :key="city.cityCode + '-note-' + note.id"
-              class="meta"
-            >
-              游记：{{ note.title }}（{{ note.visibility === 'PRIVATE' ? '私密' : '已分享' }}）
-            </div>
+          <div class="meta">{{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }}</div>
+          <div class="archive-stats">
+            <span>行程 {{ tripItineraryCount(trip) }}</span>
+            <span>游记 {{ tripNoteCount(trip) }}</span>
+            <span>花费 ¥{{ trip.subtotalCny }}</span>
           </div>
         </div>
 
-        <div class="drawer-section">
+        <div v-if="hasUngrouped" class="drawer-section">
           <div class="trip-title">未归组</div>
-          <div
-            v-if="drawer.ungrouped.itineraries.length === 0
-              && drawer.ungrouped.notes.length === 0
-              && drawer.ungrouped.expenses.length === 0"
-            class="meta"
-          >
-            暂无未归组数据
+          <div class="meta">
+            行程 {{ drawer.ungrouped.itineraries.length }} ·
+            游记 {{ drawer.ungrouped.notes.length }} ·
+            消费 {{ drawer.ungrouped.expenses.length }} ·
+            花费 ¥{{ drawer.ungrouped.expenseCny }}
           </div>
-          <div
-            v-for="itinerary in drawer.ungrouped.itineraries"
-            :key="'ungrouped-' + itinerary.id"
-            class="city-block"
-          >
-            <div class="city-head">
-              <strong>{{ itinerary.title }}</strong>
-              <span class="meta">{{ itinerary.startDate }} ~ {{ itinerary.endDate }}</span>
-              <el-tag v-if="itinerary.expired" type="info" size="small">已过期</el-tag>
-            </div>
-            <div class="meta">{{ itinerary.cities.map((city) => city.cityName).join('、') }}</div>
-          </div>
-          <div
-            v-for="note in drawer.ungrouped.notes"
-            :key="'ungrouped-note-' + note.id"
-            class="meta"
-          >
-            游记：{{ note.title }}
-          </div>
-          <div
-            v-for="expense in drawer.ungrouped.expenses"
-            :key="'ungrouped-expense-' + expense.id"
-            class="meta"
-          >
-            {{ expense.expenseDate }} · {{ expense.currency }} {{ expense.amount }} · {{ expense.category }}
-          </div>
-          <div class="meta">未归组花费：¥{{ drawer.ungrouped.expenseCny }}</div>
         </div>
       </div>
     </el-drawer>

@@ -65,7 +65,7 @@ function addItinerary(): void {
 
 <template>
   <div class="plan-page" v-loading="loading">
-    <el-result v-if="error" icon="error" title="无法打开旅行" :sub-title="error">
+    <el-result v-if="error" icon="error" title="无法打开归档" :sub-title="error">
       <template #extra>
         <el-button @click="router.push('/')">返回地图</el-button>
       </template>
