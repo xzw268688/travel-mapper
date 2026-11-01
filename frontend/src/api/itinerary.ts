@@ -122,8 +122,12 @@ export interface RegenerateResponse {
   quota: QuotaInfo
 }
 
+// 生成走大模型，推理模型可能需要 60-90 秒，单独放宽到 120 秒。
+// 推理模型单次约 50–80 秒；后端解析失败会重试一次，留足两次调用的余量。
+export const AI_REQUEST_TIMEOUT_MS = 180_000
+
 export function generateItinerary(body: GenerateRequest): Promise<GenerateResponse> {
-  return apiPost<GenerateResponse>('/itinerary/generate', body)
+  return apiPost<GenerateResponse>('/itinerary/generate', body, AI_REQUEST_TIMEOUT_MS)
 }
 
 export function saveItinerary(body: SaveRequest): Promise<SaveResponse> {
@@ -149,7 +153,7 @@ export function regenerateItinerary(
   id: number,
   body: { requestId: string; keepManualSpots: boolean; preference?: string }
 ): Promise<RegenerateResponse> {
-  return apiPost<RegenerateResponse>(`/itinerary/${id}/regenerate`, body)
+  return apiPost<RegenerateResponse>(`/itinerary/${id}/regenerate`, body, AI_REQUEST_TIMEOUT_MS)
 }
 
 export function addSpot(

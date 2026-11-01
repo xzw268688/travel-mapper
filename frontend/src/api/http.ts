@@ -46,8 +46,9 @@ export function apiGet<T>(url: string, params?: Record<string, unknown>): Promis
   return unwrap<T>(http.get(url, { params }))
 }
 
-export function apiPost<T>(url: string, data?: unknown): Promise<T> {
-  return unwrap<T>(http.post(url, data))
+/** timeoutMs 用于 AI 等长耗时接口，未传时使用全局 20 秒。 */
+export function apiPost<T>(url: string, data?: unknown, timeoutMs?: number): Promise<T> {
+  return unwrap<T>(http.post(url, data, timeoutMs ? { timeout: timeoutMs } : undefined))
 }
 
 export function apiPut<T>(url: string, data?: unknown): Promise<T> {
