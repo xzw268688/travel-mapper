@@ -24,6 +24,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Date;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
@@ -34,6 +35,8 @@ public class TripService {
 
     private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
     private static final int RECENT_EXPENSE_LIMIT = 10;
+    /** 同国家两次行程相隔不超过该天数时视为同一次旅行。 */
+    public static final int GROUPING_WINDOW_DAYS = 30;
 
     private final TripMapper tripMapper;
     private final ItineraryMapper itineraryMapper;
@@ -142,11 +145,76 @@ public class TripService {
         return trip;
     }
 
+    /**
+     * 按“同国家 + 日期间隔 ≤30 天”匹配已有旅行；匹配不到才新建。
+     * 多个匹配时取间隔最小的一次。
+     */
+    public Trip resolveForItinerary(Long userId, String countryCode, LocalDate start, LocalDate end) {
+        List<Trip> trips = tripMapper.selectList(new LambdaQueryWrapper<Trip>()
+                .eq(Trip::getUserId, userId)
+                .eq(Trip::getCountryCode, countryCode));
+        Trip best = null;
+        long bestGap = Long.MAX_VALUE;
+        for (Trip trip : trips) {
+            if (trip.getStartDate() == null || trip.getEndDate() == null) {
+                continue;
+            }
+            long gap;
+            if (start.isAfter(trip.getEndDate())) {
+                gap = ChronoUnit.DAYS.between(trip.getEndDate(), start);
+            } else if (end.isBefore(trip.getStartDate())) {
+                gap = ChronoUnit.DAYS.between(end, trip.getStartDate());
+            } else {
+                gap = 0;
+            }
+            if (gap <= GROUPING_WINDOW_DAYS && gap < bestGap) {
+                best = trip;
+                bestGap = gap;
+            }
+        }
+        return best != null ? best
+                : createForItinerary(userId, countryCode, start, end, null);
+    }
+
+    /**
+     * 按日期自动归类：落在旅行区间内，或结束后 trailingDays 天内。
+     * 多个命中时取距离最近、结束日期最晚的一次。
+     */
+    public Trip resolveForDate(Long userId, String countryCode, LocalDate date, int trailingDays) {
+        List<Trip> trips = tripMapper.selectList(new LambdaQueryWrapper<Trip>()
+                .eq(Trip::getUserId, userId)
+                .eq(Trip::getCountryCode, countryCode));
+        Trip best = null;
+        long bestDistance = Long.MAX_VALUE;
+        for (Trip trip : trips) {
+            if (trip.getStartDate() == null || trip.getEndDate() == null) {
+                continue;
+            }
+            long distance;
+            if (date.isBefore(trip.getStartDate())) {
+                continue;
+            } else if (!date.isAfter(trip.getEndDate())) {
+                distance = 0;
+            } else {
+                long after = ChronoUnit.DAYS.between(trip.getEndDate(), date);
+                if (after > trailingDays) {
+                    continue;
+                }
+                distance = after;
+            }
+            if (distance < bestDistance) {
+                best = trip;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
     public Trip attachOrCreate(Long userId, Long tripId, String rawCountryCode, String tripName,
                                LocalDate startDate, LocalDate endDate) {
         String countryCode = rawCountryCode.toUpperCase(Locale.ROOT);
         if (tripId == null) {
-            return createForItinerary(userId, countryCode, startDate, endDate, tripName);
+            return resolveForItinerary(userId, countryCode, startDate, endDate);
         }
         Trip trip = requireOwnedTrip(userId, tripId);
         if (!trip.getCountryCode().equals(countryCode)) {

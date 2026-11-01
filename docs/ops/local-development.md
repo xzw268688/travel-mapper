@@ -183,6 +183,12 @@ E2E_BACKEND_LOG='D:/path/to/backend.log' npm run test:e2e
 
 详见 `frontend/e2e/README.md`。
 
+旅行归组重算（一次性维护，会先备份数据库）：
+
+```bash
+API_BASE=http://localhost:8080 bash scripts/maintenance/recluster-trips.sh
+```
+
 性能基准（不计入测试套件，需要后端已启动）：
 
 ```bash

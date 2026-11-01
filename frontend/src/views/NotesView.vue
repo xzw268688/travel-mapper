@@ -1,16 +1,13 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import CountryCitySelector from '../components/CountryCitySelector.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
 import { createNote } from '../api/notes'
-import { getTripDetail, getTrips } from '../api/trips'
-import type { TripView } from '../api/types'
 import { hasContent } from '../utils/noteContent'
 
 const router = useRouter()
-const route = useRoute()
 const country = ref('JP')
 const city = ref('')
 const title = ref('')
@@ -21,26 +18,10 @@ const cover = ref<string | null>(null)
 const saving = ref(false)
 const openId = ref('')
 const recentIds = ref<number[]>([])
-const trips = ref<TripView[]>([])
-const tripId = ref<number | null>(null)
-const pendingTripId = ref<number | null>(null)
 
 const RECENT_KEY = 'tm_note_recent_ids'
 
-onMounted(async () => {
-  const queryTrip = Number(route.query.tripId)
-  if (Number.isInteger(queryTrip) && queryTrip > 0) {
-    try {
-      const trip = await getTripDetail(queryTrip)
-      country.value = trip.countryCode
-      pendingTripId.value = trip.id
-      await loadTrips()
-    } catch {
-      // 旅行不存在时忽略预选
-    }
-  } else {
-    await loadTrips()
-  }
+onMounted(() => {
   try {
     const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
     recentIds.value = Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'number').slice(0, 10) : []
@@ -48,29 +29,6 @@ onMounted(async () => {
     recentIds.value = []
   }
 })
-
-watch(country, () => {
-  tripId.value = null
-  void loadTrips()
-})
-
-async function loadTrips(): Promise<void> {
-  if (!country.value) {
-    trips.value = []
-    return
-  }
-  try {
-    trips.value = await getTrips(country.value)
-  } catch {
-    trips.value = []
-  }
-  if (pendingTripId.value) {
-    tripId.value = trips.value.some((item) => item.id === pendingTripId.value)
-      ? pendingTripId.value
-      : null
-    pendingTripId.value = null
-  }
-}
 
 function addImage(objectKey: string): void {
   if (!images.value.includes(objectKey)) {
@@ -99,7 +57,6 @@ async function save(): Promise<void> {
       coverImage: cover.value || images.value[0] || null,
       countryCode: country.value,
       cityCode: city.value,
-      tripId: tripId.value,
       visibility: visibility.value
     })
     remember(result.id)
@@ -140,14 +97,6 @@ function openNote(): void {
         style="margin-top: 12px"
       />
       <div style="margin-top: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
-        <el-select v-model="tripId" clearable placeholder="未归组" style="width: 240px">
-          <el-option
-            v-for="trip in trips"
-            :key="trip.id"
-            :label="`${trip.name}${trip.startDate ? '（' + trip.startDate + '）' : ''}`"
-            :value="trip.id"
-          />
-        </el-select>
         <el-select v-model="visibility" style="width: 160px">
           <el-option label="私密" value="PRIVATE" />
           <el-option label="已分享" value="SHARED" />

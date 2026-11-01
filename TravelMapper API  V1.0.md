@@ -518,7 +518,7 @@ Idempotency-Key: <uuid>
 }
 ```
 
-**说明**：按 `startDate` 倒序，为空时按 `createdAt` 倒序；只返回未删除旅行。
+**说明**：按 `startDate` 倒序，为空时按 `createdAt` 倒序；只返回未删除旅行。旅行由系统自动维护：同一国家两次行程日期间隔 ≤30 天时归为同一次旅行。
 
 ---
 
@@ -568,6 +568,22 @@ Idempotency-Key: <uuid>
 ```
 
 **错误**：`2017`（存在挂载数据且 `force` 不为 `true`）、`2015`
+
+---
+
+### 4.6 旅行归组重算（管理员）
+
+`POST /admin/trips/recluster` ｜ 管理员
+
+按“国家 + 30 天窗口”重新聚类全部行程，合并旧旅行、重挂游记/消费，删除空旅行。
+
+**响应**
+
+```json
+{ "itineraries": 120, "mergedTrips": 3, "deletedTrips": 2 }
+```
+
+**说明**：一次性维护接口，建议先备份数据库；普通用户返回 `4002`。
 
 ---
 
@@ -2960,6 +2976,7 @@ location /api/ai/polish/stream {
 | 后台 | GET | `/admin/cards` | 管理员 | — |
 | 后台 | GET | `/admin/cards/export` | 管理员 | — |
 | 后台 | PUT | `/admin/cards/{id}/void` | 管理员 | — |
+| 后台 | POST | `/admin/trips/recluster` | 管理员 | — |
 | 后台 | GET | `/admin/users` | 管理员 | — |
 | 后台 | PUT | `/admin/users/{id}/status` | 管理员 | — |
 | 后台 | PUT | `/admin/users/{id}/quota` | 管理员 | — |
@@ -2979,6 +2996,7 @@ location /api/ai/polish/stream {
 | 版本 | 修订内容 | 原因 |
 |---|---|---|
 | V1.0 | 初版：68 个接口 + 错误码 + SSE 协议 + 枚举 + 速查表 | 设计文档第 10 章计划 |
+| V1.3 自动归组 | 行程按“同国家 + 30 天间隔”自动归组；游记/消费按日期自动归类，移除手动选择；新增 `POST /admin/trips/recluster` | 归组不再需要用户理解与操作（change-11） |
 | V1.2 旅行聚合 | 新增 `GET /trips/{id}` 旅行详情聚合接口；记账/游记/行程支持带旅行上下文 | 行程、游记、记账同属一次旅行（change-09） |
 | V1.1 认证验证码 | 注册验证与找回密码由长令牌改为 6 位邮箱验证码：新增 `POST /auth/send-code`；注册接口增加 `code`（校验通过才创建已激活账号）；`reset-password` 改为 `{email, code, newPassword}`；删除 `/auth/verify-email`、`/auth/resend-verify` 与 `/auth/forgot-password`；注册响应改为 `{userId}`；`1004` 文案改为“验证码无效或已过期” | 认证体验对齐常见网站（change-06） |
 | 一致性修订 | ① 补 `GET /countries`、`/itinerary/{id}/days` 增删改、`DELETE /admin/cities/{id}`；② 6.5 引用编号 6.9→6.7；③ 抽屉 `ungrouped` 补入**行程**，明确多城市行程在每个城市下各出现一次；④ `expenses` 列表接口纳入；⑤ 修正 `date` 字段命名（原混用 `visitDate`）；⑥ 登录响应补 `plan`，明确 VIP 不是角色；⑦ 12.11 明确调增写入 `quota_pack`；⑧ 12.14 区分"新增币种回填"与"修改币种不回填"；⑨ 6.7 明确扣费前预校验手动景点上限；⑩ 6.8 明确草稿页不调接口；⑪ 6.3/9.1/10.1 补跨国家挂载校验与行程优先规则 | 四份文档交叉审查与深度语义校验 |

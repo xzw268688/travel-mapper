@@ -38,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
@@ -135,6 +136,11 @@ public class NoteService {
                 if (!trip.getCountryCode().equals(countryCode)) {
                     throw new BusinessException(ErrorCode.PARAM_INVALID, "旅行国家与游记不一致");
                 }
+            } else {
+                // 未手动指定时按创建日期自动归组；旅行结束后 30 天内仍算同一趟。
+                Trip matched = tripService.resolveForDate(
+                        userId, countryCode, LocalDate.now(), TripService.GROUPING_WINDOW_DAYS);
+                tripId = matched == null ? null : matched.getId();
             }
         }
 

@@ -51,7 +51,7 @@ function formatDate(value: string | null): string {
 }
 
 function addNote(): void {
-  void router.push({ path: '/notes', query: { tripId: String(tripId.value) } })
+  void router.push('/notes')
 }
 
 function addExpense(): void {
@@ -59,7 +59,7 @@ function addExpense(): void {
 }
 
 function addItinerary(): void {
-  void router.push({ path: '/plan', query: { tripId: String(tripId.value) } })
+  void router.push('/plan')
 }
 </script>
 

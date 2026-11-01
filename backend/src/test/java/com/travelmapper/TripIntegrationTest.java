@@ -22,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -253,6 +254,73 @@ class TripIntegrationTest extends AuthTestSupport {
         mockMvc.perform(withToken(get("/api/trips/99999999"), user))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(2015));
+    }
+
+    @Test
+    void itineraryAutoGroupsWithinThirtyDays() {
+        User user = createVerifiedUser("autogroup");
+        LocalDate start = LocalDate.now().plusDays(10);
+        Trip first = tripService.attachOrCreate(user.getId(), null, "JP", null, start, start.plusDays(2));
+        Trip close = tripService.attachOrCreate(user.getId(), null, "JP", null,
+                start.plusDays(29), start.plusDays(31));
+        assertThat(close.getId()).isEqualTo(first.getId());
+
+        Trip far = tripService.attachOrCreate(user.getId(), null, "JP", null,
+                start.plusDays(70), start.plusDays(72));
+        assertThat(far.getId()).isNotEqualTo(first.getId());
+    }
+
+    @Test
+    void expenseAndNoteAutoAssignByDate() throws Exception {
+        User user = createVerifiedUser("autodate");
+        LocalDate today = LocalDate.now();
+        Trip trip = tripService.attachOrCreate(user.getId(), null, "JP", null,
+                today.minusDays(2), today.plusDays(2));
+
+        mockMvc.perform(withToken(post("/api/expenses"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"countryCode\":\"JP\",\"currency\":\"JPY\",\"amount\":\"100.00\","
+                                + "\"category\":\"FOOD\",\"expenseDate\":\"" + today + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tripInherited").value(false));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT trip_id FROM expense WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                Long.class, user.getId())).isEqualTo(trip.getId());
+
+        mockMvc.perform(withToken(post("/api/notes"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"自动归组\",\"content\":\"<p>x</p>\",\"images\":[],"
+                                + "\"countryCode\":\"JP\",\"cityCode\":\"TYO\",\"visibility\":\"PRIVATE\"}"))
+                .andExpect(status().isOk());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT trip_id FROM travel_note WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                Long.class, user.getId())).isEqualTo(trip.getId());
+    }
+
+    @Test
+    void reclusterMergesCloseTripsAndRemovesEmptyOnes() throws Exception {
+        User user = createVerifiedUser("recluster");
+        LocalDate start = LocalDate.now().plusDays(10);
+        Trip first = tripService.createForItinerary(user.getId(), "JP", start, start.plusDays(2), "A");
+        Trip second = tripService.createForItinerary(user.getId(), "JP",
+                start.plusDays(20), start.plusDays(22), "B");
+        insertItinerary(user, first.getId(), "JP", "A1", start, start.plusDays(2));
+        insertItinerary(user, second.getId(), "JP", "B1", start.plusDays(20), start.plusDays(22));
+
+        mockMvc.perform(asAdmin(post("/api/admin/trips/recluster")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.itineraries").value(org.hamcrest.Matchers.greaterThanOrEqualTo(2)))
+                .andExpect(jsonPath("$.data.mergedTrips").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)));
+
+        Long distinct = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT trip_id) FROM itinerary WHERE user_id = ? AND deleted = 0",
+                Long.class, user.getId());
+        assertThat(distinct).isEqualTo(1);
+
+        User normal = createVerifiedUser("reclusternormal");
+        mockMvc.perform(withToken(post("/api/admin/trips/recluster"), normal))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(4002));
     }
 
     private Itinerary insertItinerary(User user, Long tripId, String countryCode, String title,

@@ -56,9 +56,10 @@ test('旅行详情聚合与录入联动', async ({ page }) => {
   await page.goto(`/expenses?tripId=${state.tripId}`)
   await expenseRequest
 
-  // 游记页预选该旅行
-  await page.goto(`/notes?tripId=${state.tripId}`)
-  await expect(page.locator('.el-select').nth(2)).toContainText(state.tripName.slice(0, 2))
+  // 游记页不再要求手动选择旅行
+  await page.goto('/notes')
+  await expect(page.getByText('发布游记')).toBeVisible()
+  await expect(page.getByText('未归组', { exact: true })).toHaveCount(0)
 })
 
 test('行程编辑：景点与天的增删改', async ({ page }) => {

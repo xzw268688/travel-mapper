@@ -83,6 +83,12 @@ public class ExpenseService {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, "旅行国家与消费不一致");
             }
         }
+        if (request.getItineraryId() == null && tripId == null) {
+            // 未指定旅行时按消费日期自动归类；不匹配则为未归组。
+            Trip matched = tripService.resolveForDate(
+                    userId, context.countryCode(), request.getExpenseDate(), 0);
+            tripId = matched == null ? null : matched.getId();
+        }
         BigDecimal snapshot = findRate(currency);
         Expense expense = new Expense();
         expense.setUserId(userId);

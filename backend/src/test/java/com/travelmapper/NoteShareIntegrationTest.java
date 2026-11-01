@@ -163,7 +163,17 @@ class NoteShareIntegrationTest extends AuthTestSupport {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(2001));
 
+        // 同国且日期落在旅行区间内：自动归到该旅行
+        Map<String, Object> auto = noteBody("自动归组", "<p>x</p>", List.of(), null);
+        MvcResult autoResult = mockMvc.perform(withToken(post("/api/notes"), user)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(auto)))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(data(autoResult).path("tripId").asLong()).isEqualTo(tripId);
+
+        // 该国没有任何旅行：保持未归组
         Map<String, Object> ungrouped = noteBody("未归组", "<p>x</p>", List.of(), null);
+        ungrouped.put("countryCode", "US");
+        ungrouped.put("cityCode", "NYC");
         MvcResult ungroupedResult = mockMvc.perform(withToken(post("/api/notes"), user)
                         .contentType(MediaType.APPLICATION_JSON).content(json(ungrouped)))
                 .andExpect(status().isOk()).andReturn();

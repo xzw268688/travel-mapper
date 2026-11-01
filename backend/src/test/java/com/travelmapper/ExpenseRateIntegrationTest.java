@@ -131,7 +131,12 @@ class ExpenseRateIntegrationTest extends AuthTestSupport {
         createExpense(user, "JP", "TYO", tripId, "JPY", "1000.00", "FOOD");
         createExpense(user, "JP", "OSA", tripId, "USD", "10.00", "TRANSPORT");
         createExpense(user, "JP", "TYO", tripId, "CNY", "20.00", "FOOD");
-        createExpense(user, "JP", "TYO", null, "CNY", "5.00", "FOOD");
+        // 日期在旅行区间之外，自动归组不会命中，保持未归组
+        mockMvc.perform(withToken(post("/api/expenses"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(expenseBody("JP", "TYO", null, null, "CNY", "5.00", "FOOD",
+                                LocalDate.now().minusDays(60).toString(), null))))
+                .andExpect(status().isOk());
 
         mockMvc.perform(withToken(get("/api/expenses/summary"), user)
                         .param("groupBy", "country"))
