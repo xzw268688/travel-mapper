@@ -1,0 +1,44 @@
+# Ui Branding Specification
+
+## Purpose
+
+定义面向用户的产品名称与视觉呈现：统一使用中文名「旅迹地图」，保留 TravelMapper 作为副标，并保证地图首页的沉浸式布局在底图不可用时仍能完整使用。
+
+## Requirements
+
+### Requirement: Product name consistency
+面向用户的界面 MUST 显示产品名「旅迹地图」。`TravelMapper` MAY 作为小字副标出现，但 MUST NOT 单独作为主标题。浏览器标题、认证页、主导航、分享页、海报与系统邮件 MUST 使用同一中文名，MUST NOT 残留旧名作为主标识。代码标识符（包名、接口路径、数据库名、环境变量前缀）MUST NOT 因改名而变化。
+
+#### Scenario: Browser title shows the Chinese name
+- **WHEN** 用户打开任意页面
+- **THEN** 浏览器标题以「旅迹地图」开头
+
+#### Scenario: Emails use the Chinese name
+- **WHEN** 系统发送验证码邮件
+- **THEN** 邮件主题与正文显示「旅迹地图」，不把 TravelMapper 作为主标识
+
+#### Scenario: Sharing surfaces use the Chinese name
+- **WHEN** 用户查看分享页或生成海报
+- **THEN** 页面与海报显示「旅迹地图」品牌名
+
+### Requirement: Immersive map layout
+地图首页 MUST 以全屏方式展示地图，品牌栏与图例 MUST 悬浮在地图之上且不遮挡国家点击。移动端 MUST 保留安全区与可点击图例。底图加载失败时 MUST 自动降级为国家列表，并保留进入国家详情的能力。
+
+#### Scenario: Map fills the viewport
+- **WHEN** 用户进入地图首页
+- **THEN** 地图铺满可视区域，品牌栏和图例悬浮显示在地图上层
+
+#### Scenario: Fallback keeps the product usable
+- **WHEN** 世界地图底图加载失败
+- **THEN** 页面显示告警与完整国家列表，点击国家仍可打开详情抽屉
+
+### Requirement: Unified visual tokens
+用户页面 MUST 使用同一套设计令牌定义品牌色、三级文字色、背景、卡片、边框、圆角与阴影；后台页面 MUST 复用同一令牌。地图的绿、黄、灰状态色 MUST 与品牌色保持可区分，MUST NOT 使用品牌色表达地图状态。
+
+#### Scenario: Status colors stay distinguishable
+- **WHEN** 用户查看地图图例与已点亮国家
+- **THEN** 绿/黄/灰状态与品牌蓝在视觉上可区分，图例文案与颜色对应
+
+#### Scenario: Admin pages reuse the same tokens
+- **WHEN** 管理员打开后台页面
+- **THEN** 页面背景、卡片、边框与用户页面一致，仅保留既有功能布局
