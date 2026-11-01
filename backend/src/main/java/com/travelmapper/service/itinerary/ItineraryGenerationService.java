@@ -268,7 +268,8 @@ public class ItineraryGenerationService {
         try {
             return CompletableFuture.supplyAsync(
                             () -> llmProviderRegistry.get().generateItinerary(request))
-                    .get(35, TimeUnit.SECONDS);
+                    .get(configService.getInt(ConfigKeys.LLM_TIMEOUT_SECONDS, 30) + 10L,
+                            TimeUnit.SECONDS);
         } catch (TimeoutException ex) {
             throw new BusinessException(ErrorCode.AI_UNAVAILABLE, "AI 服务超时");
         } catch (InterruptedException ex) {

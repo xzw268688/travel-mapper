@@ -65,7 +65,8 @@ public class HttpLlmProvider implements LlmProvider {
             body.put("model", model);
             body.put("messages", List.of(Map.of("role", "user",
                     "content", promptBuilder.buildItineraryPrompt(request))));
-            body.put("temperature", 0.7);
+            // 不显式设置 temperature：部分供应商（如火山方舟的 Kimi）只接受固定值，
+            // 省略后由供应商使用各自默认值。
             body.put("response_format", Map.of("type", "json_object"));
             String raw = client.post()
                     .uri("/chat/completions")
@@ -101,7 +102,7 @@ public class HttpLlmProvider implements LlmProvider {
             body.put("model", model);
             body.put("messages", List.of(Map.of("role", "user",
                     "content", promptBuilder.buildPolishPrompt(text, style, target))));
-            body.put("temperature", 0.7);
+            // 同上：交由供应商决定默认温度。
             body.put("stream", true);
             String json = objectMapper.writeValueAsString(body);
             HttpClient client = HttpClient.newBuilder()
