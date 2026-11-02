@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getTripDetail, type TripDetail } from '../api/trips'
+import { ElMessage } from 'element-plus'
+import { getTripDetail, updateTripStatus, type TripDetail } from '../api/trips'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,6 +51,19 @@ function formatDate(value: string | null): string {
   return value ? value.slice(0, 10) : '—'
 }
 
+async function toggleStatus(): Promise<void> {
+  if (!trip.value) return
+  try {
+    await updateTripStatus(
+      trip.value.id,
+      trip.value.status === 'COMPLETED' ? 'PLANNED' : 'COMPLETED'
+    )
+    await load()
+  } catch (err) {
+    ElMessage.error((err as Error).message || '更新归档状态失败')
+  }
+}
+
 function addNote(): void {
   void router.push('/notes')
 }
@@ -76,12 +90,20 @@ function addItinerary(): void {
         <template #header>
           <div class="trip-hub-header">
             <div>
-              <div class="trip-title">{{ trip.name }}</div>
+              <div class="trip-title">
+                {{ trip.name }}
+                <el-tag :type="trip.status === 'COMPLETED' ? 'success' : 'warning'" size="small">
+                  {{ trip.status === 'COMPLETED' ? '已完成' : '计划中' }}
+                </el-tag>
+              </div>
               <div class="meta">
                 {{ trip.countryName }} · {{ formatDate(trip.startDate) }} ~ {{ formatDate(trip.endDate) }}
               </div>
             </div>
             <div class="trip-hub-actions">
+              <el-button size="small" @click="toggleStatus">
+                {{ trip.status === 'COMPLETED' ? '改回计划中' : '标记完成' }}
+              </el-button>
               <el-button size="small" @click="addItinerary">规划行程</el-button>
               <el-button size="small" @click="addNote">写游记</el-button>
               <el-button size="small" type="primary" @click="addExpense">记一笔</el-button>

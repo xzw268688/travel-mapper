@@ -12,6 +12,7 @@ public record TripDetailView(
         String countryName,
         LocalDate startDate,
         LocalDate endDate,
+        String status,
         Summary summary,
         List<ItineraryItem> itineraries,
         List<NoteItem> notes,

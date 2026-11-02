@@ -6,6 +6,7 @@ import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.controller.trip.dto.TripDeleteResponse;
 import com.travelmapper.controller.trip.dto.TripDetailView;
 import com.travelmapper.controller.trip.dto.TripRenameResponse;
+import com.travelmapper.controller.trip.dto.TripTimelineView;
 import com.travelmapper.controller.trip.dto.TripView;
 import com.travelmapper.repository.entity.Expense;
 import com.travelmapper.repository.entity.Itinerary;
@@ -14,6 +15,7 @@ import com.travelmapper.repository.entity.Trip;
 import com.travelmapper.repository.mapper.ExpenseMapper;
 import com.travelmapper.repository.mapper.ItineraryMapper;
 import com.travelmapper.repository.mapper.TravelNoteMapper;
+import com.travelmapper.repository.enums.TripStatus;
 import com.travelmapper.repository.mapper.TripMapper;
 import com.travelmapper.service.catalog.CatalogService;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -117,6 +119,7 @@ public class TripService {
                 trip.getId(), trip.getName(), trip.getCountryCode(),
                 catalogService.countryName(trip.getCountryCode()),
                 trip.getStartDate(), trip.getEndDate(),
+                trip.getStatus() == null ? "PLANNED" : trip.getStatus().name(),
                 new TripDetailView.Summary(
                         itineraryList.size(), noteList.size(), expenseCount, money(totalCny),
                         !unconfigured.isEmpty(), unconfigured),
@@ -141,6 +144,7 @@ public class TripService {
         trip.setName(name);
         trip.setStartDate(startDate);
         trip.setEndDate(endDate);
+        trip.setStatus(TripStatus.PLANNED);
         tripMapper.insert(trip);
         return trip;
     }
@@ -269,11 +273,54 @@ public class TripService {
                 new TripDeleteResponse.Detached(itineraries, notes, expenses));
     }
 
+    @Transactional
+    public TripRenameResponse updateStatus(Long userId, Long tripId, String rawStatus) {
+        Trip trip = requireOwnedTrip(userId, tripId);
+        TripStatus status;
+        try {
+            status = TripStatus.valueOf(rawStatus.trim().toUpperCase(Locale.ROOT));
+        } catch (Exception ex) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "status 必须为 PLANNED 或 COMPLETED");
+        }
+        trip.setStatus(status);
+        tripMapper.updateById(trip);
+        return new TripRenameResponse(trip.getId(), trip.getName());
+    }
+
+    /** 时间线：本人全部归档按起始日期正序，未填日期的用创建日期。 */
+    public List<TripTimelineView> timeline(Long userId) {
+        return jdbcTemplate.query(
+                "SELECT t.id, t.country_code, t.name, t.start_date, t.end_date, t.status, t.created_at, "
+                        + "(SELECT COUNT(*) FROM itinerary i WHERE i.trip_id = t.id AND i.deleted = 0) AS itinerary_count, "
+                        + "(SELECT COUNT(*) FROM travel_note n WHERE n.trip_id = t.id AND n.deleted = 0) AS note_count, "
+                        + "(SELECT COUNT(*) FROM expense e WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_count, "
+                        + "(SELECT COALESCE(SUM(e.amount_cny), 0) FROM expense e "
+                        + " WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_cny "
+                        + "FROM trip t WHERE t.user_id = ? AND t.deleted = 0 "
+                        + "ORDER BY COALESCE(t.start_date, DATE(t.created_at)) ASC, t.id ASC",
+                (rs, rowNum) -> {
+                    String countryCode = rs.getString("country_code");
+                    return new TripTimelineView(
+                            rs.getLong("id"),
+                            rs.getString("name"),
+                            countryCode,
+                            catalogService.countryName(countryCode),
+                            toLocalDate(rs.getDate("start_date")),
+                            toLocalDate(rs.getDate("end_date")),
+                            rs.getString("status"),
+                            rs.getInt("itinerary_count"),
+                            rs.getInt("note_count"),
+                            rs.getInt("expense_count"),
+                            money(rs.getBigDecimal("expense_cny")));
+                },
+                userId);
+    }
+
     public List<TripView> list(Long userId, String rawCountryCode) {
         String countryCode = rawCountryCode.toUpperCase(Locale.ROOT);
         catalogService.requireEnabledCountry(countryCode);
         return jdbcTemplate.query(
-                "SELECT t.id, t.country_code, t.name, t.start_date, t.end_date, t.created_at, "
+                "SELECT t.id, t.country_code, t.name, t.start_date, t.end_date, t.status, t.created_at, "
                         + "(SELECT COUNT(*) FROM itinerary i WHERE i.trip_id = t.id AND i.deleted = 0) AS itinerary_count, "
                         + "(SELECT COUNT(*) FROM travel_note n WHERE n.trip_id = t.id AND n.deleted = 0) AS note_count, "
                         + "(SELECT COUNT(*) FROM expense e WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_count, "
@@ -291,6 +338,7 @@ public class TripService {
                         rs.getInt("note_count"),
                         rs.getInt("expense_count"),
                         money(rs.getBigDecimal("expense_cny")),
+                        rs.getString("status"),
                         rs.getTimestamp("created_at").toLocalDateTime()),
                 userId, countryCode);
     }

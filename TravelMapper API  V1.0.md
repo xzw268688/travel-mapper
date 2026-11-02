@@ -522,6 +522,26 @@ Idempotency-Key: <uuid>
 
 ---
 
+### 4.2.1 归档状态
+
+`PUT /trips/{id}/status` ｜ 需鉴权
+
+```json
+{ "status": "COMPLETED" }
+```
+
+**说明**：`PLANNED` / `COMPLETED`，默认 `PLANNED`；仅本人可改，他人返回 `2015`，非法值返回 `2001`。
+
+---
+
+### 4.2.2 时间线
+
+`GET /trips/timeline` ｜ 需鉴权
+
+返回本人全部归档，按起始日期正序（无日期用创建日期），字段包含名称、国家、日期、状态、行程/游记/消费数与花费。
+
+---
+
 ### 4.3 旅行改名
 
 `PUT /trips/{id}` ｜ 需鉴权
@@ -2931,6 +2951,8 @@ location /api/ai/polish/stream {
 | 国家 | GET | `/countries` | 是 | — |
 | 城市 | GET | `/cities` | 是 | — |
 | 旅行 | GET | `/trips` | 是 | — |
+| 旅行 | GET | `/trips/timeline` | 是 | 时间线 |
+| 旅行 | PUT | `/trips/{id}/status` | 是 | 计划中/已完成 |
 | 旅行 | GET | `/trips/{id}` | 是 | 详情聚合（行程/游记/最近消费） |
 | 旅行 | PUT | `/trips/{id}` | 是 | — |
 | 旅行 | DELETE | `/trips/{id}` | 是 | — |
@@ -2996,6 +3018,7 @@ location /api/ai/polish/stream {
 | 版本 | 修订内容 | 原因 |
 |---|---|---|
 | V1.0 | 初版：68 个接口 + 错误码 + SSE 协议 + 枚举 + 速查表 | 设计文档第 10 章计划 |
+| V1.4 归档状态与时间线 | 新增 `trip.status`（PLANNED/COMPLETED）与 `PUT /trips/{id}/status`；新增 `GET /trips/timeline` | 手动确认归档状态并按时间展示（change-14） |
 | V1.3 自动归组 | 行程按“同国家 + 30 天间隔”自动归组；游记/消费按日期自动归类，移除手动选择；新增 `POST /admin/trips/recluster` | 归组不再需要用户理解与操作（change-11） |
 | V1.2 旅行聚合 | 新增 `GET /trips/{id}` 旅行详情聚合接口；记账/游记/行程支持带旅行上下文 | 行程、游记、记账同属一次旅行（change-09） |
 | V1.1 认证验证码 | 注册验证与找回密码由长令牌改为 6 位邮箱验证码：新增 `POST /auth/send-code`；注册接口增加 `code`（校验通过才创建已激活账号）；`reset-password` 改为 `{email, code, newPassword}`；删除 `/auth/verify-email`、`/auth/resend-verify` 与 `/auth/forgot-password`；注册响应改为 `{userId}`；`1004` 文案改为“验证码无效或已过期” | 认证体验对齐常见网站（change-06） |

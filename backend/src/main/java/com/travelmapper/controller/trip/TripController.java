@@ -6,6 +6,8 @@ import com.travelmapper.controller.trip.dto.TripDeleteResponse;
 import com.travelmapper.controller.trip.dto.TripDetailView;
 import com.travelmapper.controller.trip.dto.TripRenameRequest;
 import com.travelmapper.controller.trip.dto.TripRenameResponse;
+import com.travelmapper.controller.trip.dto.TripStatusRequest;
+import com.travelmapper.controller.trip.dto.TripTimelineView;
 import com.travelmapper.controller.trip.dto.TripView;
 import com.travelmapper.service.trip.TripService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -35,6 +37,17 @@ public class TripController {
     @GetMapping
     public ApiResponse<List<TripView>> list(@RequestParam String countryCode) {
         return ApiResponse.ok(tripService.list(CurrentUser.id(), countryCode));
+    }
+
+    @GetMapping("/timeline")
+    public ApiResponse<List<TripTimelineView>> timeline() {
+        return ApiResponse.ok(tripService.timeline(CurrentUser.id()));
+    }
+
+    @PutMapping("/{id}/status")
+    public ApiResponse<TripRenameResponse> updateStatus(
+            @PathVariable Long id, @Valid @RequestBody TripStatusRequest request) {
+        return ApiResponse.ok(tripService.updateStatus(CurrentUser.id(), id, request.getStatus()));
     }
 
     @GetMapping("/{id}")

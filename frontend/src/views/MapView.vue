@@ -5,6 +5,7 @@ import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { getCountries } from '../api/catalog'
 import { getCountryDrawer, getMapStats } from '../api/map'
+import { getTimeline, updateTripStatus, type TripTimelineItem } from '../api/trips'
 import type { Country, CountryDrawer, CountryStat } from '../api/types'
 import { useMapStore } from '../stores/map'
 import worldNamesZh from '../assets/world-names-zh.json'
@@ -20,6 +21,9 @@ const drawerVisible = ref(false)
 const drawerSize = ref(window.innerWidth < 640 ? '92%' : '480px')
 const fallback = ref(false)
 const loading = ref(false)
+const viewMode = ref<'map' | 'timeline'>('map')
+const timeline = ref<TripTimelineItem[]>([])
+const timelineLoading = ref(false)
 
 // 默认使用本地 GeoJSON，避免依赖外部 CDN；生产环境仍需按 SRS 7.3 确认底图来源与审图号。
 const WORLD_GEO_URL = import.meta.env.VITE_WORLD_GEO_URL || '/world.json'
@@ -58,6 +62,47 @@ const statusColor = (stat?: CountryStat): string =>
 
 const statusLabel = (stat?: { status?: string }): string =>
   stat?.status === 'GREEN' ? '已完成' : stat?.status === 'YELLOW' ? '计划中' : '未点亮'
+
+const plannedTrips = computed(() =>
+  (drawer.value?.trips ?? []).filter((trip) => trip.status !== 'COMPLETED')
+)
+const completedTrips = computed(() =>
+  (drawer.value?.trips ?? []).filter((trip) => trip.status === 'COMPLETED')
+)
+
+async function switchView(mode: 'map' | 'timeline'): Promise<void> {
+  viewMode.value = mode
+  if (mode === 'timeline' && timeline.value.length === 0) {
+    await loadTimeline()
+  }
+}
+
+async function loadTimeline(): Promise<void> {
+  timelineLoading.value = true
+  try {
+    timeline.value = await getTimeline()
+  } catch {
+    timeline.value = []
+  } finally {
+    timelineLoading.value = false
+  }
+}
+
+async function toggleStatus(tripId: number, current: string): Promise<void> {
+  try {
+    await updateTripStatus(tripId, current === 'COMPLETED' ? 'PLANNED' : 'COMPLETED')
+    await openCountry(drawer.value?.countryCode ?? '')
+    if (viewportHasTimeline()) {
+      await loadTimeline()
+    }
+  } catch (error) {
+    ElMessage.error((error as Error).message || '更新归档状态失败')
+  }
+}
+
+function viewportHasTimeline(): boolean {
+  return viewMode.value === 'timeline'
+}
 
 const hasUngrouped = computed(() => {
   const ungrouped = drawer.value?.ungrouped
@@ -250,14 +295,51 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="map-page" v-loading="loading">
-    <div ref="chartEl" class="map-canvas" v-show="!fallback"></div>
+    <div ref="chartEl" class="map-canvas" v-show="viewMode === 'map' && !fallback"></div>
 
     <div class="map-topbar">
       <strong>旅迹地图</strong>
       <span>把走过的路，留在地图上</span>
     </div>
 
-    <div v-if="fallback" class="fallback-map">
+    <div class="view-switch">
+      <el-button-group>
+        <el-button :type="viewMode === 'map' ? 'primary' : 'default'" size="small" @click="switchView('map')">
+          地图
+        </el-button>
+        <el-button :type="viewMode === 'timeline' ? 'primary' : 'default'" size="small" @click="switchView('timeline')">
+          时间线
+        </el-button>
+      </el-button-group>
+    </div>
+
+    <div v-if="viewMode === 'timeline'" class="timeline-panel" v-loading="timelineLoading">
+      <el-empty v-if="timeline.length === 0" description="还没有归档，先去规划或记录一次旅行吧" />
+      <div v-for="(item, index) in timeline" :key="item.id" class="timeline-node" @click="router.push(`/trips/${item.id}`)">
+        <div class="timeline-axis">
+          <span class="timeline-dot" :class="{ completed: item.status === 'COMPLETED' }" />
+          <span v-if="index < timeline.length - 1" class="timeline-line" />
+        </div>
+        <div class="timeline-card">
+          <div class="archive-head">
+            <strong>{{ item.name }}</strong>
+            <el-tag :type="item.status === 'COMPLETED' ? 'success' : 'warning'" size="small">
+              {{ item.status === 'COMPLETED' ? '已完成' : '计划中' }}
+            </el-tag>
+          </div>
+          <div class="meta">
+            {{ item.countryName }} · {{ item.startDate || '无日期' }} ~ {{ item.endDate || '无日期' }}
+          </div>
+          <div class="archive-stats">
+            <span>行程 {{ item.itineraryCount }}</span>
+            <span>游记 {{ item.noteCount }}</span>
+            <span>花费 ¥{{ item.expenseCny }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="viewMode === 'map' && fallback" class="fallback-map">
       <el-alert
         type="warning"
         :closable="false"
@@ -278,7 +360,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="map-legend">
+    <div v-if="viewMode === 'map'" class="map-legend">
       <span><span class="legend-dot" style="background: #2e7d32"></span>绿色：有游记</span>
       <span><span class="legend-dot" style="background: #f9a825"></span>黄色：仅有行程</span>
       <span><span class="legend-dot" style="background: #37474f"></span>灰色：未点亮</span>
@@ -314,16 +396,57 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div v-for="trip in drawer.trips" :key="trip.tripId" class="archive-card" @click="router.push(`/trips/${trip.tripId}`)">
-          <div class="archive-head">
-            <strong>{{ trip.tripName }}</strong>
-            <span class="archive-link">查看全部 ›</span>
+        <div class="drawer-section">
+          <div class="trip-title">计划中</div>
+          <el-empty v-if="plannedTrips.length === 0" description="暂无计划中的归档" :image-size="60" />
+          <div
+            v-for="trip in plannedTrips"
+            :key="trip.tripId"
+            class="archive-card"
+            @click="router.push(`/trips/${trip.tripId}`)"
+          >
+            <div class="archive-head">
+              <strong>{{ trip.tripName }}</strong>
+              <span class="archive-link">查看全部 ›</span>
+            </div>
+            <div class="meta">{{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }}</div>
+            <div class="archive-stats">
+              <span>行程 {{ tripItineraryCount(trip) }}</span>
+              <span>游记 {{ tripNoteCount(trip) }}</span>
+              <span>花费 ¥{{ trip.subtotalCny }}</span>
+            </div>
+            <div class="archive-actions">
+              <el-button text size="small" type="success" @click.stop="toggleStatus(trip.tripId, trip.status)">
+                标记完成
+              </el-button>
+            </div>
           </div>
-          <div class="meta">{{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }}</div>
-          <div class="archive-stats">
-            <span>行程 {{ tripItineraryCount(trip) }}</span>
-            <span>游记 {{ tripNoteCount(trip) }}</span>
-            <span>花费 ¥{{ trip.subtotalCny }}</span>
+        </div>
+
+        <div class="drawer-section">
+          <div class="trip-title">已完成</div>
+          <el-empty v-if="completedTrips.length === 0" description="暂无已完成的归档" :image-size="60" />
+          <div
+            v-for="trip in completedTrips"
+            :key="trip.tripId"
+            class="archive-card completed"
+            @click="router.push(`/trips/${trip.tripId}`)"
+          >
+            <div class="archive-head">
+              <strong>{{ trip.tripName }}</strong>
+              <el-tag type="success" size="small">已完成</el-tag>
+            </div>
+            <div class="meta">{{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }}</div>
+            <div class="archive-stats">
+              <span>行程 {{ tripItineraryCount(trip) }}</span>
+              <span>游记 {{ tripNoteCount(trip) }}</span>
+              <span>花费 ¥{{ trip.subtotalCny }}</span>
+            </div>
+            <div class="archive-actions">
+              <el-button text size="small" @click.stop="toggleStatus(trip.tripId, trip.status)">
+                改回计划中
+              </el-button>
+            </div>
           </div>
         </div>
 

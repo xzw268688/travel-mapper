@@ -13,5 +13,6 @@ public record TripView(
         int noteCount,
         int expenseCount,
         String expenseCny,
+        String status,
         LocalDateTime createdAt) {
 }

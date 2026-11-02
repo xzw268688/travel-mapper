@@ -84,6 +84,7 @@ export interface TripGroup {
   tripName: string
   startDate: string | null
   endDate: string | null
+  status: 'PLANNED' | 'COMPLETED' 
   subtotalCny: string
   cities: CityGroup[]
 }
@@ -131,6 +132,7 @@ export interface TripView {
   noteCount: number
   expenseCount: number
   expenseCny: string
+  status: 'PLANNED' | 'COMPLETED'
   createdAt: string
 }
 

@@ -42,7 +42,7 @@ test('地图 → 国家抽屉 → 打开行程编辑页', async ({ page }) => {
 
 test('旅行详情聚合与录入联动', async ({ page }) => {
   await page.goto(`/trips/${state.tripId}`)
-  await expect(page.locator('.trip-title').first()).toHaveText(state.tripName)
+  await expect(page.locator('.trip-title').first()).toContainText(state.tripName)
   await expect(page.getByText(state.itineraryTitle).first()).toBeVisible()
 
   await page

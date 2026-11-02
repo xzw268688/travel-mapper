@@ -127,14 +127,15 @@ public class MapService {
 
         List<TripGroupBuilder> trips = new ArrayList<>();
         List<TripRow> tripRows = jdbcTemplate.query(
-                "SELECT id, name, start_date, end_date FROM trip "
+                "SELECT id, name, start_date, end_date, status FROM trip "
                         + "WHERE user_id = ? AND country_code = ? AND deleted = 0 "
                         + "ORDER BY start_date DESC, created_at DESC",
                 (rs, rowNum) -> new TripRow(
                         rs.getLong("id"),
                         rs.getString("name"),
                         toLocalDate(rs.getDate("start_date")),
-                        toLocalDate(rs.getDate("end_date"))),
+                        toLocalDate(rs.getDate("end_date")),
+                        rs.getString("status")),
                 userId, countryCode);
 
         for (TripRow trip : tripRows) {
@@ -250,6 +251,7 @@ public class MapService {
         List<CountryDrawerResponse.TripGroup> tripGroups = trips.stream()
                 .map(trip -> new CountryDrawerResponse.TripGroup(
                         trip.trip.id(), trip.trip.name(), trip.trip.startDate(), trip.trip.endDate(),
+                        trip.trip.status() == null ? "PLANNED" : trip.trip.status(),
                         trip.subtotalCny, trip.cities))
                 .toList();
         CountryDrawerResponse.Ungrouped ungrouped = new CountryDrawerResponse.Ungrouped(
@@ -286,7 +288,8 @@ public class MapService {
     private record ItineraryAgg(int count, boolean hasUnexpired) {
     }
 
-    private record TripRow(Long id, String name, LocalDate startDate, LocalDate endDate) {
+    private record TripRow(Long id, String name, LocalDate startDate, LocalDate endDate,
+                           String status) {
     }
 
     private record ItineraryRow(Long id, String title, LocalDate startDate, LocalDate endDate) {

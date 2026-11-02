@@ -344,6 +344,47 @@ class TripIntegrationTest extends AuthTestSupport {
         assertThat(later.getId()).isEqualTo(expenseTrip);
     }
 
+    @Test
+    void statusToggleAndTimelineOrder() throws Exception {
+        User user = createVerifiedUser("status");
+        LocalDate firstStart = LocalDate.now().plusDays(5);
+        Trip first = tripService.createForItinerary(user.getId(), "JP",
+                firstStart, firstStart.plusDays(1), "第一段");
+        Trip second = tripService.createForItinerary(user.getId(), "TH",
+                firstStart.plusDays(40), firstStart.plusDays(42), "第二段");
+
+        mockMvc.perform(withToken(get("/api/trips/" + first.getId()), user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PLANNED"));
+
+        mockMvc.perform(withToken(put("/api/trips/" + first.getId() + "/status"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"COMPLETED\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(withToken(get("/api/trips/" + first.getId()), user))
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"));
+
+        mockMvc.perform(withToken(put("/api/trips/" + first.getId() + "/status"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"NOPE\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(2001));
+
+        User other = createVerifiedUser("status2");
+        mockMvc.perform(withToken(put("/api/trips/" + first.getId() + "/status"), other)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"COMPLETED\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(2015));
+
+        mockMvc.perform(withToken(get("/api/trips/timeline"), user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value(first.getId()))
+                .andExpect(jsonPath("$.data[1].id").value(second.getId()))
+                .andExpect(jsonPath("$.data[0].countryName").value("日本"))
+                .andExpect(jsonPath("$.data[0].status").value("COMPLETED"));
+    }
+
     private Itinerary insertItinerary(User user, Long tripId, String countryCode, String title,
                                       LocalDate start, LocalDate end) {
         Itinerary itinerary = new Itinerary();
