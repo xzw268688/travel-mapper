@@ -34,6 +34,8 @@ const startDate = ref(new Date(Date.now() + 86_400_000).toISOString().slice(0, 1
 const preference = ref('')
 const generating = ref(false)
 const saving = ref(false)
+const mode = ref<'AI' | 'MANUAL'>('AI')
+const draftMode = ref<'AI' | 'MANUAL'>('AI')
 const draft = ref<GenerateResponse | null>(null)
 const draftTitle = ref('')
 const savedId = ref<number | null>(null)
@@ -133,6 +135,7 @@ async function generate(): Promise<void> {
   }
   generating.value = true
   try {
+    draftMode.value = 'AI'
     draft.value = await generateItinerary({
       requestId: newRequestId(),
       countryCode: country.value,
@@ -155,9 +158,82 @@ async function generate(): Promise<void> {
   }
 }
 
+function createManualDraft(): void {
+  if (!country.value) {
+    ElMessage.warning('请选择国家')
+    return
+  }
+  if (cityCodes.value.length === 0 || cityCodes.value.length > 5) {
+    ElMessage.warning('请选择 1-5 个城市')
+    return
+  }
+  if (days.value < 1 || days.value > 15) {
+    ElMessage.warning('天数必须为 1-15')
+    return
+  }
+  if (!startDate.value) {
+    ElMessage.warning('请选择开始日期')
+    return
+  }
+  const primaryCity = cityCodes.value[0]
+  const primaryCityName =
+    cities.value.find((item) => item.cityCode === primaryCity)?.name || countryName.value
+  const dayPlans: DayPlan[] = Array.from({ length: days.value }, (_, index) => ({
+    dayIndex: index + 1,
+    date: addDays(startDate.value, index),
+    cityCode: primaryCity,
+    cityName: primaryCityName,
+    spots: []
+  }))
+  draftMode.value = 'MANUAL'
+  draft.value = {
+    requestId: '',
+    countryCode: country.value,
+    startDate: startDate.value,
+    endDate: dayPlans[dayPlans.length - 1].date,
+    days: dayPlans,
+    guides: [],
+    preparations: { visa: '', currency: '', powerPlug: '', bestSeason: '', notes: [] },
+    warnings: [],
+    deduplicated: false,
+    quota: { source: 'MANUAL', freeUsedToday: 0, freeLimit: 0, packBalance: 0 }
+  }
+  draftTitle.value = `${primaryCityName} ${days.value} 日`
+  savedId.value = null
+  savedStatus.value = ''
+  checklist.value = []
+  officialLinks.value = null
+  void loadDraftCities(country.value)
+  ElMessage.success('已创建手动行程草稿，请逐天添加景点')
+}
+
+async function switchMode(next: 'AI' | 'MANUAL'): Promise<void> {
+  if (next === mode.value) return
+  if (draft.value && !savedId.value) {
+    try {
+      await ElMessageBox.confirm(
+        '切换模式会清空当前未保存的草稿，确定继续？',
+        '切换规划模式',
+        { type: 'warning', confirmButtonText: '切换并清空', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
+  }
+  mode.value = next
+  draft.value = null
+  draftTitle.value = ''
+  checklist.value = []
+  officialLinks.value = null
+}
+
+function onModeChange(value: string | number | boolean | undefined): void {
+  void switchMode(value === 'MANUAL' ? 'MANUAL' : 'AI')
+}
+
 async function save(): Promise<void> {
   if (!draft.value) {
-    ElMessage.warning('请先生成行程')
+    ElMessage.warning(draftMode.value === 'MANUAL' ? '请先创建手动行程' : '请先生成行程')
     return
   }
   if (!draftTitle.value.trim()) {
@@ -449,7 +525,17 @@ function openSearch(): void {
 <template>
   <div class="plan-page">
     <el-card>
-      <template #header><div class="trip-title">AI 行程规划</div></template>
+      <template #header>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap">
+          <div class="trip-title" style="margin-bottom: 0">
+            {{ mode === 'AI' ? 'AI 行程规划' : '手动规划' }}
+          </div>
+          <el-radio-group :model-value="mode" size="small" @change="onModeChange">
+            <el-radio-button value="AI">AI 生成</el-radio-button>
+            <el-radio-button value="MANUAL">手动规划</el-radio-button>
+          </el-radio-group>
+        </div>
+      </template>
       <div class="selector-row">
         <el-select v-model="country" placeholder="选择国家" filterable style="min-width: 180px">
           <el-option v-for="item in countries" :key="item.code" :label="item.nameZh" :value="item.code" />
@@ -473,6 +559,7 @@ function openSearch(): void {
         <el-date-picker v-model="startDate" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" />
       </div>
       <el-input
+        v-if="mode === 'AI'"
         v-model="preference"
         type="textarea"
         :rows="2"
@@ -481,9 +568,20 @@ function openSearch(): void {
         placeholder="偏好，例如：喜欢美食和寺庙，节奏慢一点"
         style="margin-top: 12px"
       />
-      <div style="margin-top: 12px; display: flex; gap: 12px; align-items: center">
-        <el-button type="primary" :loading="generating" @click="generate">生成行程</el-button>
-        <span class="meta">生成与润色共享每日免费额度；额度不足会返回 2011。</span>
+      <div style="margin-top: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+        <el-button
+          v-if="mode === 'AI'"
+          type="primary"
+          :loading="generating"
+          @click="generate"
+        >
+          生成行程
+        </el-button>
+        <el-button v-else type="primary" @click="createManualDraft">创建手动行程</el-button>
+        <span v-if="mode === 'AI'" class="meta">
+          生成与润色共享每日免费额度；额度不足会返回 2011。
+        </span>
+        <span v-else class="meta">手动规划不调用 AI、不消耗额度；创建草稿后逐天添加景点。</span>
       </div>
       <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center">
         <el-input
@@ -500,8 +598,11 @@ function openSearch(): void {
       <template #header>
         <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
           <el-input v-model="draftTitle" maxlength="50" show-word-limit style="width: 320px" />
-          <el-tag v-if="draft.deduplicated" type="info">60 秒去重结果</el-tag>
-          <span class="meta">扣费来源 {{ draft.quota.source }} · 今日已用 {{ draft.quota.freeUsedToday }}/{{ draft.quota.freeLimit }}</span>
+          <el-tag v-if="draftMode === 'MANUAL'" type="success">手动规划 · 未消耗额度</el-tag>
+          <el-tag v-else-if="draft.deduplicated" type="info">60 秒去重结果</el-tag>
+          <span v-if="draftMode === 'AI'" class="meta">
+            扣费来源 {{ draft.quota.source }} · 今日已用 {{ draft.quota.freeUsedToday }}/{{ draft.quota.freeLimit }}
+          </span>
           <el-button type="success" :loading="saving" @click="save">保存行程</el-button>
           <el-button v-if="savedId" type="primary" plain @click="router.push(`/itineraries/${savedId}`)">
             打开已保存行程
@@ -599,7 +700,11 @@ function openSearch(): void {
       show-icon
       :title="`已保存行程 #${savedId}，地图状态：${statusText(savedStatus)}`"
       style="margin-top: 16px"
-    />
+    >
+      <el-button type="primary" plain size="small" @click="router.push(`/itineraries/${savedId}`)">
+        打开已保存行程
+      </el-button>
+    </el-alert>
 
     <el-card v-if="draft && hasPreparations" style="margin-top: 16px">
       <template #header><div class="trip-title">行前准备</div></template>

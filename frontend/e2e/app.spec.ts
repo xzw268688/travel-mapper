@@ -205,6 +205,92 @@ test('个人中心、卡密兑换与找回密码页面', async ({ page }) => {
   await expect(page.getByRole('button', { name: '发送验证码' })).toBeVisible()
 })
 
+test('手动规划：创建草稿、添加景点并保存', async ({ page }) => {
+  let generateCalled = false
+  page.on('request', (request) => {
+    if (request.url().includes('/api/itinerary/generate')) {
+      generateCalled = true
+    }
+  })
+
+  const quota = () =>
+    page.evaluate(async () => {
+      const token = localStorage.getItem('tm_token')
+      const response = await fetch('/api/quota/me', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      return (await response.json()).data
+    })
+  await page.goto('/plan')
+  const quotaBefore = await quota()
+  await expect(page.getByText('AI 行程规划')).toBeVisible()
+  await page.locator('.el-radio-button').filter({ hasText: '手动规划' }).click()
+  await expect(
+    page.getByText('手动规划不调用 AI、不消耗额度；创建草稿后逐天添加景点。')
+  ).toBeVisible()
+
+  const dayInput = page.locator('.selector-row .el-input-number input').first()
+  await dayInput.fill('2')
+  await dayInput.press('Enter')
+  await dayInput.blur()
+  await page.getByRole('button', { name: '创建手动行程' }).click()
+  await expect(page.locator('.city-block')).toHaveCount(2)
+  await expect(page.getByText('手动规划 · 未消耗额度')).toBeVisible()
+
+  // 未保存草稿切换模式需要确认；取消保留草稿，确认后清空
+  await page.locator('.el-radio-button').filter({ hasText: 'AI 生成' }).click()
+  const confirmBox = page.locator('.el-message-box')
+  await expect(confirmBox.getByText('切换模式会清空当前未保存的草稿')).toBeVisible()
+  await confirmBox.getByRole('button', { name: '取消' }).click()
+  await expect(page.locator('.city-block')).toHaveCount(2)
+
+  await page.locator('.el-radio-button').filter({ hasText: 'AI 生成' }).click()
+  await page.locator('.el-message-box').getByRole('button', { name: '切换并清空' }).click()
+  await expect(page.locator('.city-block')).toHaveCount(0)
+
+  // 切回手动模式重新创建
+  await page.locator('.el-radio-button').filter({ hasText: '手动规划' }).click()
+  await page.getByRole('button', { name: '创建手动行程' }).click()
+  await expect(page.locator('.city-block')).toHaveCount(2)
+
+  const firstDay = page.locator('.city-block').first()
+  await firstDay.getByRole('button', { name: '+ 添加手动景点' }).click()
+  const dialog = page.getByRole('dialog').filter({ hasText: '添加手动景点' })
+  await dialog.locator('input').first().fill('E2E 手动景点')
+  await dialog.getByRole('button', { name: '确定' }).click()
+  await expect(firstDay.getByText('E2E 手动景点')).toBeVisible()
+
+  await page.getByRole('button', { name: '保存行程', exact: true }).click()
+  const savedAlert = page.locator('.el-alert').filter({ hasText: '已保存行程' })
+  await expect(savedAlert).toBeVisible()
+  const itineraryId = Number((await savedAlert.innerText()).match(/#(\d+)/)?.[1])
+
+  const quotaAfter = await quota()
+  expect(generateCalled).toBe(false)
+  expect(quotaAfter.freeUsedToday).toBe(quotaBefore.freeUsedToday)
+  expect(quotaAfter.packBalance).toBe(quotaBefore.packBalance)
+  expect(quotaAfter.vipDailyUsed).toBe(quotaBefore.vipDailyUsed)
+
+  // 保存结果进入归档详情
+  const trip = await page.evaluate(async (id) => {
+    const token = localStorage.getItem('tm_token')
+    const response = await fetch(`/api/itinerary/${id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    return (await response.json()).data
+  }, itineraryId)
+  await page.goto(`/trips/${trip.tripId}`)
+  await expect(page.locator('.trip-title').first()).toContainText(trip.tripName)
+
+  // 清理：删除行程并重算归档，避免空归档堆积
+  await page.evaluate(async (id) => {
+    const token = localStorage.getItem('tm_token')
+    const headers = { Authorization: `Bearer ${token}` }
+    await fetch(`/api/itinerary/${id}`, { method: 'DELETE', headers })
+    await fetch('/api/admin/trips/recluster', { method: 'POST', headers })
+  }, itineraryId)
+})
+
 test('记账新增、编辑、删除与汇总图表', async ({ page }) => {
   const amount = String(900 + (Date.now() % 90)) + '.55'
   const remark = `E2E 记账 ${Date.now()}`

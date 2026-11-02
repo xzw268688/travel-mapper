@@ -30,6 +30,18 @@ for (const width of [1440, 390]) {
       })
     }
 
+    test(`截图 plan-manual @${width}`, async ({ page }) => {
+      await page.goto('/plan')
+      await page.locator('.el-radio-button').filter({ hasText: '手动规划' }).click()
+      await page.getByRole('button', { name: '创建手动行程' }).click()
+      await page.locator('.city-block').first().waitFor({ state: 'visible', timeout: 20_000 })
+      await page.waitForTimeout(600)
+      await page.screenshot({
+        path: `test-results/screens/plan-manual-${width}.png`,
+        fullPage: false
+      })
+    })
+
     test(`截图 drawer-guide @${width}`, async ({ page }) => {
       await page.goto('/')
       await page.locator('.map-canvas canvas').waitFor({ state: 'visible', timeout: 20_000 })

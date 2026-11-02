@@ -1083,6 +1083,7 @@ Idempotency-Key: <uuid>
 - 保存成功即点亮地图（`YELLOW`），返回 `countryStatusAfter` 供前端直接刷新
 - `MANUAL` 景点总数 > 30 → `2006`，整单拒绝
 - 同一天里 `spots` 的 `sortOrder` 按数组顺序写入
+- **手动规划复用本接口**：前端不调用 AI，`guides=[]`、`preparations` 为空、景点 `source=MANUAL`；保存不消耗额度，每天允许 0 个景点，归组与地图点亮规则与 AI 行程一致
 
 **错误**：`2001`（参数错误或旅行的国家与行程不一致）、`2002`、`2006`、`2015`（`tripId` 不属于本人）
 
