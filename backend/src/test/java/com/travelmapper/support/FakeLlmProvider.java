@@ -19,10 +19,31 @@ public class FakeLlmProvider implements LlmProvider {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AtomicInteger calls = new AtomicInteger();
     private final AtomicInteger prepCounter = new AtomicInteger();
+    private final AtomicInteger guideCalls = new AtomicInteger();
     private volatile boolean failFirst;
     private volatile boolean alwaysFail;
     private volatile boolean invalidMultiCity;
     private volatile boolean failPolish;
+    private volatile boolean failGuide;
+    private volatile boolean failGuideAfterOutput;
+    private volatile String guideOutput = DEFAULT_GUIDE;
+
+    public static final String DEFAULT_GUIDE = """
+            ## 国家介绍
+            日本是位于东亚的岛国，四季分明，适合城市漫游与美食旅行。
+
+            ## 推荐景点
+            - 富士山：日本象征，适合远眺与登山
+            - 清水寺：古都文化与红叶名胜
+            - 浅草寺：感受下町风情
+
+            ## 旅游须知
+            - 签证：需提前办理签证
+            - 货币：日元，现金仍较常用
+            - 插头：A 型插头，100V
+            - 最佳季节：春秋两季
+            - 提示：地铁高峰较为拥挤
+            """;
 
     @Override
     public String providerName() {
@@ -83,13 +104,36 @@ public class FakeLlmProvider implements LlmProvider {
         }
     }
 
+    @Override
+    public void guideStream(String countryName, String countryCode,
+                            Consumer<String> onDelta, BooleanSupplier cancelled) {
+        guideCalls.incrementAndGet();
+        if (failGuide) {
+            throw new BusinessException(ErrorCode.AI_UNAVAILABLE);
+        }
+        String output = guideOutput;
+        for (int i = 0; i < output.length(); i += 6) {
+            if (cancelled.getAsBoolean()) {
+                return;
+            }
+            onDelta.accept(output.substring(i, Math.min(output.length(), i + 6)));
+        }
+        if (failGuideAfterOutput) {
+            throw new BusinessException(ErrorCode.AI_UNAVAILABLE);
+        }
+    }
+
     public void reset() {
         calls.set(0);
         prepCounter.set(0);
+        guideCalls.set(0);
         failFirst = false;
         alwaysFail = false;
         invalidMultiCity = false;
         failPolish = false;
+        failGuide = false;
+        failGuideAfterOutput = false;
+        guideOutput = DEFAULT_GUIDE;
     }
 
     public void setFailFirst(boolean failFirst) {
@@ -108,11 +152,27 @@ public class FakeLlmProvider implements LlmProvider {
         this.failPolish = failPolish;
     }
 
+    public void setFailGuide(boolean failGuide) {
+        this.failGuide = failGuide;
+    }
+
+    public void setFailGuideAfterOutput(boolean failGuideAfterOutput) {
+        this.failGuideAfterOutput = failGuideAfterOutput;
+    }
+
+    public void setGuideOutput(String guideOutput) {
+        this.guideOutput = guideOutput == null ? "" : guideOutput;
+    }
+
     public int calls() {
         return calls.get();
     }
 
     public int prepCounter() {
         return prepCounter.get();
+    }
+
+    public int guideCalls() {
+        return guideCalls.get();
     }
 }

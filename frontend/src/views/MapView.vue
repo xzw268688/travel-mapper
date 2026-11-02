@@ -4,10 +4,12 @@ import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { getCountries } from '../api/catalog'
+import { countryGuideStream, getCachedGuide, type CountryGuide } from '../api/guide'
 import { getCountryDrawer, getMapStats } from '../api/map'
 import { getTimeline, updateTripStatus, type TripTimelineItem } from '../api/trips'
 import type { Country, CountryDrawer, CountryStat } from '../api/types'
 import { useMapStore } from '../stores/map'
+import { newRequestId } from '../utils/uuid'
 import worldNamesZh from '../assets/world-names-zh.json'
 
 const router = useRouter()
@@ -24,6 +26,11 @@ const loading = ref(false)
 const viewMode = ref<'map' | 'timeline'>('map')
 const timeline = ref<TripTimelineItem[]>([])
 const timelineLoading = ref(false)
+const guide = ref<CountryGuide | null>(null)
+const guideLoading = ref(false)
+const guideStreamText = ref('')
+const guideError = ref('')
+let guideController: AbortController | null = null
 
 // 默认使用本地 GeoJSON，避免依赖外部 CDN；生产环境仍需按 SRS 7.3 确认底图来源与审图号。
 const WORLD_GEO_URL = import.meta.env.VITE_WORLD_GEO_URL || '/world.json'
@@ -267,8 +274,74 @@ async function openCountry(code: string): Promise<void> {
   try {
     drawer.value = await getCountryDrawer(code)
     drawerVisible.value = true
+    resetGuideState()
+    await loadCachedGuide(code)
   } catch (error) {
     ElMessage.error((error as Error).message || '加载国家详情失败')
+  }
+}
+
+function resetGuideState(): void {
+  guideController?.abort()
+  guideController = null
+  guide.value = null
+  guideLoading.value = false
+  guideStreamText.value = ''
+  guideError.value = ''
+}
+
+async function loadCachedGuide(code: string): Promise<void> {
+  try {
+    const cached = await getCachedGuide(code)
+    if (drawer.value?.countryCode === code) {
+      guide.value = cached.guide
+    }
+  } catch {
+    // 缓存读取失败不影响抽屉其他内容，用户仍可点击生成。
+  }
+}
+
+async function generateGuide(): Promise<void> {
+  if (!drawer.value || guideLoading.value) return
+  const code = drawer.value.countryCode
+  guideController?.abort()
+  const controller = new AbortController()
+  guideController = controller
+  guideLoading.value = true
+  guideError.value = ''
+  guideStreamText.value = ''
+  guide.value = null
+  try {
+    await countryGuideStream(
+      newRequestId(),
+      code,
+      {
+        onDelta: (delta) => {
+          if (drawer.value?.countryCode === code) {
+            guideStreamText.value += delta
+          }
+        },
+        onDone: (result) => {
+          if (drawer.value?.countryCode !== code) return
+          guide.value = result
+          guideStreamText.value = ''
+        },
+        onError: (message) => {
+          if (drawer.value?.countryCode === code) {
+            guideError.value = message
+          }
+        }
+      },
+      controller.signal
+    )
+  } catch (error) {
+    if ((error as Error).name !== 'AbortError') {
+      guideError.value = (error as Error).message || '生成国家攻略失败'
+    }
+  } finally {
+    if (drawer.value?.countryCode === code) {
+      guideLoading.value = false
+    }
   }
 }
 
@@ -288,6 +361,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeChart)
   window.removeEventListener('resize', syncDrawerSize)
+  guideController?.abort()
   chart?.dispose()
   chart = null
 })
@@ -394,6 +468,70 @@ onBeforeUnmount(() => {
             style="margin-top: 8px"
             :title="`部分花费未计入：${drawer.summary.unconfiguredCurrencies.join('、')}`"
           />
+        </div>
+
+        <div class="drawer-section guide-section">
+          <div class="guide-head">
+            <div class="trip-title">AI 国家攻略</div>
+            <el-button
+              v-if="!guide && !guideLoading"
+              type="primary"
+              size="small"
+              plain
+              @click="generateGuide"
+            >
+              {{ guideError ? '重试生成' : '生成攻略' }}
+            </el-button>
+          </div>
+          <div v-if="!guide && !guideLoading && !guideError" class="meta">
+            点击生成国家介绍、推荐景点与旅游须知；一次消耗 1 次 AI 额度，结果缓存 24 小时。
+          </div>
+          <div v-if="guideLoading" class="guide-streaming">
+            <div class="meta">正在生成，请稍候…</div>
+            <pre class="guide-stream-text">{{ guideStreamText || '…' }}</pre>
+          </div>
+          <el-alert
+            v-if="guideError"
+            type="error"
+            :closable="false"
+            show-icon
+            :title="guideError"
+            style="margin-top: 8px"
+          />
+          <div v-if="guide && !guideLoading" class="guide-content">
+            <div class="guide-block">
+              <div class="guide-block-title">国家介绍</div>
+              <p class="guide-intro">{{ guide.intro }}</p>
+            </div>
+            <div v-if="guide.attractions.length > 0" class="guide-block">
+              <div class="guide-block-title">推荐景点</div>
+              <div v-for="item in guide.attractions" :key="item.name" class="guide-attraction">
+                <strong>{{ item.name }}</strong>
+                <span v-if="item.description">：{{ item.description }}</span>
+              </div>
+            </div>
+            <div class="guide-block">
+              <div class="guide-block-title">旅游须知</div>
+              <div v-if="guide.notice.visa" class="guide-notice-row">
+                <span>签证</span><em>{{ guide.notice.visa }}</em>
+              </div>
+              <div v-if="guide.notice.currency" class="guide-notice-row">
+                <span>货币</span><em>{{ guide.notice.currency }}</em>
+              </div>
+              <div v-if="guide.notice.powerPlug" class="guide-notice-row">
+                <span>插头</span><em>{{ guide.notice.powerPlug }}</em>
+              </div>
+              <div v-if="guide.notice.bestSeason" class="guide-notice-row">
+                <span>最佳季节</span><em>{{ guide.notice.bestSeason }}</em>
+              </div>
+              <ul v-if="guide.notice.notes.length > 0" class="guide-notes">
+                <li v-for="note in guide.notice.notes" :key="note">{{ note }}</li>
+              </ul>
+            </div>
+            <div class="meta">
+              {{ guide.cached ? '来自 24 小时国家缓存，未消耗额度' : '本次消耗 1 次 AI 额度' }}
+            </div>
+          </div>
         </div>
 
         <div class="drawer-section">

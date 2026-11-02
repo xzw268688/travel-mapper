@@ -88,7 +88,8 @@ class ItineraryGenerationIntegrationTest extends AuthTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.days.length()").value(3))
                 .andExpect(jsonPath("$.data.guides.length()").value(3))
-                .andExpect(jsonPath("$.data.preparations.visa").value("visa-1"))
+                .andExpect(jsonPath("$.data.preparations.visa").value(""))
+                .andExpect(jsonPath("$.data.preparations.notes.length()").value(0))
                 .andExpect(jsonPath("$.data.quota.source").value("FREE"))
                 .andExpect(jsonPath("$.data.quota.freeUsedToday").value(1))
                 .andExpect(jsonPath("$.data.deduplicated").value(false))
@@ -199,13 +200,13 @@ class ItineraryGenerationIntegrationTest extends AuthTestSupport {
     }
 
     @Test
-    void preparationsAndGuidesCachesAreReusedAcrossUsers() throws Exception {
+    void guidesCachesAreReusedAcrossUsersWithoutPreparations() throws Exception {
         User first = createVerifiedUser("gencache1");
         mockMvc.perform(withToken(post("/api/itinerary/generate"), first)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(UUID.randomUUID().toString(), "JP", List.of("TYO", "OSA"), 3, "美食")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.preparations.visa").value("visa-1"));
+                .andExpect(jsonPath("$.data.preparations.visa").value(""));
         assertThat(fakeSearch.calls()).isEqualTo(1);
 
         User second = createVerifiedUser("gencache2");
@@ -213,7 +214,7 @@ class ItineraryGenerationIntegrationTest extends AuthTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(UUID.randomUUID().toString(), "JP", List.of("TYO", "OSA"), 5, "美食")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.preparations.visa").value("visa-1"));
+                .andExpect(jsonPath("$.data.preparations.visa").value(""));
         assertThat(fakeLlm.calls()).isEqualTo(2);
         assertThat(fakeSearch.calls()).isEqualTo(2);
 
@@ -222,10 +223,11 @@ class ItineraryGenerationIntegrationTest extends AuthTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(UUID.randomUUID().toString(), "JP", List.of("TYO", "OSA"), 3, "美食")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.preparations.visa").value("visa-1"))
+                .andExpect(jsonPath("$.data.preparations.visa").value(""))
                 .andExpect(jsonPath("$.data.guides.length()").value(3));
         assertThat(fakeLlm.calls()).isEqualTo(3);
         assertThat(fakeSearch.calls()).isEqualTo(2);
+        assertThat(redis.keys("prep:*")).isEmpty();
     }
 
     @Test

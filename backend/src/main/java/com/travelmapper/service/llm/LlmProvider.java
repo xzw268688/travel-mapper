@@ -11,4 +11,7 @@ public interface LlmProvider {
 
     void polishStream(String text, String style, String target,
                       Consumer<String> onDelta, BooleanSupplier cancelled);
+
+    void guideStream(String countryName, String countryCode,
+                     Consumer<String> onDelta, BooleanSupplier cancelled);
 }

@@ -48,6 +48,7 @@ public abstract class AiTestSupport extends AuthTestSupport {
         fakeSearch.reset();
         clearKeys("guides:*");
         clearKeys("prep:*");
+        clearKeys("country-guide:*");
         clearKeys("quota:dedupe:*");
         clearKeys("quota:dedupe:lock:*");
         configService.updateGroup(Map.of(

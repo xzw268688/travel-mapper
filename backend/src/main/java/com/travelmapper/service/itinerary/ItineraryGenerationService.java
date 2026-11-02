@@ -337,15 +337,8 @@ public class ItineraryGenerationService {
                             + "」未被安排，可手动调整或重新生成");
                 }
             }
-            GenerateItineraryResponse.Preparations preparations = parsePreparations(root.path("preparations"));
-            GenerateItineraryResponse.Preparations cached = cachedPreparations(
-                    request.countryCode(), request.cityCodes());
-            if (cached != null) {
-                preparations = cached;
-            } else {
-                cachePreparations(request.countryCode(), request.cityCodes(), preparations);
-            }
-            return new GeneratedPlan(days, preparations, warnings);
+            // 行前准备已迁移到国家攻略能力，行程生成不再解析或缓存该字段。
+            return new GeneratedPlan(days, emptyPreparations(), warnings);
         } catch (InvalidPlanException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -353,47 +346,8 @@ public class ItineraryGenerationService {
         }
     }
 
-    private GenerateItineraryResponse.Preparations parsePreparations(JsonNode node) {
-        List<String> notes = new ArrayList<>();
-        JsonNode notesNode = node.path("notes");
-        if (notesNode.isArray()) {
-            for (JsonNode note : notesNode) {
-                if (notes.size() >= 5) {
-                    break;
-                }
-                String text = note.asText("");
-                if (!text.isBlank()) {
-                    notes.add(text);
-                }
-            }
-        }
-        return new GenerateItineraryResponse.Preparations(
-                node.path("visa").asText(""),
-                node.path("currency").asText(""),
-                node.path("powerPlug").asText(""),
-                node.path("bestSeason").asText(""),
-                notes);
-    }
-
-    private GenerateItineraryResponse.Preparations cachedPreparations(String countryCode,
-                                                                      List<String> cityCodes) {
-        try {
-            String value = redis.opsForValue().get(prepKey(countryCode, cityCodes));
-            return value == null ? null : objectMapper.readValue(
-                    value, GenerateItineraryResponse.Preparations.class);
-        } catch (Exception ex) {
-            return null;
-        }
-    }
-
-    private void cachePreparations(String countryCode, List<String> cityCodes,
-                                   GenerateItineraryResponse.Preparations preparations) {
-        try {
-            redis.opsForValue().set(prepKey(countryCode, cityCodes),
-                    objectMapper.writeValueAsString(preparations), Duration.ofHours(24));
-        } catch (Exception ex) {
-            log.warn("failed to cache preparations", ex);
-        }
+    private GenerateItineraryResponse.Preparations emptyPreparations() {
+        return new GenerateItineraryResponse.Preparations("", "", "", "", List.of());
     }
 
     private List<GuideLink> loadGuides(Long userId, NormalizedRequest request) {
@@ -487,12 +441,7 @@ public class ItineraryGenerationService {
         return text.trim();
     }
 
-    private String prepKey(String countryCode, List<String> cityCodes) {
-        List<String> sorted = new ArrayList<>(cityCodes);
-        sorted.sort(String::compareTo);
-        return "prep:" + countryCode + ":" + sha256(String.join(",", sorted));
-    }
-
+    
     private record NormalizedRequest(
             String requestId,
             String countryCode,

@@ -91,6 +91,18 @@ public class HttpLlmProvider implements LlmProvider {
     @Override
     public void polishStream(String text, String style, String target,
                              Consumer<String> onDelta, BooleanSupplier cancelled) {
+        streamChatCompletion(promptBuilder.buildPolishPrompt(text, style, target), onDelta, cancelled);
+    }
+
+    @Override
+    public void guideStream(String countryName, String countryCode,
+                            Consumer<String> onDelta, BooleanSupplier cancelled) {
+        streamChatCompletion(
+                promptBuilder.buildCountryGuidePrompt(countryName, countryCode), onDelta, cancelled);
+    }
+
+    private void streamChatCompletion(String prompt, Consumer<String> onDelta,
+                                      BooleanSupplier cancelled) {
         String baseUrl = configService.get(ConfigKeys.LLM_BASE_URL, "");
         String model = configService.get(ConfigKeys.LLM_MODEL, "");
         String apiKey = configService.get(ConfigKeys.LLM_API_KEY, "");
@@ -100,8 +112,7 @@ public class HttpLlmProvider implements LlmProvider {
         try {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("model", model);
-            body.put("messages", List.of(Map.of("role", "user",
-                    "content", promptBuilder.buildPolishPrompt(text, style, target))));
+            body.put("messages", List.of(Map.of("role", "user", "content", prompt)));
             // 同上：交由供应商决定默认温度。
             body.put("stream", true);
             String json = objectMapper.writeValueAsString(body);

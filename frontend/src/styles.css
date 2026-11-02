@@ -353,6 +353,103 @@ nav a.router-link-active {
   margin-top: 4px;
 }
 
+.guide-section {
+  padding: 14px 16px;
+  background: linear-gradient(135deg, var(--tm-brand-soft), var(--tm-surface));
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius);
+}
+
+.guide-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.guide-head .trip-title {
+  margin-bottom: 0;
+}
+
+.guide-streaming {
+  margin-top: 10px;
+}
+
+.guide-stream-text {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--tm-text);
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius-sm);
+}
+
+.guide-content {
+  margin-top: 10px;
+}
+
+.guide-block + .guide-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--tm-border);
+}
+
+.guide-block-title {
+  font-weight: 600;
+  color: var(--tm-brand);
+  margin-bottom: 6px;
+}
+
+.guide-intro {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--tm-text);
+}
+
+.guide-attraction {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--tm-text);
+}
+
+.guide-attraction strong {
+  color: var(--tm-text);
+}
+
+.guide-notice-row {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.guide-notice-row span {
+  flex: 0 0 56px;
+  color: var(--tm-text-muted);
+}
+
+.guide-notice-row em {
+  flex: 1;
+  font-style: normal;
+  color: var(--tm-text);
+}
+
+.guide-notes {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--tm-text-secondary);
+}
+
 .view-switch {
   position: absolute;
   top: 16px;

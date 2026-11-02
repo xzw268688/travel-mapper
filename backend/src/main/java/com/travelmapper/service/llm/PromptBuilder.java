@@ -16,14 +16,13 @@ public class PromptBuilder {
                 偏好：%s
 
                 JSON Schema：
-                {"countryCode":"%s","days":[{"dayIndex":1,"cityCode":"%s","spots":[{"name":"景点名","description":"简述","suggestedDuration":"2小时"}]}],"preparations":{"visa":"签证提示","currency":"货币提示","powerPlug":"插头提示","bestSeason":"最佳季节","notes":["提醒1","提醒2"]}}
+                {"countryCode":"%s","days":[{"dayIndex":1,"cityCode":"%s","spots":[{"name":"景点名","description":"简述","suggestedDuration":"2小时"}]}]}
 
                 要求：
                 1. days 数组长度必须等于 %d，dayIndex 从 1 连续递增。
                 2. 每天 cityCode 必须来自可选城市集合；多城市时按天分配，尽量连续。
                 3. 每天 1-6 个景点，name 必填；description 和 suggestedDuration 可为空字符串。
-                4. preparations 必须包含 visa、currency、powerPlug、bestSeason、notes 五项；notes 为字符串数组，最多 5 条。
-                5. 不要输出 guides；攻略链接由后端搜索填充。
+                4. 不要输出 guides、preparations 或其他额外字段；攻略链接与行前须知由其他接口提供。
                 """.formatted(
                 request.countryName(), request.countryCode(),
                 cities.isBlank() ? request.cityCodes().get(0) : cities,
@@ -32,6 +31,30 @@ public class PromptBuilder {
                 request.countryCode(),
                 request.cityCodes().get(0),
                 request.days());
+    }
+
+    public String buildCountryGuidePrompt(String countryName, String countryCode) {
+        return """
+                你是 TravelMapper 的国家旅行攻略编辑。请用简体中文介绍 %s（%s），并严格按以下 Markdown 结构输出。
+                不要输出任何额外解释、不要使用代码块、不要改变章节标题。
+
+                ## 国家介绍
+                （150-250 字，说明旅行特色、文化氛围与适合人群）
+
+                ## 推荐景点
+                - 景点名：一句话推荐理由
+                - 景点名：一句话推荐理由
+                （共 4-6 条，优先该国最具代表性的地点）
+
+                ## 旅游须知
+                - 签证：签证与入境提示
+                - 货币：货币与支付提示
+                - 插头：电源插头与电压提示
+                - 最佳季节：最佳旅行月份与天气提示
+                - 提示：一条实用提醒（可重复 2-3 条“提示”）
+
+                要求：三个章节必须齐全；推荐景点使用“名称：描述”格式；旅游须知只使用上述标签。
+                """.formatted(countryName, countryCode);
     }
 
     public String buildPolishPrompt(String text, String style, String target) {

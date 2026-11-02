@@ -32,6 +32,13 @@ test('地图 → 国家抽屉 → 打开行程编辑页', async ({ page }) => {
   // 空未归组不再渲染占位文案
   await expect(drawer.getByText('暂无未归组数据')).toHaveCount(0)
 
+  // 国家攻略：无缓存时显示生成入口，有缓存时直接展示内容
+  const guideSection = drawer.locator('.guide-section')
+  await expect(guideSection.getByText('AI 国家攻略')).toBeVisible()
+  await expect(
+    guideSection.getByRole('button', { name: '生成攻略' }).or(guideSection.locator('.guide-content'))
+  ).toBeVisible()
+
   await drawer.locator('.archive-card').first().click()
   await expect(page).toHaveURL(/\/trips\/\d+$/)
 

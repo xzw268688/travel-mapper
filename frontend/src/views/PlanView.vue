@@ -58,6 +58,19 @@ const countryName = computed(() =>
   countries.value.find((item) => item.code === country.value)?.nameZh || country.value
 )
 
+// 行程生成不再产出“行前准备”；仅在历史草稿仍有内容时展示，避免空卡片。
+const hasPreparations = computed(() => {
+  const preparations = draft.value?.preparations
+  if (!preparations) return false
+  return Boolean(
+    preparations.visa ||
+      preparations.currency ||
+      preparations.powerPlug ||
+      preparations.bestSeason ||
+      (preparations.notes && preparations.notes.length > 0)
+  )
+})
+
 onMounted(async () => {
   try {
     countries.value = await getCountries()
@@ -588,7 +601,7 @@ function openSearch(): void {
       style="margin-top: 16px"
     />
 
-    <el-card v-if="draft" style="margin-top: 16px">
+    <el-card v-if="draft && hasPreparations" style="margin-top: 16px">
       <template #header><div class="trip-title">行前准备</div></template>
       <div class="meta">仅供参考，请以官方最新政策为准。</div>
       <div style="margin-top: 8px">

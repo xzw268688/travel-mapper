@@ -13,7 +13,7 @@
 2. 错误码
 3. 认证与账号 `/auth`、`/user`
 4. 国家、城市与旅行 `/countries`、`/cities`、`/trips`
-5. 地图 `/map`
+5. 地图与攻略 `/map`、`/country-guide`
 6. 行程与 AI `/itinerary`、`/ai`
 7. 行前准备 `/prep`
 8. 上传 `/upload`
@@ -804,6 +804,81 @@ Idempotency-Key: <uuid>
 
 ---
 
+### 5.3 国家攻略（AI 流式）
+
+国家抽屉的「AI 国家攻略」包含国家介绍、推荐景点、旅游须知三块内容。攻略按国家全局缓存 24 小时：缓存命中不扣额度、不调用 LLM；缓存未命中时点击生成才扣 1 次 AI 额度。
+
+#### 5.3.1 读取缓存
+
+`GET /country-guide/{countryCode}` ｜ 需鉴权 ｜ **不消耗额度**
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "available": true,
+    "guide": {
+      "countryCode": "JP",
+      "countryName": "日本",
+      "intro": "日本是位于东亚的岛国……",
+      "attractions": [
+        { "name": "富士山", "description": "日本象征，适合远眺与登山" }
+      ],
+      "notice": {
+        "visa": "中国大陆普通护照通常需提前办理日本签证",
+        "currency": "使用日元（JPY），大城市普遍支持信用卡",
+        "powerPlug": "多为 A 型两脚扁插，电压 100V",
+        "bestSeason": "3—5 月和 9—11 月较舒适",
+        "notes": ["樱花季住宿紧张，建议提前预订"]
+      },
+      "cached": true
+    }
+  }
+}
+```
+
+| 字段 | 规则 |
+|---|---|
+| `available` | 是否存在 24 小时内的国家级缓存 |
+| `guide` | 无缓存时为 `null`；有缓存时 `cached=true` |
+| 国家校验 | 国家不存在或已停用返回 `2002` |
+
+#### 5.3.2 生成攻略（SSE）
+
+`POST /country-guide/stream` ｜ 需鉴权 ｜ **缓存未命中时消耗 1 次 AI 额度**
+
+**请求**
+
+```json
+{
+  "requestId": "5f1c9e2a-3b7d-4c8e-9a10-2b3c4d5e6f70",
+  "countryCode": "JP"
+}
+```
+
+**SSE 事件**
+
+| 事件 | data | 说明 |
+|---|---|---|
+| `meta` | `{"requestId":"…","quotaSource":"FREE","cached":false}` | 建立流时发送；缓存命中为 `quotaSource=CACHE`、`cached=true` |
+| `delta` | `{"delta":"…"}` | 模型文本增量，前端按序拼接展示 |
+| `done` | `{"requestId":"…","cached":false,"guide":{…}}` | 结束事件，携带解析后的完整结构化攻略 |
+| `error` | `{"code":2012,"message":"…"}` | 失败；未输出任何 `delta` 时额度已自动退回 |
+
+**关键说明**
+
+- **一次生成三块内容**：国家介绍、推荐景点、旅游须知只扣 1 次额度。
+- **24 小时国家缓存**：缓存对所有用户共享；第二个人打开同一国家直接返回缓存，不扣费、不调用 LLM。
+- **并发保护**：同一国家正在生成时，后到请求返回 `3001`「该国攻略正在生成，请稍后重试」，不扣额度。
+- **退款边界**：未输出任何 `delta` 即失败/断连 → 退回；已输出部分内容后失败/断连 → 不退回。
+- **超时**：LLM 流式调用 120 秒，SSE 连接 130 秒。
+- **错误**：`2001`（参数非法）、`2002`（国家不存在/停用）、`2011`（额度耗尽）、`2012`（AI 不可用）、`3001`（同国生成中）。
+
+---
+
 ## 6. 行程与 AI
 
 ### 6.1 AI 生成行程
@@ -863,11 +938,11 @@ Idempotency-Key: <uuid>
       { "title": "东京 5 日游攻略", "url": "https://example.com/tokyo", "source": "example.com" }
     ],
     "preparations": {
-      "visa": "中国公民赴日旅游通常需办理签证，建议提前 1–2 个月准备",
-      "currency": "日元 JPY，建议提前兑换少量现金",
-      "powerPlug": "日本电压 100V，两脚扁插，建议带转换头",
-      "bestSeason": "春季樱花季和秋季红叶季最佳",
-      "notes": ["建议购买旅行保险", "下载离线地图和翻译 App"]
+      "visa": "",
+      "currency": "",
+      "powerPlug": "",
+      "bestSeason": "",
+      "notes": []
     },
     "warnings": [],
     "deduplicated": false,
@@ -897,7 +972,7 @@ Idempotency-Key: <uuid>
   `["多城市生成不稳定，已按单城市（东京）生成，可重新调整或分城市生成"]`
 - **城市未覆盖提示**：某所选城市未分配到任何一天时，`warnings` 追加
   `["城市「大阪」未被安排，可手动调整或重新生成"]`
-- **preparations 缓存**：命中国家+城市缓存时仍正常扣 1 次额度（用户拿到的是新行程）
+- **preparations 已下线**：行程生成不再产出或缓存行前准备，响应中的 `preparations` 字段保留兼容但五项恒为空；签证、货币、插头、最佳季节与旅行提示改由 5.3「国家攻略」提供。历史行程详情仍返回库中已保存的旧内容。
 
 **错误**：`2011`（额度耗尽）、`2012`（AI 不可用，额度已自动退回）、`2002`（城市非法/停用）、`2001`
 
@@ -2789,7 +2864,30 @@ event: error
 data: {"code":2012,"message":"AI 服务不可用，本次额度已退回"}
 ```
 
-### 13.2 事件类型汇总
+### 13.2 国家攻略流
+
+`POST /country-guide/stream` ｜ 需鉴权 ｜ **缓存未命中时消耗 1 次 AI 额度**
+
+请求体只需 `requestId` 与 `countryCode`。事件顺序与润色一致，差异在于 `meta` 额外包含 `cached`，`done` 携带结构化攻略：
+
+```
+event: meta
+data: {"requestId":"a1b2...","quotaSource":"FREE","cached":false}
+
+event: delta
+data: {"delta":"## 国家介绍\n"}
+
+event: done
+data: {"requestId":"a1b2...","cached":false,"guide":{"countryCode":"JP","intro":"…","attractions":[],"notice":{},"cached":false}}
+```
+
+- 缓存命中时只发送 `meta`（`quotaSource=CACHE`、`cached=true`）与 `done`（完整 `guide`），不扣额度。
+- 未输出任何 `delta` 即失败时退回额度；已输出部分内容后失败不退回。
+- 无法取消；关闭抽屉会中断连接，服务端按上述退款规则处理。
+
+Nginx 需同样对 `/api/country-guide/stream` 关闭缓冲，读超时建议 130 秒。
+
+### 13.3 事件类型汇总
 
 | event | 出现次数 | 说明 |
 |---|---|---|
@@ -2799,7 +2897,7 @@ data: {"code":2012,"message":"AI 服务不可用，本次额度已退回"}
 | `cancelled` | 0 或 1 | 用户主动取消，**不退额度** |
 | `error` | 0 或 1 | 异常结束；按规则退回额度 |
 
-### 13.3 前端处理要点
+### 13.4 前端处理要点
 
 - 用 `fetch` + `ReadableStream`，**不要**用 `EventSource`（无法带 `Authorization` 头、无法 POST）
 - 按 `\n\n` 切分事件，按 `event:` / `data:` 解析
@@ -2958,6 +3056,8 @@ location /api/ai/polish/stream {
 | 旅行 | DELETE | `/trips/{id}` | 是 | — |
 | 地图 | GET | `/map/stats` | 是 | — |
 | 地图 | GET | `/map/country/{countryCode}` | 是 | — |
+| 攻略 | GET | `/country-guide/{countryCode}` | 是 | — |
+| 攻略 | POST | `/country-guide/stream` | 是 | 缓存未命中 **1 次** |
 | 行程 | POST | `/itinerary/generate` | 是 | **1 次** |
 | 行程 | POST | `/ai/cancel` | 是 | — |
 | 行程 | POST | `/itinerary/save` | 是 | — |
