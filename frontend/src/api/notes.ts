@@ -9,6 +9,7 @@ export interface NoteCreate {
   title: string
   content: string
   images: string[]
+  videos: string[]
   coverImage: string | null
   countryCode: string
   cityCode: string
@@ -22,6 +23,7 @@ export interface NoteResponse {
   title: string
   content: string
   images: NoteImage[]
+  videos: NoteImage[]
   coverImage: string | null
   countryCode: string
   countryName: string
@@ -67,25 +69,37 @@ export interface PresignResponse {
   expireAt: string
 }
 
-export function presignUpload(contentType: string, size: number): Promise<PresignResponse> {
-  return apiPost<PresignResponse>('/upload/presign', {
-    bizType: 'NOTE_IMAGE',
-    contentType,
-    size
-  })
+export function presignUpload(
+  bizType: 'NOTE_IMAGE' | 'NOTE_VIDEO',
+  contentType: string,
+  size: number
+): Promise<PresignResponse> {
+  return apiPost<PresignResponse>('/upload/presign', { bizType, contentType, size })
 }
 
-export async function uploadImage(file: File): Promise<string> {
-  const presigned = await presignUpload(file.type, file.size)
+async function uploadFile(
+  file: File,
+  bizType: 'NOTE_IMAGE' | 'NOTE_VIDEO',
+  label: string
+): Promise<string> {
+  const presigned = await presignUpload(bizType, file.type, file.size)
   const response = await fetch(presigned.uploadUrl, {
     method: presigned.method || 'PUT',
     headers: presigned.headers,
     body: file
   })
   if (!response.ok) {
-    throw new Error('图片上传失败')
+    throw new Error(`${label}上传失败`)
   }
   return presigned.objectKey
+}
+
+export function uploadImage(file: File): Promise<string> {
+  return uploadFile(file, 'NOTE_IMAGE', '图片')
+}
+
+export function uploadVideo(file: File): Promise<string> {
+  return uploadFile(file, 'NOTE_VIDEO', '视频')
 }
 
 export function createNote(body: NoteCreate): Promise<{ id: number; tripId: number | null; tripInherited: boolean; countryStatusAfter: string }> {

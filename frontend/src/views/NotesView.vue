@@ -14,6 +14,7 @@ const title = ref('')
 const content = ref('')
 const visibility = ref<'PRIVATE' | 'SHARED'>('PRIVATE')
 const images = ref<string[]>([])
+const videos = ref<string[]>([])
 const cover = ref<string | null>(null)
 const saving = ref(false)
 const openId = ref('')
@@ -39,6 +40,12 @@ function addImage(objectKey: string): void {
   }
 }
 
+function addVideo(objectKey: string): void {
+  if (!videos.value.includes(objectKey)) {
+    videos.value.push(objectKey)
+  }
+}
+
 async function save(): Promise<void> {
   if (!country.value || !city.value || !title.value.trim()) {
     ElMessage.warning('请填写国家、城市和标题')
@@ -54,6 +61,7 @@ async function save(): Promise<void> {
       title: title.value,
       content: content.value,
       images: images.value,
+      videos: videos.value,
       coverImage: cover.value || images.value[0] || null,
       countryCode: country.value,
       cityCode: city.value,
@@ -106,11 +114,13 @@ function openNote(): void {
       <RichTextEditor
         v-model="content"
         :max-images="20"
+        :max-videos="3"
         @image-uploaded="addImage"
+        @video-uploaded="addVideo"
         @error="(message: string) => ElMessage.error(message)"
       />
       <div class="meta" style="margin-top: 8px">
-        已上传 {{ images.length }}/20 张；单图 ≤5MB；支持粘贴或拖拽图片，前端压缩并移除 EXIF。
+        图片 {{ images.length }}/20 张（单图 ≤5MB，自动压缩并移除 EXIF）；视频 {{ videos.length }}/3 个（mp4/webm，单个 ≤100MB）。
       </div>
       <el-radio-group v-if="images.length" v-model="cover" class="cover-list">
         <div v-for="(key, index) in images" :key="key" class="cover-item">

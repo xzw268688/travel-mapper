@@ -12,6 +12,8 @@ import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -53,9 +55,27 @@ public class StorageCleanupService {
         return deleted;
     }
 
+    private static final Pattern OBJECT_REFERENCE =
+            Pattern.compile("/objects/([^\"'\\s<>]+)");
+
     private Set<String> referencedObjects() {
         Set<String> keys = new HashSet<>();
-        for (String json : travelNoteMapper.selectReferencedImageJson()) {
+        collectJsonKeys(keys, travelNoteMapper.selectReferencedImageJson(), "images_json");
+        collectJsonKeys(keys, travelNoteMapper.selectReferencedVideoJson(), "videos_json");
+        for (String content : travelNoteMapper.selectReferencedContent()) {
+            if (content == null || content.isBlank()) {
+                continue;
+            }
+            Matcher matcher = OBJECT_REFERENCE.matcher(content);
+            while (matcher.find()) {
+                keys.add(matcher.group(1));
+            }
+        }
+        return keys;
+    }
+
+    private void collectJsonKeys(Set<String> keys, List<String> jsonValues, String column) {
+        for (String json : jsonValues) {
             if (json == null || json.isBlank()) {
                 continue;
             }
@@ -63,9 +83,8 @@ public class StorageCleanupService {
                 keys.addAll(objectMapper.readValue(json, new TypeReference<List<String>>() {
                 }));
             } catch (Exception ex) {
-                log.warn("failed to parse travel_note.images_json", ex);
+                log.warn("failed to parse travel_note.{}", column, ex);
             }
         }
-        return keys;
     }
 }

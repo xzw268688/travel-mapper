@@ -157,6 +157,85 @@ test('游记创建、分享与海报下载', async ({ page }) => {
   await expect(page).toHaveURL(/\/notes$/)
 })
 
+test('编辑器内选中文本流式润色并替换', async ({ page }) => {
+  await page.goto('/notes')
+  const editor = page.locator('.rich-editor-content').first()
+  await editor.click()
+  await page.keyboard.type('这是需要润色的原文')
+  await page.keyboard.press('Control+A')
+
+  let requestBody = ''
+  await page.route('**/api/ai/polish/stream', async (route) => {
+    requestBody = route.request().postData() || ''
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body:
+        'event: meta\ndata: {"requestId":"e2e","quotaSource":"FREE"}\n\n' +
+        'event: delta\ndata: {"delta":"这是润色后的"}\n\n' +
+        'event: delta\ndata: {"delta":"文本"}\n\n' +
+        'event: done\ndata: {"requestId":"e2e","totalChars":8}\n\n'
+    })
+  })
+
+  await page.locator('.rich-editor-toolbar').getByRole('button', { name: 'AI 润色' }).click()
+  await expect(editor).toContainText('这是润色后的文本')
+  await expect(page.getByText('润色完成，已替换选中文本')).toBeVisible()
+  expect(JSON.parse(requestBody).target).toBe('selected')
+})
+
+test('编辑器润色取消不修改正文', async ({ page }) => {
+  await page.goto('/notes')
+  const editor = page.locator('.rich-editor-content').first()
+  await editor.click()
+  await page.keyboard.type('取消测试的原文')
+  await page.keyboard.press('Control+A')
+
+  await page.route('**/api/ai/polish/stream', () => {
+    // 保持请求挂起，等待用户取消
+  })
+  await page.route('**/api/ai/cancel', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '{"code":0,"message":"ok","data":null}'
+    })
+  )
+
+  await page.locator('.rich-editor-toolbar').getByRole('button', { name: 'AI 润色' }).click()
+  await page.getByRole('button', { name: '取消润色' }).click()
+  await expect(editor).toContainText('取消测试的原文')
+  await expect(page.getByText('已取消（不退回额度）')).toBeVisible()
+})
+
+test('游记视频上传、保存与播放', async ({ page }) => {
+  const title = `E2E 视频游记 ${Date.now()}`
+  await page.goto('/notes')
+  await page.getByPlaceholder('标题').fill(title)
+  await page.locator('.selector-row .el-select').nth(1).click()
+  await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '东京' }).first().click()
+
+  const editor = page.locator('.rich-editor-content').first()
+  await editor.click()
+  await page.keyboard.type('带视频的游记正文')
+
+  await page.locator('input[type="file"][accept*="video"]').setInputFiles({
+    name: 'e2e.mp4',
+    mimeType: 'video/mp4',
+    buffer: Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109])
+  })
+  await expect(editor.locator('video')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('视频 1/3')).toBeVisible()
+
+  await page.getByRole('button', { name: '保存并查看详情' }).click()
+  await expect(page).toHaveURL(/\/notes\/\d+$/)
+  await expect(page.locator('.note-video')).toBeVisible({ timeout: 20_000 })
+
+  await page.getByRole('button', { name: '删除' }).click()
+  await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+  await expect(page).toHaveURL(/\/notes$/)
+})
+
 test('公开分享页无需登录即可访问', async ({ browser }) => {
   const context = await browser.newContext({ baseURL: 'http://localhost:5173' })
   const page = await context.newPage()

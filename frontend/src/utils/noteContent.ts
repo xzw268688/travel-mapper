@@ -26,14 +26,14 @@ export function contentToPreview(html: string, urlByKey: Record<string, string>)
     return ''
   }
   const doc = new DOMParser().parseFromString(html, 'text/html')
-  doc.querySelectorAll('img').forEach((img) => {
-    const key = imageKeyFromSrc(img.getAttribute('src') || '')
+  doc.querySelectorAll('img, video').forEach((media) => {
+    const key = imageKeyFromSrc(media.getAttribute('src') || '')
     if (key) {
       const url = urlByKey[key]
       if (url) {
-        img.setAttribute('src', url)
+        media.setAttribute('src', url)
       } else {
-        img.removeAttribute('src')
+        media.removeAttribute('src')
       }
     }
   })
@@ -49,11 +49,11 @@ export function previewToContent(html: string, keyByUrl: Record<string, string>)
     return ''
   }
   const doc = new DOMParser().parseFromString(html, 'text/html')
-  doc.querySelectorAll('img').forEach((img) => {
-    const src = img.getAttribute('src') || ''
+  doc.querySelectorAll('img, video').forEach((media) => {
+    const src = media.getAttribute('src') || ''
     const key = keyByUrl[src]
     if (key) {
-      img.setAttribute('src', imageStorageSrc(key))
+      media.setAttribute('src', imageStorageSrc(key))
     }
   })
   return doc.body.innerHTML
@@ -65,5 +65,8 @@ export function hasContent(html: string): boolean {
     return false
   }
   const doc = new DOMParser().parseFromString(html, 'text/html')
-  return Boolean(doc.body.textContent?.trim()) || doc.querySelectorAll('img').length > 0
+  return (
+    Boolean(doc.body.textContent?.trim()) ||
+    doc.querySelectorAll('img, video').length > 0
+  )
 }

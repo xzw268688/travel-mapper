@@ -20,8 +20,13 @@ public class StorageUrlService {
     }
 
     public StorageProvider.PresignedUpload presignUpload(String objectKey, String contentType) {
-        return holder.get().presignUpload(objectKey, contentType,
+        return presignUpload(objectKey, contentType,
                 properties.getStorage().getUploadTtlSeconds());
+    }
+
+    public StorageProvider.PresignedUpload presignUpload(String objectKey, String contentType,
+                                                         long ttlSeconds) {
+        return holder.get().presignUpload(objectKey, contentType, ttlSeconds);
     }
 
     public String presignDownload(String objectKey) {

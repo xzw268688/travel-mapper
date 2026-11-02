@@ -42,6 +42,10 @@ public enum ErrorCode {
     CONTENT_TAKEDOWN(2024, "内容已下架，不可操作", 403),
     CITY_REFERENCED(2025, "城市已被引用，不能物理删除", 409),
     OFFICIAL_LINK_LIMIT(2026, "该国官方链接已达上限", 400),
+    MEDIA_OBJECT_INVALID(2027, "媒体对象无效或不属于当前用户", 400),
+    VIDEO_COUNT_LIMIT(2028, "视频数量超限", 400),
+    VIDEO_SIZE_LIMIT(2029, "单个视频超限", 400),
+    VIDEO_TYPE_UNSUPPORTED(2030, "不支持的视频类型", 400),
 
     DUPLICATE_REQUEST(3001, "重复请求 / 相同请求正在处理", 409),
     CONCURRENT_CONFLICT(3002, "并发操作冲突", 409),

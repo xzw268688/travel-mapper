@@ -31,6 +31,7 @@ const editTitle = ref('')
 const editContent = ref('')
 const editVisibility = ref<'PRIVATE' | 'SHARED'>('PRIVATE')
 const editImages = ref<string[]>([])
+const editVideos = ref<string[]>([])
 const editCover = ref<string | null>(null)
 
 const imageUrlByKey = computed<Record<string, string>>(() => {
@@ -43,8 +44,18 @@ const imageUrlByKey = computed<Record<string, string>>(() => {
   return map
 })
 
+const mediaUrlByKey = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = { ...imageUrlByKey.value }
+  note.value?.videos.forEach((video) => {
+    if (video.url) {
+      map[video.objectKey] = video.url
+    }
+  })
+  return map
+})
+
 const renderedContent = computed(() =>
-  note.value ? contentToPreview(note.value.content, imageUrlByKey.value) : ''
+  note.value ? contentToPreview(note.value.content, mediaUrlByKey.value) : ''
 )
 
 const shareUrl = computed(() => {
@@ -74,6 +85,7 @@ function startEdit(): void {
   editContent.value = note.value.content
   editVisibility.value = note.value.visibility === 'SHARED' ? 'SHARED' : 'PRIVATE'
   editImages.value = note.value.images.map((image) => image.objectKey)
+  editVideos.value = (note.value.videos || []).map((video) => video.objectKey)
   editCover.value = note.value.coverImage
   editing.value = true
 }
@@ -88,6 +100,12 @@ function onImageUploaded(objectKey: string): void {
   }
   if (!editCover.value) {
     editCover.value = objectKey
+  }
+}
+
+function onVideoUploaded(objectKey: string): void {
+  if (!editVideos.value.includes(objectKey)) {
+    editVideos.value.push(objectKey)
   }
 }
 
@@ -109,6 +127,7 @@ async function saveEdit(): Promise<void> {
       title: editTitle.value,
       content: editContent.value,
       images: editImages.value,
+      videos: editVideos.value,
       coverImage: editCover.value,
       visibility: editVisibility.value
     })
@@ -275,9 +294,11 @@ function formatDate(value: string | null): string {
           </div>
           <RichTextEditor
             v-model="editContent"
-            :image-urls="imageUrlByKey"
+            :image-urls="mediaUrlByKey"
             :max-images="20"
+            :max-videos="3"
             @image-uploaded="onImageUploaded"
+            @video-uploaded="onVideoUploaded"
             @error="(message: string) => ElMessage.error(message)"
           />
           <div v-if="editImages.length" style="margin-top: 12px">
@@ -299,6 +320,17 @@ function formatDate(value: string | null): string {
 
         <template v-else>
           <article class="note-content" v-html="renderedContent" />
+          <div v-if="note.videos.length" class="note-videos">
+            <video
+              v-for="video in note.videos"
+              :key="video.objectKey"
+              :src="video.url || ''"
+              controls
+              preload="metadata"
+              playsinline
+              class="note-video"
+            />
+          </div>
           <div v-if="note.images.length" class="cover-list" style="margin-top: 16px">
             <el-image
               v-for="image in note.images"
@@ -369,6 +401,29 @@ function formatDate(value: string | null): string {
   padding-left: 12px;
   border-left: 3px solid #c0c4cc;
   color: #606266;
+}
+
+.note-content :deep(video) {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  margin: 8px 0;
+  border-radius: 6px;
+  background: #000;
+}
+
+.note-videos {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.note-video {
+  width: 100%;
+  max-height: 420px;
+  border-radius: 6px;
+  background: #000;
 }
 
 .cover-list {

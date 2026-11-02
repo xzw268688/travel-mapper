@@ -21,6 +21,7 @@ public final class NoteDtos {
         @NotBlank
         private String content;
         private List<String> images;
+        private List<String> videos;
         private String coverImage;
         @NotBlank
         private String countryCode;
@@ -37,11 +38,15 @@ public final class NoteDtos {
         private String title;
         private String content;
         private List<String> images;
+        private List<String> videos;
         private String coverImage;
         private Visibility visibility;
     }
 
     public record ImageView(String objectKey, String url) {
+    }
+
+    public record VideoView(String objectKey, String url) {
     }
 
     public record ShareState(boolean active, String token, String url, LocalDateTime expireAt) {
@@ -52,6 +57,7 @@ public final class NoteDtos {
             String title,
             String content,
             List<ImageView> images,
+            List<VideoView> videos,
             String coverImage,
             String countryCode,
             String countryName,

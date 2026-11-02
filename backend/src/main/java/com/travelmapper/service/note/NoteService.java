@@ -53,6 +53,7 @@ public class NoteService {
     /** 仅用于 Jsoup 解析相对链接，不写入存储，也不会被访问。 */
     private static final String SANITIZE_BASE_URI = "https://travelmapper.invalid/";
     private static final int MAX_IMAGES = 20;
+    private static final int MAX_VIDEOS = 3;
     private static final int MAX_SHARE_IMAGES = 6;
 
     private final TravelNoteMapper noteMapper;
@@ -65,6 +66,7 @@ public class NoteService {
     private final TripService tripService;
     private final MapService mapService;
     private final StorageUrlService storageUrlService;
+    private final NoteMediaValidator mediaValidator;
     private final SensitiveWordFilter sensitiveWordFilter;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
@@ -77,7 +79,8 @@ public class NoteService {
                        ItineraryMapper itineraryMapper, ItineraryDayMapper itineraryDayMapper,
                        TripMapper tripMapper, UserMapper userMapper, CatalogService catalogService,
                        TripService tripService, MapService mapService,
-                       StorageUrlService storageUrlService, SensitiveWordFilter sensitiveWordFilter,
+                       StorageUrlService storageUrlService, NoteMediaValidator mediaValidator,
+                       SensitiveWordFilter sensitiveWordFilter,
                        AuditLogService auditLogService, ObjectMapper objectMapper) {
         this.noteMapper = noteMapper;
         this.shareMapper = shareMapper;
@@ -89,6 +92,7 @@ public class NoteService {
         this.tripService = tripService;
         this.mapService = mapService;
         this.storageUrlService = storageUrlService;
+        this.mediaValidator = mediaValidator;
         this.sensitiveWordFilter = sensitiveWordFilter;
         this.auditLogService = auditLogService;
         this.objectMapper = objectMapper;
@@ -108,7 +112,9 @@ public class NoteService {
             throw new BusinessException(ErrorCode.CONTENT_SIZE_LIMIT);
         }
         List<String> images = normalizeImages(request.getImages());
+        List<String> videos = normalizeVideos(request.getVideos());
         String cover = normalizeCover(request.getCoverImage(), images);
+        mediaValidator.validate(userId, images, videos);
         String countryCode;
         String cityCode;
         Long tripId;
@@ -157,6 +163,7 @@ public class NoteService {
         note.setContent(sanitized);
         note.setContentText(summaryOf(sanitized));
         note.setImagesJson(images.isEmpty() ? null : toJson(images));
+        note.setVideosJson(videos.isEmpty() ? null : toJson(videos));
         note.setCoverImage(cover);
         note.setVisibility(request.getVisibility() == null ? Visibility.PRIVATE : request.getVisibility());
         note.setTakedown(false);
@@ -176,9 +183,21 @@ public class NoteService {
             throw new BusinessException(ErrorCode.CONTENT_TAKEDOWN);
         }
         if (request.getContent() == null && request.getImages() == null
+                && request.getVideos() == null
                 && request.getVisibility() == null && request.getTitle() == null
                 && request.getCoverImage() == null) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "至少提交一个可更新字段");
+        }
+        List<String> normalizedImages = request.getImages() == null
+                ? null : normalizeImages(request.getImages());
+        List<String> normalizedVideos = request.getVideos() == null
+                ? null : normalizeVideos(request.getVideos());
+        if (request.getContent() != null || normalizedImages != null || normalizedVideos != null) {
+            List<String> effectiveImages = normalizedImages != null
+                    ? normalizedImages : parseImages(note.getImagesJson());
+            List<String> effectiveVideos = normalizedVideos != null
+                    ? normalizedVideos : parseVideos(note.getVideosJson());
+            mediaValidator.validate(userId, effectiveImages, effectiveVideos);
         }
         if (request.getTitle() != null) {
             if (request.getTitle().isBlank() || request.getTitle().length() > 50) {
@@ -194,12 +213,15 @@ public class NoteService {
             note.setContent(sanitized);
             note.setContentText(summaryOf(sanitized));
         }
-        if (request.getImages() != null) {
-            List<String> images = normalizeImages(request.getImages());
-            note.setImagesJson(images.isEmpty() ? null : toJson(images));
-            note.setCoverImage(normalizeCover(request.getCoverImage(), images));
+        if (normalizedImages != null) {
+            note.setImagesJson(normalizedImages.isEmpty() ? null : toJson(normalizedImages));
+            note.setCoverImage(normalizeCover(request.getCoverImage(), normalizedImages));
         } else if (request.getCoverImage() != null) {
-            note.setCoverImage(request.getCoverImage());
+            note.setCoverImage(normalizeCover(request.getCoverImage(),
+                    parseImages(note.getImagesJson())));
+        }
+        if (normalizedVideos != null) {
+            note.setVideosJson(normalizedVideos.isEmpty() ? null : toJson(normalizedVideos));
         }
         if (request.getVisibility() != null) {
             note.setVisibility(request.getVisibility());
@@ -331,6 +353,10 @@ public class NoteService {
         for (String key : keys) {
             images.add(new NoteDtos.ImageView(key, signUrl(key, 600)));
         }
+        List<NoteDtos.VideoView> videos = new ArrayList<>();
+        for (String key : parseVideos(note.getVideosJson())) {
+            videos.add(new NoteDtos.VideoView(key, signUrl(key, 600)));
+        }
         NoteShare active = activeShare(note.getId());
         NoteDtos.ShareState shareState = active == null
                 ? new NoteDtos.ShareState(false, null, null, null)
@@ -344,6 +370,7 @@ public class NoteService {
                 note.getTitle(),
                 note.getContent(),
                 images,
+                videos,
                 note.getCoverImage(),
                 note.getCountryCode(),
                 catalogService.countryName(note.getCountryCode()),
@@ -422,6 +449,23 @@ public class NoteService {
         return result;
     }
 
+    private List<String> normalizeVideos(List<String> videos) {
+        if (videos == null) {
+            return List.of();
+        }
+        if (videos.size() > MAX_VIDEOS) {
+            throw new BusinessException(ErrorCode.VIDEO_COUNT_LIMIT);
+        }
+        List<String> result = new ArrayList<>();
+        for (String video : videos) {
+            if (video == null || video.isBlank()) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "视频 objectKey 不能为空");
+            }
+            result.add(video);
+        }
+        return result;
+    }
+
     private String normalizeCover(String cover, List<String> images) {
         if (cover != null && !cover.isBlank()) {
             if (!images.contains(cover)) {
@@ -436,7 +480,11 @@ public class NoteService {
         // 正文图片使用相对路径 /objects/{objectKey} 持久化，需保留相对链接。
         // Jsoup 只有在提供 baseUri 时才会校验并保留相对链接；输出仍保持相对形式，
         // javascript: 等危险协议依旧被 relaxed 白名单移除。
-        Safelist safelist = Safelist.relaxed().preserveRelativeLinks(true);
+        Safelist safelist = Safelist.relaxed().preserveRelativeLinks(true)
+                .addTags("video")
+                .addAttributes("video", "src", "controls", "preload", "poster",
+                        "width", "height", "playsinline")
+                .addProtocols("video", "src", "http", "https");
         String clean = Jsoup.clean(html, SANITIZE_BASE_URI, safelist);
         return sensitiveWordFilter.filter(clean);
     }
@@ -456,6 +504,10 @@ public class NoteService {
         } catch (Exception ex) {
             return List.of();
         }
+    }
+
+    private List<String> parseVideos(String json) {
+        return parseImages(json);
     }
 
     private String signUrl(String key, long ttlSeconds) {

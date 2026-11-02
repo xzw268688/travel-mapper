@@ -5,6 +5,7 @@ import com.travelmapper.repository.entity.User;
 import com.travelmapper.service.config.ConfigEntry;
 import com.travelmapper.service.config.ConfigKeys;
 import com.travelmapper.service.config.ConfigService;
+import com.travelmapper.service.storage.StorageProvider;
 import com.travelmapper.service.storage.StorageProviderHolder;
 import com.travelmapper.support.AuthTestSupport;
 import com.travelmapper.support.TestInfrastructure;
@@ -16,12 +17,19 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -38,6 +46,8 @@ class NoteShareIntegrationTest extends AuthTestSupport {
 
     @Autowired
     private StorageProviderHolder storageHolder;
+
+    private final HttpClient httpClient = HttpClient.newHttpClient();
 
     @BeforeAll
     static void requireStorage() {
@@ -90,6 +100,101 @@ class NoteShareIntegrationTest extends AuthTestSupport {
                         .content("{\"bizType\":\"OTHER\",\"contentType\":\"image/png\",\"size\":100}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(2001));
+    }
+
+    @Test
+    void uploadPresignSupportsVideoWithThirtyMinuteTtl() throws Exception {
+        User user = createVerifiedUser("uploadvideo");
+        Instant before = Instant.now();
+        MvcResult result = mockMvc.perform(withToken(post("/api/upload/presign"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bizType\":\"NOTE_VIDEO\",\"contentType\":\"video/mp4\",\"size\":1048576}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.method").value("PUT"))
+                .andReturn();
+        JsonNode data = data(result);
+        assertThat(data.path("objectKey").asText())
+                .startsWith("note/" + user.getId() + "/").endsWith(".mp4");
+        Instant expireAt = Instant.parse(data.path("expireAt").asText());
+        assertThat(Duration.between(before, expireAt).toSeconds()).isBetween(1790L, 1800L);
+
+        mockMvc.perform(withToken(post("/api/upload/presign"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bizType\":\"NOTE_VIDEO\",\"contentType\":\"video/quicktime\",\"size\":100}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(2030));
+        mockMvc.perform(withToken(post("/api/upload/presign"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bizType\":\"NOTE_VIDEO\",\"contentType\":\"video/webm\",\"size\":104857601}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(2029));
+    }
+
+    @Test
+    void noteVideosAreValidatedStoredAndReturned() throws Exception {
+        User user = createVerifiedUser("notevideo");
+        String imageKey = uploadObject(user, "image/jpeg", "jpg", new byte[]{9, 9, 9});
+        String videoKey = uploadObject(user, "video/mp4", "mp4", new byte[]{0, 1, 2, 3});
+        String content = "<p>视频游记</p><img src=\"/objects/" + imageKey + "\">"
+                + "<video controls src=\"/objects/" + videoKey + "\"></video>";
+
+        Map<String, Object> body = noteBody("视频游记", content, List.of(imageKey), null);
+        body.put("videos", List.of(videoKey));
+        MvcResult created = mockMvc.perform(withToken(post("/api/notes"), user)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(body)))
+                .andExpect(status().isOk())
+                .andReturn();
+        long noteId = data(created).path("id").asLong();
+
+        String stored = jdbcTemplate.queryForObject(
+                "SELECT content FROM travel_note WHERE id = ?", String.class, noteId);
+        assertThat(stored).contains("<video", "/objects/" + videoKey)
+                .doesNotContain("javascript:");
+        mockMvc.perform(withToken(get("/api/notes/" + noteId), user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.videos.length()").value(1))
+                .andExpect(jsonPath("$.data.videos[0].objectKey").value(videoKey))
+                .andExpect(jsonPath("$.data.videos[0].url").isString())
+                .andExpect(jsonPath("$.data.images.length()").value(1))
+                .andExpect(jsonPath("$.data.images[0].objectKey").value(imageKey));
+
+        // 视频-only 正文允许保存
+        Map<String, Object> videoOnly = noteBody("纯视频", "<video controls src=\"/objects/"
+                + videoKey + "\"></video>", List.of(), null);
+        videoOnly.put("videos", List.of(videoKey));
+        mockMvc.perform(withToken(post("/api/notes"), user)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(videoOnly)))
+                .andExpect(status().isOk());
+
+        // 视频数量上限
+        List<String> four = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            four.add(videoKey);
+        }
+        Map<String, Object> tooMany = noteBody("太多视频", "<p>x</p>", List.of(), null);
+        tooMany.put("videos", four);
+        mockMvc.perform(withToken(post("/api/notes"), user)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(tooMany)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(2028));
+    }
+
+    @Test
+    void referencedMediaMustExistAndBelongToUser() throws Exception {
+        User user = createVerifiedUser("notemedia");
+        String missing = "note/" + user.getId() + "/2026/11/" + UUID.randomUUID() + ".jpg";
+        Map<String, Object> missingBody = noteBody("缺失媒体", "<p>x</p>", List.of(missing), null);
+        mockMvc.perform(withToken(post("/api/notes"), user)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(missingBody)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(2027));
+
+        Map<String, Object> foreignBody = noteBody("越权媒体", "<p>x</p>",
+                List.of("note/999999/2026/11/foreign.jpg"), null);
+        mockMvc.perform(withToken(post("/api/notes"), user)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(foreignBody)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(2027));
     }
 
     @Test
@@ -185,7 +290,7 @@ class NoteShareIntegrationTest extends AuthTestSupport {
     void shareLifecycleWhitelistAndTakedown() throws Exception {
         User user = createVerifiedUser("notes");
         long noteId = createNote(user, "分享游记", "<p>分享内容</p>",
-                List.of("note/1/a.jpg"), null);
+                List.of(), null);
 
         MvcResult shared = mockMvc.perform(withToken(post("/api/notes/" + noteId + "/share"), user)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -293,6 +398,20 @@ class NoteShareIntegrationTest extends AuthTestSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(json(badCover)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(2001));
+    }
+
+    private String uploadObject(User user, String contentType, String extension, byte[] content)
+            throws Exception {
+        String key = "note/" + user.getId() + "/2026/11/" + UUID.randomUUID() + "." + extension;
+        StorageProvider.PresignedUpload upload = storageHolder.get()
+                .presignUpload(key, contentType, 300);
+        HttpRequest request = HttpRequest.newBuilder(URI.create(upload.uploadUrl()))
+                .header("Content-Type", contentType)
+                .PUT(HttpRequest.BodyPublishers.ofByteArray(content))
+                .build();
+        assertThat(httpClient.send(request, HttpResponse.BodyHandlers.discarding()).statusCode())
+                .isEqualTo(200);
+        return key;
     }
 
     private long createNote(User user, String title, String content, List<String> images,

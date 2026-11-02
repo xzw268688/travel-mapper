@@ -49,8 +49,7 @@ function onUserCommand(command: string): void {
         <router-link to="/plan">规划行程</router-link>
         <router-link to="/notes">游记</router-link>
         <router-link to="/expenses">记账</router-link>
-        <router-link to="/polish">AI 润色</router-link>
-        <el-dropdown v-if="auth.user?.role === 'ADMIN'" @command="openAdmin">
+                <el-dropdown v-if="auth.user?.role === 'ADMIN'" @command="openAdmin">
           <span class="admin-menu">管理 ▾</span>
           <template #dropdown>
             <el-dropdown-menu>

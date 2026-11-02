@@ -9,7 +9,6 @@ import MapView from '../views/MapView.vue'
 import PlanView from '../views/PlanView.vue'
 import ItineraryEditView from '../views/ItineraryEditView.vue'
 import TripDetailView from '../views/TripDetailView.vue'
-import PolishView from '../views/PolishView.vue'
 import NotesView from '../views/NotesView.vue'
 import NoteDetailView from '../views/NoteDetailView.vue'
 import ShareView from '../views/ShareView.vue'
@@ -38,8 +37,7 @@ const router = createRouter({
     { path: '/plan', name: 'plan', component: PlanView },
     { path: '/itineraries/:id', name: 'itinerary-edit', component: ItineraryEditView },
     { path: '/trips/:id', name: 'trip-detail', component: TripDetailView },
-    { path: '/polish', name: 'polish', component: PolishView },
-    { path: '/notes', name: 'notes', component: NotesView },
+        { path: '/notes', name: 'notes', component: NotesView },
     { path: '/notes/:id', name: 'note-detail', component: NoteDetailView },
     { path: '/poster/:id?', name: 'poster', component: PosterView },
     { path: '/expenses', name: 'expenses', component: ExpensesView },

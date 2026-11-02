@@ -10,4 +10,10 @@ public interface TravelNoteMapper extends BaseMapper<TravelNote> {
 
     @Select("SELECT images_json FROM travel_note WHERE images_json IS NOT NULL AND deleted = 0")
     List<String> selectReferencedImageJson();
+
+    @Select("SELECT videos_json FROM travel_note WHERE videos_json IS NOT NULL AND deleted = 0")
+    List<String> selectReferencedVideoJson();
+
+    @Select("SELECT content FROM travel_note WHERE content IS NOT NULL AND deleted = 0")
+    List<String> selectReferencedContent();
 }

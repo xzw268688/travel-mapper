@@ -23,9 +23,14 @@ import java.util.Set;
 @RequestMapping("/api/upload")
 public class UploadController {
 
-    private static final Set<String> ALLOWED_TYPES = Set.of(
+    private static final Set<String> IMAGE_TYPES = Set.of(
             "image/jpeg", "image/png", "image/webp");
-    private static final long MAX_SIZE = 5L * 1024 * 1024;
+    private static final Set<String> VIDEO_TYPES = Set.of(
+            "video/mp4", "video/webm");
+    private static final long MAX_IMAGE_SIZE = 5L * 1024 * 1024;
+    private static final long MAX_VIDEO_SIZE = 100L * 1024 * 1024;
+    private static final long IMAGE_TTL_SECONDS = 300;
+    private static final long VIDEO_TTL_SECONDS = 1800;
 
     private final ObjectKeyGenerator objectKeyGenerator;
     private final StorageUrlService storageUrlService;
@@ -39,21 +44,34 @@ public class UploadController {
     @PostMapping("/presign")
     public ApiResponse<UploadDtos.PresignResponse> presign(
             @Valid @RequestBody UploadDtos.PresignRequest request) {
-        if (!"NOTE_IMAGE".equals(request.getBizType())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "bizType 仅支持 NOTE_IMAGE");
+        String bizType = request.getBizType();
+        if (!"NOTE_IMAGE".equals(bizType) && !"NOTE_VIDEO".equals(bizType)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "bizType 仅支持 NOTE_IMAGE / NOTE_VIDEO");
         }
         String contentType = request.getContentType().toLowerCase(Locale.ROOT);
-        if (!ALLOWED_TYPES.contains(contentType)) {
-            throw new BusinessException(ErrorCode.IMAGE_TYPE_UNSUPPORTED);
-        }
         if (request.getSize() == null || request.getSize() <= 0) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "size 必填");
         }
-        if (request.getSize() > MAX_SIZE) {
-            throw new BusinessException(ErrorCode.IMAGE_SIZE_LIMIT);
+        boolean video = "NOTE_VIDEO".equals(bizType);
+        if (video) {
+            if (!VIDEO_TYPES.contains(contentType)) {
+                throw new BusinessException(ErrorCode.VIDEO_TYPE_UNSUPPORTED);
+            }
+            if (request.getSize() > MAX_VIDEO_SIZE) {
+                throw new BusinessException(ErrorCode.VIDEO_SIZE_LIMIT);
+            }
+        } else {
+            if (!IMAGE_TYPES.contains(contentType)) {
+                throw new BusinessException(ErrorCode.IMAGE_TYPE_UNSUPPORTED);
+            }
+            if (request.getSize() > MAX_IMAGE_SIZE) {
+                throw new BusinessException(ErrorCode.IMAGE_SIZE_LIMIT);
+            }
         }
         String objectKey = objectKeyGenerator.generate(CurrentUser.id(), contentType);
-        StorageProvider.PresignedUpload upload = storageUrlService.presignUpload(objectKey, contentType);
+        StorageProvider.PresignedUpload upload = storageUrlService.presignUpload(
+                objectKey, contentType, video ? VIDEO_TTL_SECONDS : IMAGE_TTL_SECONDS);
         return ApiResponse.ok(new UploadDtos.PresignResponse(
                 upload.objectKey(), upload.uploadUrl(), upload.method(),
                 upload.headers(), upload.expireAt()));

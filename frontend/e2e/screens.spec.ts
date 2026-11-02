@@ -42,6 +42,47 @@ for (const width of [1440, 390]) {
       })
     })
 
+    test(`截图 notes-polish @${width}`, async ({ page }) => {
+      await page.goto('/notes')
+      const editor = page.locator('.rich-editor-content').first()
+      await editor.click()
+      await page.keyboard.type('这是一段需要润色的旅行文字')
+      await page.keyboard.press('Control+A')
+      await page.route('**/api/ai/polish/stream', (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body:
+            'event: meta\ndata: {"requestId":"screen","quotaSource":"FREE"}\n\n' +
+            'event: delta\ndata: {"delta":"这是一段经过润色的旅行文字，节奏更从容。"}\n\n'
+        })
+      )
+      await page.locator('.rich-editor-toolbar').getByRole('button', { name: 'AI 润色' }).click()
+      await page.locator('.polish-panel').waitFor({ state: 'visible', timeout: 20_000 })
+      await page.waitForTimeout(400)
+      await page.screenshot({
+        path: `test-results/screens/notes-polish-${width}.png`,
+        fullPage: false
+      })
+    })
+
+    test(`截图 notes-video @${width}`, async ({ page }) => {
+      await page.goto('/notes')
+      await page.locator('.rich-editor-content').first().click()
+      await page.keyboard.type('带视频的游记正文')
+      await page.locator('input[type="file"][accept*="video"]').setInputFiles({
+        name: 'screen.mp4',
+        mimeType: 'video/mp4',
+        buffer: Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109])
+      })
+      await page.locator('.rich-editor-content video').waitFor({ state: 'visible', timeout: 30_000 })
+      await page.waitForTimeout(400)
+      await page.screenshot({
+        path: `test-results/screens/notes-video-${width}.png`,
+        fullPage: false
+      })
+    })
+
     test(`截图 drawer-guide @${width}`, async ({ page }) => {
       await page.goto('/')
       await page.locator('.map-canvas canvas').waitFor({ state: 'visible', timeout: 20_000 })

@@ -1642,9 +1642,9 @@ Idempotency-Key: <uuid>
 
 | 字段 | 必填 | 校验 |
 |---|---|---|
-| `bizType` | 是 | V1 仅 `NOTE_IMAGE` |
-| `contentType` | 是 | 仅 `image/jpeg`、`image/png`、`image/webp`（**禁止 SVG**） |
-| `size` | 是 | ≤ 5 MB（5242880 字节） |
+| `bizType` | 是 | `NOTE_IMAGE` 或 `NOTE_VIDEO` |
+| `contentType` | 是 | 图片：`image/jpeg`、`image/png`、`image/webp`（**禁止 SVG**）；视频：`video/mp4`、`video/webm` |
+| `size` | 是 | 图片 ≤ 5 MB（5242880 字节）；视频 ≤ 100 MB（104857600 字节） |
 
 **响应**
 
@@ -1666,16 +1666,18 @@ Idempotency-Key: <uuid>
 
 1. 前端调本接口拿 `uploadUrl`
 2. 前端**直接 PUT** 文件到 `uploadUrl`（带返回的 `headers`）
-3. 上传成功后，把 `objectKey` 写入游记的 `images[]`
+3. 上传成功后，把 `objectKey` 写入游记的 `images[]` 或 `videos[]`，并在正文中插入 `/objects/{objectKey}`
 
 **说明**
 
-- 签名有效期 300 秒
+- 图片签名有效期 300 秒；视频签名有效期 1800 秒
+- 视频仅支持 mp4/webm，每篇游记最多 3 个；不做转码，浏览器直接播放原文件
 - 不经过后端，节省 2 核 4G 的带宽与内存
 - 前端仍应先做一次本地压缩与尺寸检查，降低失败率
 - EXIF GPS 剥离在前端压缩阶段完成（canvas 重绘天然丢失 EXIF），后端无法二次校验
+- 保存游记时后端会校验 objectKey 属于当前用户且对象真实存在
 
-**错误**：`2021`（类型不支持）、`2019`（单图超 5MB）、`5003`（存储不可用）
+**错误**：`2021`（图片类型不支持）、`2019`（单图超 5MB）、`2030`（视频类型不支持）、`2029`（视频超 100MB）、`5003`（存储不可用）
 
 ---
 
@@ -1695,6 +1697,9 @@ Idempotency-Key: <uuid>
     "note/12/2025/06/a1.jpg",
     "note/12/2025/06/b2.jpg"
   ],
+  "videos": [
+    "note/12/2025/06/c3.mp4"
+  ],
   "coverImage": "note/12/2025/06/a1.jpg",
   "countryCode": "JP",
   "cityCode": "TYO",
@@ -1709,6 +1714,7 @@ Idempotency-Key: <uuid>
 | `title` | 是 | 1–50 字 |
 | `content` | 是 | HTML，≤ 200 KB（UTF-8 字节） |
 | `images` | 否 | `objectKey` 数组，≤ 20 张 |
+| `videos` | 否 | `objectKey` 数组，≤ 3 个；仅 mp4/webm |
 | `coverImage` | 否 | 必须是 `images` 之一；缺省取第一张 |
 | `countryCode` | 是 | — |
 | `cityCode` | 是 | 主城市；必须属于该国家的 ENABLED 城市（历史停用城市不可新选） |
@@ -1739,8 +1745,9 @@ Idempotency-Key: <uuid>
 - 传了 `itineraryId` 但与 `countryCode`/`cityCode` 不一致时，以行程的值为准并忽略入参（避免脏数据）
 - 发布即点亮地图绿色，返回 `countryStatusAfter` 供前端刷新
 - **默认私密**：未分享时仅本人可见
+- `images`/`videos` 中的 objectKey 必须属于当前用户（`note/{userId}/`）且已真实上传，否则 `2027`
 
-**错误**：`2001`（缺国家/城市）、`2002`（城市非法/停用）、`2003`（行程无权）、`2018`（图片 > 20 张）、`2020`（正文 > 200KB）
+**错误**：`2001`（缺国家/城市）、`2002`（城市非法/停用）、`2003`（行程无权）、`2018`（图片 > 20 张）、`2020`（正文 > 200KB）、`2027`（媒体无效）、`2028`（视频 > 3 个）
 
 ---
 
@@ -1760,6 +1767,9 @@ Idempotency-Key: <uuid>
     "content": "<p>…</p>",
     "images": [
       { "objectKey": "note/12/2025/06/a1.jpg", "url": "https://…签名URL…" }
+    ],
+    "videos": [
+      { "objectKey": "note/12/2025/06/c3.mp4", "url": "https://…600秒签名URL…" }
     ],
     "coverImage": "note/12/2025/06/a1.jpg",
     "countryCode": "JP",
@@ -1788,7 +1798,7 @@ Idempotency-Key: <uuid>
 
 - 非本人访问返回 `2004`（不区分"不存在"与"无权"，防枚举）
 - `takedown=true` 表示已被管理员下架：本人可看、不可编辑、不可分享
-- 图片 URL 为 600 秒签名
+- 图片与视频 URL 均为 600 秒签名；分享页不展示视频
 
 **错误**：`2004`
 
@@ -1798,11 +1808,11 @@ Idempotency-Key: <uuid>
 
 `PUT /notes/{id}` ｜ 需鉴权
 
-**请求**：字段同 9.1，均为可选；`content`、`images`、`visibility` 至少传一项
+**请求**：字段同 9.1，均为可选；`content`、`images`、`videos`、`visibility` 至少传一项
 
 **响应**：返回完整游记结构（同 9.2）
 
-**错误**：`2004`、`2002`、`2018`、`2020`、`2024`（内容已下架，不可编辑）
+**错误**：`2004`、`2002`、`2018`、`2020`、`2024`（内容已下架，不可编辑）、`2027`（媒体无效）、`2028`（视频 > 3 个）
 
 ---
 
@@ -2804,6 +2814,8 @@ TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00
 
 `POST /ai/polish/stream` ｜ 需鉴权 ｜ **消耗 1 次 AI 额度**
 
+> 前端入口位于游记编辑器工具栏：选中文本后直接润色并原位替换；独立 `/polish` 页面已删除。协议与取消/退款规则不变。
+
 **请求头**
 
 ```
@@ -3032,6 +3044,10 @@ location /api/ai/polish/stream {
 | 2024 | 内容已下架，不可操作 | 403 | `PUT /notes/{id}`、`POST /notes/{id}/share` |
 | 2025 | 城市已被引用，不能物理删除 | 409 | `DELETE /admin/cities/{id}` |
 | 2026 | 该国官方链接已达上限（3 条） | 400 | `POST /admin/official-links` |
+| 2027 | 媒体对象无效或不属于当前用户 | 400 | `POST/PUT /notes` |
+| 2028 | 视频数量超限（> 3 个） | 400 | `POST/PUT /notes` |
+| 2029 | 单个视频超限（> 100 MB） | 400 | `POST /upload/presign` |
+| 2030 | 不支持的视频类型 | 400 | `POST /upload/presign` |
 
 ---
 

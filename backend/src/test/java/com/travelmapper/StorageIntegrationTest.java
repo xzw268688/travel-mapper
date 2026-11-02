@@ -109,17 +109,24 @@ class StorageIntegrationTest extends AbstractIntegrationTest {
     void cleanupDeletesOrphansAndKeepsReferencedObjects() throws Exception {
         String orphan = "note/1/2025/06/" + UUID.randomUUID() + ".jpg";
         String referenced = "note/1/2025/06/" + UUID.randomUUID() + ".jpg";
+        String videoOrphan = "note/1/2025/06/" + UUID.randomUUID() + ".mp4";
+        String videoReferenced = "note/1/2025/06/" + UUID.randomUUID() + ".mp4";
+        String contentReferenced = "note/1/2025/06/" + UUID.randomUUID() + ".webm";
         upload(orphan);
         upload(referenced);
+        upload(videoOrphan, "video/mp4");
+        upload(videoReferenced, "video/mp4");
+        upload(contentReferenced, "video/webm");
 
         TravelNote note = new TravelNote();
         note.setUserId(1L);
         note.setCountryCode("JP");
         note.setCityCode("TYO");
         note.setTitle("cleanup");
-        note.setContent("<p>cleanup</p>");
+        note.setContent("<p>cleanup</p><video controls src=\"/objects/" + contentReferenced + "\"></video>");
         note.setContentText("cleanup");
         note.setImagesJson("[\"" + referenced + "\"]");
+        note.setVideosJson("[\"" + videoReferenced + "\"]");
         note.setVisibility(Visibility.PRIVATE);
         note.setTakedown(false);
         note.setDeleted(0);
@@ -128,10 +135,15 @@ class StorageIntegrationTest extends AbstractIntegrationTest {
         cleanupService.cleanup(Instant.now().plusSeconds(60));
 
         assertThat(storageHolder.get().exists(orphan)).isFalse();
+        assertThat(storageHolder.get().exists(videoOrphan)).isFalse();
         assertThat(storageHolder.get().exists(referenced)).isTrue();
+        assertThat(storageHolder.get().exists(videoReferenced)).isTrue();
+        assertThat(storageHolder.get().exists(contentReferenced)).isTrue();
 
         travelNoteMapper.deleteById(note.getId());
         storageHolder.get().delete(referenced);
+        storageHolder.get().delete(videoReferenced);
+        storageHolder.get().delete(contentReferenced);
     }
 
     @Test
@@ -160,8 +172,12 @@ class StorageIntegrationTest extends AbstractIntegrationTest {
     }
 
     private void upload(String key) throws Exception {
-        StorageProvider.PresignedUpload upload = storageUrlService.presignUpload(key, "image/jpeg");
-        assertThat(put(upload.uploadUrl(), key.getBytes(StandardCharsets.UTF_8), "image/jpeg").statusCode())
+        upload(key, "image/jpeg");
+    }
+
+    private void upload(String key, String contentType) throws Exception {
+        StorageProvider.PresignedUpload upload = storageUrlService.presignUpload(key, contentType);
+        assertThat(put(upload.uploadUrl(), key.getBytes(StandardCharsets.UTF_8), contentType).statusCode())
                 .isEqualTo(200);
     }
 

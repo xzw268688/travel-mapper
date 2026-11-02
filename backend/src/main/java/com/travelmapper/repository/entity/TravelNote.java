@@ -23,6 +23,7 @@ public class TravelNote {
     private String content;
     private String contentText;
     private String imagesJson;
+    private String videosJson;
     private String coverImage;
     private Visibility visibility;
     private Boolean takedown;
