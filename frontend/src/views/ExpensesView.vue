@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -11,7 +11,9 @@ import {
   deleteExpense,
   getExpenseSummary,
   listExpenses,
+  listExpensesByDate,
   updateExpense,
+  type ExpenseDateGrouped,
   type ExpenseResponse,
   type ExpenseSummary
 } from '../api/expenses'
@@ -59,6 +61,11 @@ const summary = ref<ExpenseSummary | null>(null)
 const groupBy = ref('country')
 const loading = ref(false)
 const saving = ref(false)
+const viewMode = ref<'LIST' | 'DATE'>('LIST')
+const dateGrouped = ref<ExpenseDateGrouped | null>(null)
+const dateLoading = ref(false)
+const month = ref(currentMonth())
+const monthSummary = ref<ExpenseSummary | null>(null)
 
 const formVisible = ref(false)
 const form = reactive({
@@ -75,7 +82,40 @@ const form = reactive({
 
 const pendingTripId = ref<number | null>(null)
 const chartEl = ref<HTMLDivElement | null>(null)
+const categoryChartEl = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
+let categoryChart: echarts.ECharts | null = null
+
+const PREF_KEY = 'tm_expense_prefs'
+
+const amountPreview = computed(() => {
+  const raw = form.amount.trim()
+  if (!raw || !/[+\-*/()]/.test(raw)) {
+    return ''
+  }
+  const value = evaluateExpression(raw)
+  return value === null ? '表达式无效' : `= ${value}`
+})
+
+const monthTotalCny = computed(() => {
+  const groups = monthSummary.value?.groups ?? []
+  return groups
+    .reduce((total, group) => total + Number(group.totalCny || 0), 0)
+    .toFixed(2)
+})
+
+const monthOriginalCurrencies = computed(() => {
+  const totals = new Map<string, number>()
+  for (const group of monthSummary.value?.groups ?? []) {
+    for (const item of group.originalCurrencies) {
+      totals.set(item.currency, (totals.get(item.currency) ?? 0) + Number(item.total || 0))
+    }
+  }
+  return [...totals.entries()].map(([currency, total]) => ({
+    currency,
+    total: total.toFixed(2)
+  }))
+})
 
 onMounted(async () => {
   try {
@@ -107,9 +147,15 @@ onBeforeUnmount(() => {
 })
 
 watch(groupBy, loadSummary)
+watch(viewMode, (mode) => {
+  if (mode === 'DATE') {
+    void loadDateGroups()
+  }
+})
 watch(summary, async () => {
   await nextTick()
   renderChart()
+  renderCategoryChart()
 })
 watch(
   () => filters.countryCode,
@@ -153,7 +199,49 @@ watch(
 )
 
 async function loadAll(): Promise<void> {
-  await Promise.all([loadList(), loadSummary()])
+  const tasks = [loadList(), loadSummary(), loadMonthSummary()]
+  if (viewMode.value === 'DATE') {
+    tasks.push(loadDateGroups())
+  }
+  await Promise.all(tasks)
+}
+
+function filterParams(): Record<string, unknown> {
+  return {
+    countryCode: filters.countryCode || undefined,
+    cityCode: filters.cityCode || undefined,
+    tripId: filters.tripId ?? undefined,
+    ungrouped: filters.ungrouped || undefined,
+    category: filters.category || undefined,
+    from: filters.range?.[0] || undefined,
+    to: filters.range?.[1] || undefined
+  }
+}
+
+async function loadDateGroups(): Promise<void> {
+  dateLoading.value = true
+  try {
+    dateGrouped.value = await listExpensesByDate(filterParams())
+  } catch (error) {
+    ElMessage.error((error as Error).message || '加载按日期消费失败')
+    dateGrouped.value = null
+  } finally {
+    dateLoading.value = false
+  }
+}
+
+async function loadMonthSummary(): Promise<void> {
+  const [from, to] = monthRange()
+  try {
+    monthSummary.value = await getExpenseSummary('country', {
+      countryCode: filters.countryCode || undefined,
+      tripId: filters.tripId ?? undefined,
+      from,
+      to
+    })
+  } catch {
+    monthSummary.value = null
+  }
 }
 
 async function loadList(): Promise<void> {
@@ -219,13 +307,18 @@ async function loadFormTrips(): Promise<void> {
 }
 
 function openCreate(): void {
+  const prefs = loadPrefs()
+  const preferredCountry = prefs?.countryCode
+    && countries.value.some((item) => item.code === prefs.countryCode)
+    ? prefs.countryCode
+    : ''
   form.id = 0
-  form.country = filters.countryCode || countries.value[0]?.code || 'JP'
+  form.country = filters.countryCode || preferredCountry || countries.value[0]?.code || 'JP'
   form.city = filters.cityCode || ''
   form.tripId = filters.tripId
-  form.currency = 'CNY'
+  form.currency = prefs?.currency || 'CNY'
   form.amount = ''
-  form.category = 'FOOD'
+  form.category = prefs?.category || 'FOOD'
   form.expenseDate = todayString()
   form.remark = ''
   formVisible.value = true
@@ -251,8 +344,9 @@ async function submit(): Promise<void> {
     ElMessage.warning('请选择国家并填写金额')
     return
   }
-  if (!/^-?\d+(\.\d{1,2})?$/.test(form.amount.trim())) {
-    ElMessage.warning('金额最多两位小数')
+  const amount = normalizeAmountInput(form.amount)
+  if (amount === null) {
+    ElMessage.warning('金额或表达式无效')
     return
   }
   saving.value = true
@@ -262,7 +356,7 @@ async function submit(): Promise<void> {
       cityCode: form.city || null,
       tripId: form.tripId ?? null,
       currency: form.currency.trim().toUpperCase(),
-      amount: form.amount.trim(),
+      amount,
       category: form.category,
       expenseDate: form.expenseDate,
       remark: form.remark
@@ -273,6 +367,13 @@ async function submit(): Promise<void> {
       await createExpense(body)
     }
     formVisible.value = false
+    if (!form.id) {
+      savePrefs({
+        countryCode: form.country,
+        currency: form.currency.trim().toUpperCase(),
+        category: form.category
+      })
+    }
     await loadAll()
     ElMessage.success(form.id ? '消费已更新' : '消费已记录')
   } catch (error) {
@@ -363,8 +464,170 @@ function renderChart(): void {
   chart.resize()
 }
 
+function renderCategoryChart(): void {
+  const el = categoryChartEl.value
+  if (!el || !summary.value) return
+  if (categoryChart && categoryChart.getDom() !== el) {
+    categoryChart.dispose()
+    categoryChart = null
+  }
+  if (!categoryChart) {
+    categoryChart = echarts.init(el)
+  }
+  const totals = new Map<string, number>()
+  for (const group of summary.value.groups) {
+    for (const item of group.categories) {
+      totals.set(item.category, (totals.get(item.category) ?? 0) + Number(item.totalCny))
+    }
+  }
+  const data = [...totals.entries()]
+    .filter(([, value]) => value !== 0)
+    .map(([category, value]) => ({ name: categoryLabel(category), value }))
+  if (data.length === 0) {
+    categoryChart.clear()
+    return
+  }
+  categoryChart.setOption(
+    {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'item',
+        valueFormatter: (value: unknown) => `¥${Number(value).toFixed(2)}`
+      },
+      legend: { bottom: 0, textStyle: { color: '#52514e' } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['42%', '68%'],
+          center: ['50%', '44%'],
+          data,
+          label: { formatter: '{b} ¥{c}' },
+          itemStyle: { borderRadius: 4, borderColor: '#ffffff', borderWidth: 2 }
+        }
+      ]
+    },
+    true
+  )
+  categoryChart.resize()
+}
+
 function resizeChart(): void {
   chart?.resize()
+  categoryChart?.resize()
+}
+
+function normalizeAmountInput(raw: string): string | null {
+  const text = raw.trim()
+  if (/^-?\d+(\.\d{1,2})?$/.test(text)) {
+    return text
+  }
+  return evaluateExpression(text)
+}
+
+function evaluateExpression(input: string): string | null {
+  const expr = input.replace(/\s+/g, '').replace(/×/g, '*').replace(/÷/g, '/')
+  if (!expr || expr.length > 100 || !/^[0-9+\-*/().]+$/.test(expr)) {
+    return null
+  }
+  let pos = 0
+  const peek = () => expr[pos]
+  const fail = (): never => {
+    throw new Error('invalid')
+  }
+  const parseExpression = (): number => {
+    let value = parseTerm()
+    while (peek() === '+' || peek() === '-') {
+      const op = expr[pos++]
+      const right = parseTerm()
+      value = op === '+' ? value + right : value - right
+    }
+    return value
+  }
+  const parseTerm = (): number => {
+    let value = parseFactor()
+    while (peek() === '*' || peek() === '/') {
+      const op = expr[pos++]
+      const right = parseFactor()
+      if (op === '/' && right === 0) {
+        fail()
+      }
+      value = op === '*' ? value * right : value / right
+    }
+    return value
+  }
+  const parseFactor = (): number => {
+    if (peek() === '+' || peek() === '-') {
+      const op = expr[pos++]
+      const value = parseFactor()
+      return op === '-' ? -value : value
+    }
+    if (peek() === '(') {
+      pos++
+      const value = parseExpression()
+      if (peek() !== ')') {
+        fail()
+      }
+      pos++
+      return value
+    }
+    const match = /^\d*\.?\d+/.exec(expr.slice(pos))
+    if (!match) {
+      throw new Error('invalid')
+    }
+    pos += match[0].length
+    const value = Number(match[0])
+    if (!Number.isFinite(value)) {
+      fail()
+    }
+    return value
+  }
+  try {
+    const value = parseExpression()
+    if (pos !== expr.length || !Number.isFinite(value)) {
+      return null
+    }
+    return (Math.round((value + Number.EPSILON) * 100) / 100).toFixed(2)
+  } catch {
+    return null
+  }
+}
+
+function loadPrefs(): { countryCode: string; currency: string; category: string } | null {
+  try {
+    const raw = localStorage.getItem(PREF_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (typeof parsed?.countryCode !== 'string'
+        || typeof parsed?.currency !== 'string'
+        || typeof parsed?.category !== 'string') {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function savePrefs(prefs: { countryCode: string; currency: string; category: string }): void {
+  try {
+    localStorage.setItem(PREF_KEY, JSON.stringify(prefs))
+  } catch {
+    // 忽略隐私模式下的存储失败
+  }
+}
+
+function currentMonth(): string {
+  const date = new Date()
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+function monthRange(): [string, string] {
+  const [year, monthValue] = month.value.split('-').map(Number)
+  const lastDay = new Date(year, monthValue, 0).getDate()
+  return [
+    `${month.value}-01`,
+    `${month.value}-${String(lastDay).padStart(2, '0')}`
+  ]
 }
 
 function categoryLabel(value: string): string {
@@ -431,8 +694,39 @@ function todayString(): string {
       </div>
     </el-card>
 
+    <el-card class="month-card" style="margin-top: 16px">
+      <template #header>
+        <div class="month-head">
+          <span class="trip-title">月度合计</span>
+          <el-date-picker
+            v-model="month"
+            type="month"
+            value-format="YYYY-MM"
+            style="width: 160px"
+            @change="loadMonthSummary"
+          />
+        </div>
+      </template>
+      <div class="month-total">¥{{ monthTotalCny }}</div>
+      <div v-if="monthOriginalCurrencies.length" class="month-originals">
+        <span v-for="item in monthOriginalCurrencies" :key="item.currency">
+          {{ item.currency }} {{ item.total }}
+        </span>
+      </div>
+      <div v-else-if="monthTotalCny === '0.00'" class="meta">当前筛选下本月暂无消费</div>
+    </el-card>
+
     <el-card style="margin-top: 16px" v-loading="loading">
-      <template #header><div class="trip-title">消费记录</div></template>
+      <template #header>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap">
+          <div class="trip-title" style="margin-bottom: 0">消费记录</div>
+          <el-radio-group v-model="viewMode" size="small">
+            <el-radio-button value="LIST">明细</el-radio-button>
+            <el-radio-button value="DATE">按日期</el-radio-button>
+          </el-radio-group>
+        </div>
+      </template>
+      <template v-if="viewMode === 'LIST'">
       <el-empty v-if="items.length === 0" description="暂无消费记录" />
       <el-table v-else :data="items" stripe>
         <el-table-column prop="expenseDate" label="日期" width="120" />
@@ -467,6 +761,46 @@ function todayString(): string {
         @current-change="loadList"
         @size-change="search"
       />
+      </template>
+      <div v-else v-loading="dateLoading">
+        <el-empty
+          v-if="!dateGrouped || dateGrouped.groups.length === 0"
+          description="当前筛选下暂无消费记录"
+        />
+        <template v-else>
+          <div v-for="group in dateGrouped.groups" :key="group.date" class="expense-date-group">
+            <div class="expense-date-head">
+              <strong>{{ group.date }}</strong>
+              <span class="expense-date-total">CNY ¥{{ group.totalCny }}</span>
+              <span v-for="item in group.originalCurrencies" :key="item.currency" class="meta">
+                {{ item.currency }} {{ item.total }}
+              </span>
+            </div>
+            <div v-for="row in group.items" :key="row.id" class="expense-date-row">
+              <el-tag size="small">{{ categoryLabel(row.category) }}</el-tag>
+              <span class="expense-date-place">
+                {{ row.countryName }}<template v-if="row.cityName"> · {{ row.cityName }}</template>
+              </span>
+              <span class="expense-date-amount">
+                {{ row.amount }} {{ row.currency }}
+                <template v-if="!row.rateMissing"> ≈ ¥{{ row.amountCny }}</template>
+                <span v-else class="meta">（未配置汇率）</span>
+              </span>
+              <span class="meta expense-date-remark">{{ row.remark }}</span>
+              <div class="expense-date-actions">
+                <el-button text size="small" type="primary" @click="openEdit(row)">编辑</el-button>
+                <el-button text size="small" type="danger" @click="remove(row)">删除</el-button>
+              </div>
+            </div>
+          </div>
+          <div class="meta" style="margin-top: 8px">
+            筛选合计 CNY ¥{{ dateGrouped.totalCny }}
+            <span v-if="dateGrouped.hasUnconfiguredCurrency">
+              · 未配置汇率：{{ dateGrouped.unconfiguredCurrencies.join('、') }}
+            </span>
+          </div>
+        </template>
+      </div>
     </el-card>
 
     <el-card v-if="summary" style="margin-top: 16px">
@@ -488,7 +822,10 @@ function todayString(): string {
       />
       <el-empty v-if="summary.groups.length === 0" description="当前筛选下暂无汇总数据" :image-size="70" />
       <template v-else>
-        <div ref="chartEl" class="expense-chart" />
+        <div class="expense-charts">
+          <div ref="chartEl" class="expense-chart" />
+          <div ref="categoryChartEl" class="expense-chart" />
+        </div>
         <el-table :data="summary.groups" style="margin-top: 12px">
           <el-table-column prop="label" label="分组" min-width="160" />
           <el-table-column prop="totalCny" label="CNY 小计" width="130" />
@@ -524,7 +861,10 @@ function todayString(): string {
           <el-input v-model="form.currency" maxlength="3" style="width: 120px" />
         </el-form-item>
         <el-form-item label="金额" required>
-          <el-input v-model="form.amount" placeholder="如 125.00，可为负数" />
+          <el-input v-model="form.amount" placeholder="如 125.00，支持 12+3.5*2，可为负数" />
+          <div v-if="amountPreview" class="meta" style="margin-top: 4px">
+            {{ amountPreview }}
+          </div>
         </el-form-item>
         <el-form-item label="分类">
           <el-select v-model="form.category" style="width: 100%">
@@ -547,9 +887,114 @@ function todayString(): string {
 </template>
 
 <style scoped>
+.expense-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
+  gap: 16px;
+  margin-top: 12px;
+}
+
 .expense-chart {
   width: 100%;
   height: 320px;
-  margin-top: 12px;
+}
+
+.month-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.month-head .trip-title {
+  margin-bottom: 0;
+}
+
+.month-total {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--tm-brand);
+}
+
+.month-originals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--tm-text-secondary);
+}
+
+.expense-date-group {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius);
+}
+
+.expense-date-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--tm-border);
+}
+
+.expense-date-total {
+  color: var(--tm-brand);
+  font-weight: 600;
+}
+
+.expense-date-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--tm-border);
+  font-size: 13px;
+}
+
+.expense-date-row:last-child {
+  border-bottom: 0;
+}
+
+.expense-date-place {
+  min-width: 110px;
+}
+
+.expense-date-amount {
+  min-width: 180px;
+}
+
+.expense-date-remark {
+  flex: 1;
+  min-width: 120px;
+}
+
+.expense-date-actions {
+  display: flex;
+  gap: 4px;
+}
+
+@media (max-width: 640px) {
+  .expense-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .expense-chart {
+    height: 260px;
+  }
+
+  .expense-date-row {
+    align-items: flex-start;
+  }
+
+  .expense-date-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 </style>

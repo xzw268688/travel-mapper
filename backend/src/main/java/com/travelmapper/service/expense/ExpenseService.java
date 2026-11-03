@@ -190,6 +190,67 @@ public class ExpenseService {
         return PageResult.of(page.getTotal(), request, rows);
     }
 
+    public ExpenseDtos.DateGroupedResponse byDate(Long userId, String countryCode, String cityCode,
+                                              Long tripId, Boolean ungrouped, String category,
+                                              LocalDate from, LocalDate to) {
+        LambdaQueryWrapper<Expense> wrapper = new LambdaQueryWrapper<Expense>()
+                .eq(Expense::getUserId, userId)
+                .eq(countryCode != null && !countryCode.isBlank(), Expense::getCountryCode,
+                        countryCode == null ? null : countryCode.toUpperCase(Locale.ROOT))
+                .eq(cityCode != null && !cityCode.isBlank(), Expense::getCityCode,
+                        cityCode == null ? null : cityCode.toUpperCase(Locale.ROOT))
+                .eq(tripId != null, Expense::getTripId, tripId)
+                .isNull(Boolean.TRUE.equals(ungrouped), Expense::getTripId)
+                .eq(category != null && !category.isBlank(), Expense::getCategory,
+                        category == null ? null : ExpenseCategory.valueOf(normalizeCategory(category)))
+                .ge(from != null, Expense::getExpenseDate, from)
+                .le(to != null, Expense::getExpenseDate, to)
+                .orderByDesc(Expense::getExpenseDate)
+                .orderByDesc(Expense::getId);
+        List<Expense> rows = expenseMapper.selectList(wrapper);
+
+        Map<LocalDate, List<ExpenseDtos.Response>> itemsByDate = new LinkedHashMap<>();
+        Map<LocalDate, BigDecimal> totalByDate = new LinkedHashMap<>();
+        Map<LocalDate, TreeMap<String, BigDecimal>> originalsByDate = new LinkedHashMap<>();
+        java.util.Set<String> unconfigured = new java.util.LinkedHashSet<>();
+        BigDecimal grandTotal = BigDecimal.ZERO;
+
+        for (Expense expense : rows) {
+            ExpenseDtos.Response response = toResponse(expense);
+            LocalDate date = expense.getExpenseDate();
+            itemsByDate.computeIfAbsent(date, key -> new ArrayList<>()).add(response);
+            originalsByDate.computeIfAbsent(date, key -> new TreeMap<>())
+                    .merge(expense.getCurrency(), expense.getAmount(), BigDecimal::add);
+            if (response.amountCny() != null) {
+                BigDecimal amountCny = new BigDecimal(response.amountCny());
+                totalByDate.merge(date, amountCny, BigDecimal::add);
+                grandTotal = grandTotal.add(amountCny);
+            } else {
+                unconfigured.add(expense.getCurrency());
+            }
+        }
+
+        List<ExpenseDtos.DateGroup> groups = new ArrayList<>();
+        for (Map.Entry<LocalDate, List<ExpenseDtos.Response>> entry : itemsByDate.entrySet()) {
+            LocalDate date = entry.getKey();
+            List<ExpenseDtos.CurrencyTotal> originals = originalsByDate.get(date).entrySet().stream()
+                    .map(item -> new ExpenseDtos.CurrencyTotal(
+                            item.getKey(), item.getValue().setScale(2, RoundingMode.HALF_UP).toPlainString()))
+                    .toList();
+            groups.add(new ExpenseDtos.DateGroup(
+                    date,
+                    totalByDate.getOrDefault(date, BigDecimal.ZERO)
+                            .setScale(2, RoundingMode.HALF_UP).toPlainString(),
+                    originals,
+                    entry.getValue()));
+        }
+        return new ExpenseDtos.DateGroupedResponse(
+                grandTotal.setScale(2, RoundingMode.HALF_UP).toPlainString(),
+                !unconfigured.isEmpty(),
+                new ArrayList<>(unconfigured),
+                groups);
+    }
+
     public ExpenseDtos.SummaryResponse summary(Long userId, String groupByCsv, String countryCode,
                                                Long tripId, LocalDate from, LocalDate to) {
         List<String> groupBy = parseGroupBy(groupByCsv);

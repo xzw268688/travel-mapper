@@ -42,6 +42,16 @@ for (const width of [1440, 390]) {
       })
     })
 
+    test(`截图 expenses-date @${width}`, async ({ page }) => {
+      await page.goto('/expenses')
+      await page.locator('.el-radio-button').filter({ hasText: '按日期' }).click()
+      await page.waitForTimeout(800)
+      await page.screenshot({
+        path: `test-results/screens/expenses-date-${width}.png`,
+        fullPage: false
+      })
+    })
+
     test(`截图 notes-polish @${width}`, async ({ page }) => {
       await page.goto('/notes')
       const editor = page.locator('.rich-editor-content').first()

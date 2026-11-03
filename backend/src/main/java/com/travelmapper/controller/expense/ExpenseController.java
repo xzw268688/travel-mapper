@@ -56,6 +56,19 @@ public class ExpenseController {
                 tripId, ungrouped, category, from, to, request));
     }
 
+    @GetMapping("/by-date")
+    public ApiResponse<ExpenseDtos.DateGroupedResponse> byDate(
+            @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String cityCode,
+            @RequestParam(required = false) Long tripId,
+            @RequestParam(required = false) Boolean ungrouped,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ApiResponse.ok(expenseService.byDate(CurrentUser.id(), countryCode, cityCode,
+                tripId, ungrouped, category, from, to));
+    }
+
     @GetMapping("/summary")
     public ApiResponse<ExpenseDtos.SummaryResponse> summary(
             @RequestParam(required = false) String groupBy,

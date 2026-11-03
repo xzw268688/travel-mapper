@@ -378,7 +378,7 @@ test('记账新增、编辑、删除与汇总图表', async ({ page }) => {
 
   await page.getByRole('button', { name: '记一笔' }).click()
   const dialog = page.getByRole('dialog').filter({ hasText: '记一笔' })
-  await dialog.getByPlaceholder('如 125.00，可为负数').fill(amount)
+  await dialog.getByPlaceholder('如 125.00，支持 12+3.5*2，可为负数').fill(amount)
   await dialog.getByPlaceholder('备注（可选）').fill(remark)
   await dialog.getByRole('button', { name: '保存消费' }).click()
   await expect(page.getByText(remark)).toBeVisible()
@@ -386,14 +386,51 @@ test('记账新增、编辑、删除与汇总图表', async ({ page }) => {
   const row = page.locator('.el-table__row').filter({ hasText: remark }).first()
   await row.getByRole('button', { name: '编辑' }).click()
   const editDialog = page.getByRole('dialog').filter({ hasText: '编辑消费' })
-  await editDialog.getByPlaceholder('如 125.00，可为负数').fill('999.99')
+  await editDialog.getByPlaceholder('如 125.00，支持 12+3.5*2，可为负数').fill('999.99')
   await editDialog.getByRole('button', { name: '保存消费' }).click()
   const updatedRow = page.locator('.el-table__row').filter({ hasText: remark }).first()
   await expect(updatedRow.getByText('999.99').first()).toBeVisible()
 
-  await expect(page.locator('.expense-chart canvas')).toBeVisible()
+  await expect(page.locator('.expense-chart canvas').first()).toBeVisible()
 
   await updatedRow.getByRole('button', { name: '删除' }).click()
+  await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+  await expect(page.getByText(remark)).toHaveCount(0)
+})
+
+test('记账快捷偏好、表达式与按日期视图', async ({ page }) => {
+  const remark = `E2E 快捷记账 ${Date.now()}`
+  await page.goto('/expenses')
+  await expect(page.getByText('月度合计')).toBeVisible()
+
+  await page.getByRole('button', { name: '记一笔' }).click()
+  let dialog = page.getByRole('dialog').filter({ hasText: '记一笔' })
+  await dialog.getByPlaceholder('如 125.00，支持 12+3.5*2，可为负数').fill('10+2.5*2')
+  await expect(dialog.getByText('= 15.00')).toBeVisible()
+  await dialog.getByPlaceholder('备注（可选）').fill(remark)
+  await dialog.getByRole('button', { name: '保存消费' }).click()
+  await expect(page.getByText(remark)).toBeVisible()
+  await expect(page.locator('.expense-chart canvas')).toHaveCount(2)
+
+  // 刷新后新增表单应记住上次的国家/币种/分类
+  await page.reload()
+  await page.getByRole('button', { name: '记一笔' }).click()
+  dialog = page.getByRole('dialog').filter({ hasText: '记一笔' })
+  await expect(
+    dialog.locator('.el-form-item').filter({ hasText: '币种' }).locator('input')
+  ).toHaveValue('CNY')
+  await expect(
+    dialog.locator('.el-form-item').filter({ hasText: '分类' }).locator('.el-select')
+  ).toContainText('餐饮')
+  await dialog.getByRole('button', { name: '取消' }).click()
+
+  await page.locator('.el-radio-button').filter({ hasText: '按日期' }).click()
+  const dateRow = page.locator('.expense-date-row').filter({ hasText: remark }).first()
+  await expect(dateRow).toBeVisible()
+  await expect(dateRow).toContainText('15.00')
+  await expect(page.locator('.expense-date-group').first()).toBeVisible()
+
+  await dateRow.getByRole('button', { name: '删除' }).click()
   await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
   await expect(page.getByText(remark)).toHaveCount(0)
 })

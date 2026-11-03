@@ -123,6 +123,49 @@ class ExpenseRateIntegrationTest extends AuthTestSupport {
     }
 
     @Test
+    void byDateGroupsAllMatchingExpensesWithOriginalCurrencyTotals() throws Exception {
+        User user = createVerifiedUser("expenseday");
+        String today = LocalDate.now().toString();
+        String yesterday = LocalDate.now().minusDays(1).toString();
+        for (Map<String, Object> body : List.of(
+                expenseBody("JP", "TYO", null, null, "JPY", "1000.00", "FOOD", today, "午餐"),
+                expenseBody("JP", null, null, null, "CNY", "50.00", "FOOD", today, "小吃"),
+                expenseBody("JP", null, null, null, "XYZ", "10.00", "FOOD", today, "未知币种"),
+                expenseBody("JP", null, null, null, "CNY", "20.00", "SHOPPING", yesterday, "购物"))) {
+            mockMvc.perform(withToken(post("/api/expenses"), user)
+                            .contentType(MediaType.APPLICATION_JSON).content(json(body)))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(withToken(get("/api/expenses/by-date"), user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalCny").value("118.00"))
+                .andExpect(jsonPath("$.data.hasUnconfiguredCurrency").value(true))
+                .andExpect(jsonPath("$.data.unconfiguredCurrencies[0]").value("XYZ"))
+                .andExpect(jsonPath("$.data.groups.length()").value(2))
+                .andExpect(jsonPath("$.data.groups[0].date").value(today))
+                .andExpect(jsonPath("$.data.groups[0].totalCny").value("98.00"))
+                .andExpect(jsonPath("$.data.groups[0].items.length()").value(3))
+                .andExpect(jsonPath("$.data.groups[0].originalCurrencies[?(@.currency == 'JPY')].total")
+                        .value(org.hamcrest.Matchers.hasItem("1000.00")))
+                .andExpect(jsonPath("$.data.groups[1].date").value(yesterday))
+                .andExpect(jsonPath("$.data.groups[1].totalCny").value("20.00"));
+
+        mockMvc.perform(withToken(get("/api/expenses/by-date"), user)
+                        .param("category", "FOOD")
+                        .param("from", today)
+                        .param("to", today))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalCny").value("98.00"))
+                .andExpect(jsonPath("$.data.groups.length()").value(1));
+
+        User other = createVerifiedUser("expenseday2");
+        mockMvc.perform(withToken(get("/api/expenses/by-date"), other))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.groups.length()").value(0));
+    }
+
+    @Test
     void summaryGroupingAndTripAssociation() throws Exception {
         User user = createVerifiedUser("expsum");
         long tripId = insertTrip(user, "JP", "日本旅行");

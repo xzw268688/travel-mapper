@@ -101,4 +101,18 @@ public final class ExpenseDtos {
 
     public record CurrencyTotal(String currency, String total) {
     }
+
+    public record DateGroupedResponse(
+            String totalCny,
+            boolean hasUnconfiguredCurrency,
+            List<String> unconfiguredCurrencies,
+            List<DateGroup> groups) {
+    }
+
+    public record DateGroup(
+            LocalDate date,
+            String totalCny,
+            List<CurrencyTotal> originalCurrencies,
+            List<Response> items) {
+    }
 }

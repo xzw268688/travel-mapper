@@ -1971,7 +1971,7 @@ Idempotency-Key: <uuid>
 | `itineraryId` | 否 | 关联行程 → 自动继承 `tripId` |
 | `tripId` | 否 | 不关联行程时手动归组；`null` = 未归组 |
 | `currency` | 是 | ISO 4217，如 `JPY`、`CNY` |
-| `amount` | 是 | 字符串，两位小数；**允许负数**表示退款 |
+| `amount` | 是 | 字符串，最多两位小数；**允许负数**表示退款。前端可输入 `10+2.5*2` 等表达式，由前端计算后提交最终金额 |
 | `category` | 是 | 固定 7 类，见第 14 章 |
 | `expenseDate` | 是 | 不得晚于今天 |
 | `remark` | 否 | ≤ 100 字 |
@@ -2137,6 +2137,68 @@ Idempotency-Key: <uuid>
 - 未配置汇率的记录不计入 `totalCny`，只在 `unconfiguredCurrencies` 中列出
 - 负数金额参与 SUM
 - 默认视图为"按国家汇总"；切"按旅行拆分"传 `groupBy=trip`
+
+---
+
+### 10.6 按日期分组消费
+
+`GET /expenses/by-date` ｜ 需鉴权
+
+返回当前用户全部匹配消费并按日期分组，每日合计不受分页影响。
+
+**查询参数**：与 10.4 消费列表一致（`countryCode`、`cityCode`、`tripId`、`ungrouped`、`category`、`from`、`to`），无分页参数。
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "totalCny": "118.00",
+    "hasUnconfiguredCurrency": true,
+    "unconfiguredCurrencies": ["XYZ"],
+    "groups": [
+      {
+        "date": "2025-06-02",
+        "totalCny": "98.00",
+        "originalCurrencies": [
+          { "currency": "CNY", "total": "50.00" },
+          { "currency": "JPY", "total": "1000.00" }
+        ],
+        "items": [
+          {
+            "id": 8,
+            "countryCode": "JP",
+            "countryName": "日本",
+            "cityCode": "TYO",
+            "cityName": "东京",
+            "tripId": 101,
+            "currency": "JPY",
+            "amount": "1000.00",
+            "exchangeRateSnapshot": "0.048000",
+            "amountCny": "48.00",
+            "rateMissing": false,
+            "category": "FOOD",
+            "expenseDate": "2025-06-02",
+            "remark": "午餐",
+            "createdAt": "2025-06-02T12:00:00"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**说明**
+
+- 日期倒序，组内按 ID 倒序
+- 未配置汇率的记录仍出现在明细中，但不计入 `totalCny`
+- `originalCurrencies` 为该日按币种汇总的原币金额
+- 只返回本人未删除消费，越权不可见
+
+**错误**：`2001`（日期/分类格式非法）
 
 ---
 
@@ -3106,6 +3168,7 @@ location /api/ai/polish/stream {
 | 记账 | PUT | `/expenses/{id}` | 是 | — |
 | 记账 | DELETE | `/expenses/{id}` | 是 | — |
 | 记账 | GET | `/expenses/summary` | 是 | — |
+| 记账 | GET | `/expenses/by-date` | 是 | 按日期分组 |
 | 卡密 | POST | `/card/redeem` | 是 | — |
 | 额度 | GET | `/quota/me` | 是 | — |
 | 后台 | GET/PUT | `/admin/config/llm` | 管理员 | — |

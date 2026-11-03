@@ -53,6 +53,20 @@ export interface ExpenseSummary {
   groups: SummaryGroup[]
 }
 
+export interface ExpenseDateGroup {
+  date: string
+  totalCny: string
+  originalCurrencies: Array<{ currency: string; total: string }>
+  items: ExpenseResponse[]
+}
+
+export interface ExpenseDateGrouped {
+  totalCny: string
+  hasUnconfiguredCurrency: boolean
+  unconfiguredCurrencies: string[]
+  groups: ExpenseDateGroup[]
+}
+
 export interface ExpenseFilters {
   countryCode?: string
   tripId?: number
@@ -74,6 +88,12 @@ export function updateExpense(id: number, body: Record<string, unknown>): Promis
 
 export function deleteExpense(id: number): Promise<unknown> {
   return apiDelete(`/expenses/${id}`)
+}
+
+export function listExpensesByDate(
+  params: Record<string, unknown> = {}
+): Promise<ExpenseDateGrouped> {
+  return apiGet<ExpenseDateGrouped>('/expenses/by-date', params)
 }
 
 export function getExpenseSummary(
