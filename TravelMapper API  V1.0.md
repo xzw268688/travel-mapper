@@ -2390,6 +2390,47 @@ Idempotency-Key: 0b5c8e41-2f3a-4d5b-9c6e-7f8a9b0c1d2e
 
 ---
 
+### 12.4.1 邮件 SMTP 配置
+
+`GET /admin/config/mail` ｜ `PUT /admin/config/mail`
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "enabled": true,
+    "host": "smtp.example.com",
+    "port": 587,
+    "username": "mailer@example.com",
+    "password": "****",
+    "from": "no-reply@example.com",
+    "smtpAuth": true,
+    "starttls": true
+  }
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `enabled` | 是否启用 SMTP；关闭时回退日志发送器 |
+| `host` / `port` | SMTP 主机与端口（1–65535） |
+| `username` / `password` | 认证信息；密码 AES 加密，读取仅掩码，PUT 留空保留 |
+| `from` | 发件人邮箱；启用时必填且需包含 `@` |
+| `smtpAuth` / `starttls` | SMTP 认证与 STARTTLS 开关 |
+
+**说明**
+
+- 保存后立即热加载，下一次发送验证码/重置密码邮件使用新配置
+- 启用 SMTP 后开发环境不再在日志打印验证码
+- 未配置 DB 值时使用环境变量 `MAIL_*` 作为默认值
+
+**错误**：`2001`（启用时缺主机/发件人非法/端口越界）、`4002`
+
+---
+
 ### 12.5 批量生成卡密
 
 `POST /admin/cards/generate`
@@ -3174,6 +3215,7 @@ location /api/ai/polish/stream {
 | 后台 | GET/PUT | `/admin/config/llm` | 管理员 | — |
 | 后台 | GET/PUT | `/admin/config/oss` | 管理员 | — |
 | 后台 | GET/PUT | `/admin/config/search` | 管理员 | — |
+| 后台 | GET/PUT | `/admin/config/mail` | 管理员 | — |
 | 后台 | POST | `/admin/cards/generate` | 管理员 | — |
 | 后台 | GET | `/admin/cards` | 管理员 | — |
 | 后台 | GET | `/admin/cards/export` | 管理员 | — |

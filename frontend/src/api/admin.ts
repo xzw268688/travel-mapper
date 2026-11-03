@@ -56,6 +56,44 @@ export function updateSearchConfig(body: Partial<SearchConfig>): Promise<SearchC
   return apiPut<SearchConfig>('/admin/config/search', body)
 }
 
+export interface StorageConfig {
+  provider: string
+  endpoint: string
+  region: string
+  bucket: string
+  accessKey: string
+  secretKey: string
+  pathStyle: boolean
+  publicDomain: string
+}
+
+export interface MailConfig {
+  enabled: boolean
+  host: string
+  port: number
+  username: string
+  password: string
+  from: string
+  smtpAuth: boolean
+  starttls: boolean
+}
+
+export function getStorageConfig(): Promise<StorageConfig> {
+  return apiGet<StorageConfig>('/admin/config/oss')
+}
+
+export function updateStorageConfig(body: Partial<StorageConfig>): Promise<StorageConfig> {
+  return apiPut<StorageConfig>('/admin/config/oss', body)
+}
+
+export function getMailConfig(): Promise<MailConfig> {
+  return apiGet<MailConfig>('/admin/config/mail')
+}
+
+export function updateMailConfig(body: Partial<MailConfig>): Promise<MailConfig> {
+  return apiPut<MailConfig>('/admin/config/mail', body)
+}
+
 export interface AdminUserView {
   id: number
   username: string

@@ -248,6 +248,19 @@ test('公开分享页无需登录即可访问', async ({ browser }) => {
   }
 })
 
+test('后台管理与配置菜单拆分', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('.admin-menu').filter({ hasText: '管理' })).toBeVisible()
+  await expect(page.locator('.admin-menu').filter({ hasText: '配置' })).toBeVisible()
+
+  await page.locator('.admin-menu').filter({ hasText: '配置' }).click()
+  await page.getByRole('menuitem', { name: '邮件 SMTP' }).click()
+  await expect(page).toHaveURL(/\/admin\/settings\?tab=mail/)
+  await expect(page.getByRole('tab', { name: '邮件 SMTP' })).toBeVisible()
+  await expect(page.getByText('SMTP 主机')).toBeVisible()
+  await expect(page.getByRole('tab')).toHaveCount(4)
+})
+
 test('后台汇率与内容管理页面可访问', async ({ page }) => {
   await page.goto('/admin/rates')
   await expect(page.locator('.trip-title').getByText('汇率维护')).toBeVisible()

@@ -11,7 +11,8 @@ const PAGES: Array<{ name: string; path: string; ready: string }> = [
   { name: 'notes', path: '/notes', ready: 'text=发布游记' },
   { name: 'expenses', path: '/expenses', ready: 'text=记账' },
   { name: 'profile', path: '/profile', ready: 'text=个人资料' },
-  { name: 'admin-users', path: '/admin/users', ready: 'text=用户管理' }
+  { name: 'admin-users', path: '/admin/users', ready: 'text=用户管理' },
+  { name: 'admin-mail', path: '/admin/settings?tab=mail', ready: 'text=SMTP 主机' }
 ]
 
 for (const width of [1440, 390]) {

@@ -83,7 +83,13 @@ app:
     jwt-ttl-seconds: ${TRAVELMAPPER_JWT_TTL:604800}
   mail:
     enabled: ${MAIL_ENABLED:false}
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:25}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
     from: ${MAIL_FROM:no-reply@travelmapper.local}
+    smtp-auth: ${MAIL_SMTP_AUTH:false}
+    smtp-starttls: ${MAIL_SMTP_STARTTLS:false}
   crypto:
     aes-key: ${TRAVELMAPPER_AES_KEY:}
   storage:

@@ -141,6 +141,8 @@ test.describe('验证码流程', () => {
     // 注册成功自动登录并进入地图
     await expect(page).toHaveURL(/\/$/)
     await expect(page.locator('.user-menu')).toBeVisible()
+    // 普通用户不显示后台「管理 / 配置」入口
+    await expect(page.locator('.admin-menu')).toHaveCount(0)
 
     // 普通用户从管理员入口登录应被拒绝并清除登录态
     await logout(page)

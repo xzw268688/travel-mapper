@@ -62,6 +62,10 @@ curl -H 'Authorization: Bearer <token>' http://localhost:8080/api/user/profile
 
 前端 `/register` 在邮箱下方直接填 6 位验证码，注册成功自动登录。注册与找回密码使用邮箱验证码；开发期 `MAIL_ENABLED=false` 时邮件不会发送，验证码只打印在后端日志（`[auth-dev] scene=... email=... code=...`），按日志填写即可。管理员后台入口为 `/admin/login`。普通用户访问 `/api/admin/**` 返回 403 `4002`。
 
+## 邮件 SMTP 配置
+
+开发期默认 `MAIL_ENABLED=false`，验证码只打印在后端日志。需要真实发信时可在后台「配置 → 邮件 SMTP」填写主机、端口、账号、密码、发件人并启用，保存后立即热加载，无需重启；密码留空表示保留原值。未保存过 DB 配置时使用环境变量 `MAIL_*` 作为默认值。
+
 ## LLM / 搜索配置
 
 种子配置中 `llm.provider=qwen`、`search.provider=tavily`，API Key 为空。填写后即时热加载：

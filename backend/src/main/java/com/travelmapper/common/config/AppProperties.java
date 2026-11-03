@@ -28,7 +28,13 @@ public class AppProperties {
     @Data
     public static class Mail {
         private boolean enabled = false;
+        private String host = "localhost";
+        private int port = 25;
+        private String username = "";
+        private String password = "";
         private String from = "no-reply@travelmapper.local";
+        private boolean smtpAuth = false;
+        private boolean smtpStarttls = false;
     }
 
     @Data

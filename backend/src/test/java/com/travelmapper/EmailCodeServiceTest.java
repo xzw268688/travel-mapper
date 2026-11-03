@@ -4,8 +4,11 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.travelmapper.common.api.BusinessException;
-import com.travelmapper.common.config.AppProperties;
 import com.travelmapper.service.auth.EmailCodeService;
+import com.travelmapper.service.auth.MailSenderHolder;
+import com.travelmapper.service.config.ConfigEntry;
+import com.travelmapper.service.config.ConfigKeys;
+import com.travelmapper.service.config.ConfigService;
 import com.travelmapper.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,15 +37,16 @@ class EmailCodeServiceTest extends AbstractIntegrationTest {
     private EmailCodeService emailCodeService;
 
     @Autowired
-    private AppProperties properties;
+    private ConfigService configService;
+
+    @Autowired
+    private MailSenderHolder mailSenderHolder;
 
     private Logger codeLogger;
     private ListAppender<ILoggingEvent> appender;
-    private boolean originalMailEnabled;
 
     @BeforeEach
     void attachLogAppender() {
-        originalMailEnabled = properties.getMail().isEnabled();
         codeLogger = (Logger) LoggerFactory.getLogger(EmailCodeService.class);
         appender = new ListAppender<>();
         appender.start();
@@ -51,24 +55,33 @@ class EmailCodeServiceTest extends AbstractIntegrationTest {
 
     @AfterEach
     void detachLogAppender() {
-        properties.getMail().setEnabled(originalMailEnabled);
+        jdbcTemplate.update("DELETE FROM sys_config WHERE config_key LIKE 'mail.%'");
+        mailSenderHolder.reload();
         if (codeLogger != null && appender != null) {
             codeLogger.detachAppender(appender);
             appender.stop();
         }
     }
 
+    private void configureMail(boolean enabled) {
+        configService.updateGroup(java.util.Map.of(
+                ConfigKeys.MAIL_ENABLED, ConfigEntry.plain(String.valueOf(enabled), "test"),
+                ConfigKeys.MAIL_HOST, ConfigEntry.plain("smtp.example.com", "test"),
+                ConfigKeys.MAIL_FROM, ConfigEntry.plain("no-reply@example.com", "test")), 1L);
+        mailSenderHolder.reload();
+    }
+
     @Test
     void devModeLogsCodeButProductionDoesNot() {
         String email = uniq() + "@example.com";
 
-        properties.getMail().setEnabled(false);
+        configureMail(false);
         emailCodeService.issue(email, EmailCodeService.Scene.VERIFY);
         String logged = devCodeFromLog(email);
         assertThat(logged).hasSize(6);
 
         appender.list.clear();
-        properties.getMail().setEnabled(true);
+        configureMail(true);
         emailCodeService.issue(email, EmailCodeService.Scene.RESET);
         assertThat(devCodeFromLog(email)).isNull();
         assertThat(capturingMail.lastCode(email)).isNotNull();
@@ -77,7 +90,6 @@ class EmailCodeServiceTest extends AbstractIntegrationTest {
     @Test
     void issuingNewCodeInvalidatesThePreviousOne() {
         String email = uniq() + "@example.com";
-        properties.getMail().setEnabled(true);
 
         emailCodeService.issue(email, EmailCodeService.Scene.VERIFY);
         String first = capturingMail.lastCode(email);
@@ -93,7 +105,6 @@ class EmailCodeServiceTest extends AbstractIntegrationTest {
     @Test
     void codeIsConsumedOnceAndRemoved() {
         String email = uniq() + "@example.com";
-        properties.getMail().setEnabled(true);
         emailCodeService.issue(email, EmailCodeService.Scene.RESET);
         String code = capturingMail.lastCode(email);
 
@@ -105,7 +116,6 @@ class EmailCodeServiceTest extends AbstractIntegrationTest {
     @Test
     void concurrentWrongAttemptsCannotExceedTheAttemptLimit() throws Exception {
         String email = uniq() + "@example.com";
-        properties.getMail().setEnabled(true);
         emailCodeService.issue(email, EmailCodeService.Scene.VERIFY);
         String code = capturingMail.lastCode(email);
         String wrong = code.equals("000000") ? "111111" : "000000";

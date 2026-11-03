@@ -59,7 +59,17 @@ function onUserCommand(command: string): void {
               <el-dropdown-item command="/admin/official-links">官方链接</el-dropdown-item>
               <el-dropdown-item command="/admin/rates">汇率维护</el-dropdown-item>
               <el-dropdown-item command="/admin/notes">内容管理</el-dropdown-item>
-              <el-dropdown-item command="/admin/settings">AI 配置</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-dropdown v-if="auth.user?.role === 'ADMIN'" @command="openAdmin">
+          <span class="admin-menu">配置 ▾</span>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="/admin/settings?tab=llm">AI 模型</el-dropdown-item>
+              <el-dropdown-item command="/admin/settings?tab=search">攻略搜索</el-dropdown-item>
+              <el-dropdown-item command="/admin/settings?tab=storage">对象存储</el-dropdown-item>
+              <el-dropdown-item command="/admin/settings?tab=mail">邮件 SMTP</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>

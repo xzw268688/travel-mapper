@@ -55,15 +55,18 @@ public class EmailCodeService {
     private final StringRedisTemplate redis;
     private final RedisRateLimiter rateLimiter;
     private final EmailSender emailSender;
+    private final MailSenderHolder mailSenderHolder;
     private final AppProperties properties;
     private final SecureRandom random = new SecureRandom();
     private final byte[] hmacKey;
 
     public EmailCodeService(StringRedisTemplate redis, RedisRateLimiter rateLimiter,
-                            EmailSender emailSender, AppProperties properties) {
+                            EmailSender emailSender, MailSenderHolder mailSenderHolder,
+                            AppProperties properties) {
         this.redis = redis;
         this.rateLimiter = rateLimiter;
         this.emailSender = emailSender;
+        this.mailSenderHolder = mailSenderHolder;
         this.properties = properties;
         this.hmacKey = resolveKey(properties);
     }
@@ -99,7 +102,7 @@ public class EmailCodeService {
             log.error("verification email send failed scene={}", scene, ex);
             sent = false;
         }
-        if (!properties.getMail().isEnabled()) {
+        if (!mailSenderHolder.isSmtpEnabled()) {
             // 开发环境没有 SMTP：额外打印验证码便于本地调试；生产配置绝不打印。
             log.info("[auth-dev] scene={} email={} code={} expiresIn={}s",
                     scene, email, code, CODE_TTL_SECONDS);

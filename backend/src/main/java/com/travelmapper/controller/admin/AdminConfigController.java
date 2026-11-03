@@ -4,9 +4,11 @@ import com.travelmapper.common.api.ApiResponse;
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.audit.Auditable;
+import com.travelmapper.common.config.AppProperties;
 import com.travelmapper.common.crypto.AesCryptoService;
 import com.travelmapper.common.security.RequestContext;
 import com.travelmapper.controller.admin.dto.LlmConfigDto;
+import com.travelmapper.controller.admin.dto.MailConfigDto;
 import com.travelmapper.controller.admin.dto.SearchConfigDto;
 import com.travelmapper.controller.admin.dto.StorageConfigDto;
 import com.travelmapper.service.config.ConfigEntry;
@@ -34,12 +36,15 @@ public class AdminConfigController {
     private final ConfigService configService;
     private final ConfigReloadService reloadService;
     private final SearchProviderHolder searchProviderHolder;
+    private final AppProperties properties;
 
     public AdminConfigController(ConfigService configService, ConfigReloadService reloadService,
-                                 SearchProviderHolder searchProviderHolder) {
+                                 SearchProviderHolder searchProviderHolder,
+                                 AppProperties properties) {
         this.configService = configService;
         this.reloadService = reloadService;
         this.searchProviderHolder = searchProviderHolder;
+        this.properties = properties;
     }
 
     @GetMapping("/llm")
@@ -151,6 +156,57 @@ public class AdminConfigController {
                 "外链域名白名单，逗号分隔；V1 只记录不强制拦截");
         apply(updates);
         return getSearch();
+    }
+
+    @GetMapping("/mail")
+    public ApiResponse<MailConfigDto> getMail() {
+        AppProperties.Mail fallback = properties.getMail();
+        MailConfigDto dto = new MailConfigDto();
+        dto.setEnabled(configService.getBoolean(ConfigKeys.MAIL_ENABLED, fallback.isEnabled()));
+        dto.setHost(configService.get(ConfigKeys.MAIL_HOST, fallback.getHost()));
+        dto.setPort(configService.getInt(ConfigKeys.MAIL_PORT, fallback.getPort()));
+        dto.setUsername(configService.get(ConfigKeys.MAIL_USERNAME, fallback.getUsername()));
+        dto.setPassword(AesCryptoService.mask(
+                configService.get(ConfigKeys.MAIL_PASSWORD, fallback.getPassword())));
+        dto.setFrom(configService.get(ConfigKeys.MAIL_FROM, fallback.getFrom()));
+        dto.setSmtpAuth(configService.getBoolean(
+                ConfigKeys.MAIL_SMTP_AUTH, fallback.isSmtpAuth()));
+        dto.setStarttls(configService.getBoolean(
+                ConfigKeys.MAIL_SMTP_STARTTLS, fallback.isSmtpStarttls()));
+        return ApiResponse.ok(dto);
+    }
+
+    @PutMapping("/mail")
+    @Auditable(action = "CONFIG_UPDATE", targetType = "CONFIG")
+    public ApiResponse<MailConfigDto> updateMail(@RequestBody MailConfigDto dto) {
+        boolean enabled = Boolean.TRUE.equals(dto.getEnabled());
+        String host = dto.getHost() == null ? "" : dto.getHost().trim();
+        String from = dto.getFrom() == null ? "" : dto.getFrom().trim();
+        if (dto.getPort() != null && (dto.getPort() < 1 || dto.getPort() > 65535)) {
+            throw invalid("mail.port 必须在 1 到 65535 之间");
+        }
+        if (enabled) {
+            if (host.isBlank()) {
+                throw invalid("启用 SMTP 时必须填写主机");
+            }
+            if (!from.contains("@")) {
+                throw invalid("发件人邮箱格式非法");
+            }
+        }
+        Map<String, ConfigEntry> updates = new LinkedHashMap<>();
+        putText(updates, ConfigKeys.MAIL_ENABLED, String.valueOf(enabled), "是否启用 SMTP");
+        putText(updates, ConfigKeys.MAIL_HOST, host, "SMTP 主机");
+        putNumber(updates, ConfigKeys.MAIL_PORT, dto.getPort(), "SMTP 端口");
+        putText(updates, ConfigKeys.MAIL_USERNAME,
+                dto.getUsername() == null ? "" : dto.getUsername().trim(), "SMTP 用户名");
+        putSecret(updates, ConfigKeys.MAIL_PASSWORD, dto.getPassword(), "AES 加密存储");
+        putText(updates, ConfigKeys.MAIL_FROM, from, "发件人");
+        putText(updates, ConfigKeys.MAIL_SMTP_AUTH,
+                String.valueOf(Boolean.TRUE.equals(dto.getSmtpAuth())), "SMTP 认证");
+        putText(updates, ConfigKeys.MAIL_SMTP_STARTTLS,
+                String.valueOf(Boolean.TRUE.equals(dto.getStarttls())), "STARTTLS");
+        apply(updates);
+        return getMail();
     }
 
     private void apply(Map<String, ConfigEntry> updates) {
