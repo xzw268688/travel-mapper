@@ -39,7 +39,8 @@ test('地图 → 国家抽屉 → 打开行程编辑页', async ({ page }) => {
     guideSection.getByRole('button', { name: '生成攻略' }).or(guideSection.locator('.guide-content'))
   ).toBeVisible()
 
-  await drawer.locator('.archive-card').first().click()
+  // 抽屉按 进行中/计划中/已完成 分组，种子行程所属的旅行不一定是第一张卡片
+  await drawer.locator('.archive-card').filter({ hasText: state.tripName }).first().click()
   await expect(page).toHaveURL(/\/trips\/\d+$/)
 
   await page.locator('.trip-hub-row').filter({ hasText: state.itineraryTitle }).first().click()
@@ -89,8 +90,21 @@ test('行程编辑：景点与天的增删改', async ({ page }) => {
   await row.getByRole('button', { name: '编辑' }).click()
   dialog = page.getByRole('dialog').filter({ hasText: '编辑景点' })
   await dialog.locator('input').first().fill('E2E 编辑后景点')
+  await dialog.getByText('更多信息（门票、交通、亮点与提醒）').click()
+  await dialog.getByPlaceholder('原币文本，如 约 2000 円 / 免费').fill('约 500 円')
+  await dialog.getByPlaceholder('如 台东区').fill('台东区')
+  await dialog.getByPlaceholder('如 浅草站').fill('浅草站')
+  await dialog.locator('.el-switch').click()
   await dialog.getByRole('button', { name: '确定' }).click()
   await expect(page.getByText('E2E 编辑后景点', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('约 500 円').first()).toBeVisible()
+  await expect(page.getByText('需预约').first()).toBeVisible()
+
+  // 刷新后仍从服务端读回扩展字段
+  await page.reload()
+  row = page.locator('.fallback-row').filter({ hasText: 'E2E 编辑后景点' }).first()
+  await expect(row.getByText('约 500 円')).toBeVisible()
+  await expect(row.getByText('台东区')).toBeVisible()
 
   row = page.locator('.fallback-row').filter({ hasText: 'E2E 编辑后景点' }).first()
   await row.getByRole('button', { name: '移到…' }).click()
@@ -123,7 +137,7 @@ test('行程编辑：景点与天的增删改', async ({ page }) => {
 test('游记创建、分享与海报下载', async ({ page }) => {
   const title = `E2E UI 游记 ${Date.now()}`
   await page.goto('/notes')
-  await page.getByPlaceholder('标题').fill(title)
+  await page.getByPlaceholder('标题', { exact: true }).fill(title)
 
   await page.locator('.selector-row .el-select').nth(1).click()
   await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '东京' }).first().click()
@@ -157,7 +171,7 @@ test('游记创建、分享与海报下载', async ({ page }) => {
   await expect(page).toHaveURL(/\/notes$/)
 })
 
-test('编辑器内选中文本流式润色并替换', async ({ page }) => {
+test('编辑器内选中文本流式润色后手动采用', async ({ page }) => {
   await page.goto('/notes')
   const editor = page.locator('.rich-editor-content').first()
   await editor.click()
@@ -179,9 +193,15 @@ test('编辑器内选中文本流式润色并替换', async ({ page }) => {
   })
 
   await page.locator('.rich-editor-toolbar').getByRole('button', { name: 'AI 润色' }).click()
-  await expect(editor).toContainText('这是润色后的文本')
-  await expect(page.getByText('润色完成，已替换选中文本')).toBeVisible()
+  // 结果先进入独立结果区，正文保持不变
+  await expect(page.locator('.polish-preview')).toContainText('这是润色后的文本')
+  await expect(editor).toContainText('这是需要润色的原文')
+  await expect(editor).not.toContainText('这是润色后的文本')
   expect(JSON.parse(requestBody).target).toBe('selected')
+
+  await page.getByRole('button', { name: '采用' }).click()
+  await expect(editor).toContainText('这是润色后的文本')
+  await expect(page.getByText('已采用润色结果')).toBeVisible()
 })
 
 test('编辑器润色取消不修改正文', async ({ page }) => {
@@ -211,7 +231,7 @@ test('编辑器润色取消不修改正文', async ({ page }) => {
 test('游记视频上传、保存与播放', async ({ page }) => {
   const title = `E2E 视频游记 ${Date.now()}`
   await page.goto('/notes')
-  await page.getByPlaceholder('标题').fill(title)
+  await page.getByPlaceholder('标题', { exact: true }).fill(title)
   await page.locator('.selector-row .el-select').nth(1).click()
   await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '东京' }).first().click()
 
@@ -253,6 +273,11 @@ test('后台管理与配置菜单拆分', async ({ page }) => {
   await expect(page.locator('.admin-menu').filter({ hasText: '管理' })).toBeVisible()
   await expect(page.locator('.admin-menu').filter({ hasText: '配置' })).toBeVisible()
 
+  await page.locator('.admin-menu').filter({ hasText: '管理' }).click()
+  await expect(page.getByRole('menuitem', { name: '日志管理' })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: '官方链接' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
   await page.locator('.admin-menu').filter({ hasText: '配置' }).click()
   await page.getByRole('menuitem', { name: '邮件 SMTP' }).click()
   await expect(page).toHaveURL(/\/admin\/settings\?tab=mail/)
@@ -267,8 +292,17 @@ test('后台汇率与内容管理页面可访问', async ({ page }) => {
   await expect(page.locator('.el-table').getByText('CNY').first()).toBeVisible()
 
   await page.goto('/admin/notes')
-  await expect(page.locator('.trip-title').getByText('内容下架与恢复')).toBeVisible()
-  await expect(page.getByPlaceholder('游记 ID')).toBeVisible()
+  await expect(page.locator('.trip-title').getByText('内容管理')).toBeVisible()
+  await expect(page.getByPlaceholder('标题 / 作者')).toBeVisible()
+  await expect(page.locator('.el-table__row').first()).toBeVisible()
+
+  await page.goto('/admin/audit')
+  await expect(page).toHaveURL(/\/admin\/logs\?tab=operations/)
+  await expect(page.locator('.trip-title').getByText('日志管理')).toBeVisible()
+  await expect(page.getByRole('tab', { name: '操作日志' })).toBeVisible()
+  await expect(page.locator('.el-table__row').first()).toBeVisible()
+  await page.getByRole('tab', { name: '登录日志' }).click()
+  await expect(page.getByPlaceholder('账号（模糊）')).toBeVisible()
 
   await page.goto('/admin/settings')
   await expect(page.locator('.trip-title').getByText('AI 行程模型（LLM）')).toBeVisible()
@@ -349,8 +383,11 @@ test('手动规划：创建草稿、添加景点并保存', async ({ page }) => 
   await firstDay.getByRole('button', { name: '+ 添加手动景点' }).click()
   const dialog = page.getByRole('dialog').filter({ hasText: '添加手动景点' })
   await dialog.locator('input').first().fill('E2E 手动景点')
+  await dialog.getByText('更多信息（门票、交通、亮点与提醒）').click()
+  await dialog.getByPlaceholder('原币文本，如 约 2000 円 / 免费').fill('免费')
   await dialog.getByRole('button', { name: '确定' }).click()
   await expect(firstDay.getByText('E2E 手动景点')).toBeVisible()
+  await expect(firstDay.getByText('免费')).toBeVisible()
 
   await page.getByRole('button', { name: '保存行程', exact: true }).click()
   const savedAlert = page.locator('.el-alert').filter({ hasText: '已保存行程' })
@@ -414,7 +451,7 @@ test('记账新增、编辑、删除与汇总图表', async ({ page }) => {
 test('记账快捷偏好、表达式与按日期视图', async ({ page }) => {
   const remark = `E2E 快捷记账 ${Date.now()}`
   await page.goto('/expenses')
-  await expect(page.getByText('月度合计')).toBeVisible()
+  await expect(page.getByText('月度合计', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: '记一笔' }).click()
   let dialog = page.getByRole('dialog').filter({ hasText: '记一笔' })
@@ -446,4 +483,25 @@ test('记账快捷偏好、表达式与按日期视图', async ({ page }) => {
   await dateRow.getByRole('button', { name: '删除' }).click()
   await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
   await expect(page.getByText(remark)).toHaveCount(0)
+})
+
+test('顶栏返回与记账页操作分区', async ({ page }) => {
+  // 首页不显示返回
+  await page.goto('/')
+  await expect(page.locator('.back-button')).toHaveCount(0)
+
+  // 子页面显示返回，点击回到上一页
+  await page.goto('/notes')
+  await expect(page.locator('.back-button')).toBeVisible()
+  await page.locator('.back-button').click()
+  await expect(page).toHaveURL(/\/$/)
+
+  // 记账：记一笔在标题栏，筛选区只有查询/重置
+  await page.goto('/expenses')
+  const head = page.locator('.expense-card-head')
+  await expect(head.getByRole('button', { name: '记一笔' })).toBeVisible()
+  const filterArea = page.locator('.el-card').first().locator('.el-card__body')
+  await expect(filterArea.getByRole('button', { name: '查询' })).toBeVisible()
+  await expect(filterArea.getByRole('button', { name: '重置' })).toBeVisible()
+  await expect(filterArea.getByRole('button', { name: '记一笔' })).toHaveCount(0)
 })

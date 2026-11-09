@@ -65,6 +65,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.github.oshi</groupId>
+            <artifactId>oshi-core</artifactId>
+            <version>6.10.0</version>
+        </dependency>
 
         <dependency>
             <groupId>com.baomidou</groupId>

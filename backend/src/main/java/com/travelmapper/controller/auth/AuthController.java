@@ -43,8 +43,10 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ApiResponse.ok(authService.login(request));
+    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request,
+                                            HttpServletRequest servletRequest) {
+        return ApiResponse.ok(authService.login(
+                request, clientIp(servletRequest), clientUserAgent(servletRequest)));
     }
 
     @PostMapping("/reset-password")
@@ -69,5 +71,9 @@ public class AuthController {
             }
         }
         return request.getRemoteAddr();
+    }
+
+    private String clientUserAgent(HttpServletRequest request) {
+        return request.getHeader("User-Agent");
     }
 }

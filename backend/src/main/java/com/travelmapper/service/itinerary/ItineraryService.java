@@ -18,6 +18,7 @@ import com.travelmapper.repository.mapper.ItineraryDayMapper;
 import com.travelmapper.repository.mapper.ItineraryMapper;
 import com.travelmapper.repository.mapper.ItinerarySpotMapper;
 import com.travelmapper.repository.mapper.TripMapper;
+import com.travelmapper.service.audit.AuditLogService;
 import com.travelmapper.service.catalog.CatalogService;
 import com.travelmapper.service.map.MapService;
 import com.travelmapper.service.quota.QuotaDeduction;
@@ -40,6 +41,14 @@ import java.util.Map;
 @Service
 public class ItineraryService {
 
+    private static final int CATEGORY_MAX = 32;
+    private static final int TICKET_PRICE_MAX = 64;
+    private static final int HIGHLIGHTS_MAX = 255;
+    private static final int BEST_TIME_MAX = 64;
+    private static final int NEAREST_STATION_MAX = 128;
+    private static final int AREA_MAX = 128;
+    private static final int WARNING_NOTES_MAX = 255;
+
     private final ItineraryMapper itineraryMapper;
     private final ItineraryDayMapper dayMapper;
     private final ItinerarySpotMapper spotMapper;
@@ -51,13 +60,15 @@ public class ItineraryService {
     private final ObjectMapper objectMapper;
     private final QuotaService quotaService;
     private final ItineraryGenerationService generationService;
+    private final AuditLogService auditLogService;
 
     public ItineraryService(ItineraryMapper itineraryMapper, ItineraryDayMapper dayMapper,
                             ItinerarySpotMapper spotMapper, TripMapper tripMapper,
                             TripService tripService, CatalogService catalogService,
                             MapService mapService, GuideLinkSanitizer guideLinkSanitizer,
                             ObjectMapper objectMapper, QuotaService quotaService,
-                            ItineraryGenerationService generationService) {
+                            ItineraryGenerationService generationService,
+                            AuditLogService auditLogService) {
         this.itineraryMapper = itineraryMapper;
         this.dayMapper = dayMapper;
         this.spotMapper = spotMapper;
@@ -69,6 +80,7 @@ public class ItineraryService {
         this.objectMapper = objectMapper;
         this.quotaService = quotaService;
         this.generationService = generationService;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -135,6 +147,11 @@ public class ItineraryService {
         itineraryMapper.insert(itinerary);
         insertDays(itinerary.getId(), days, countryCode);
         tripService.recalculateDates(trip.getId());
+        int spotCount = days.stream()
+                .mapToInt(day -> day.getSpots() == null ? 0 : day.getSpots().size())
+                .sum();
+        auditLogService.record(userId, "ITINERARY_CREATE", "ITINERARY", itinerary.getId(),
+                Map.of("dayCount", days.size(), "spotCount", spotCount), null);
         return new ItineraryDtos.SaveResponse(
                 itinerary.getId(), trip.getId(), trip.getName(), tripCreated,
                 mapService.statusFor(userId, countryCode),
@@ -182,18 +199,31 @@ public class ItineraryService {
         if (itinerary.getTripId() != null) {
             tripService.recalculateDates(itinerary.getTripId());
         }
+        List<String> changed = new ArrayList<>();
+        if (request.getTitle() != null) {
+            changed.add("title");
+        }
+        if (request.getStartDate() != null || request.getEndDate() != null) {
+            changed.add("dates");
+        }
+        auditLogService.record(userId, "ITINERARY_UPDATE", "ITINERARY", id,
+                Map.of("changed", changed), null);
         return toResponse(requireOwned(userId, id));
     }
 
     @Transactional
     public ItineraryDtos.DeleteResponse delete(Long userId, Long id) {
         Itinerary itinerary = requireOwned(userId, id);
+        Long tripId = itinerary.getTripId();
         itineraryMapper.deleteById(id);
-        if (itinerary.getTripId() != null) {
-            tripService.recalculateDates(itinerary.getTripId());
+        if (tripId != null) {
+            tripService.recalculateDates(tripId);
         }
+        boolean tripDeleted = tripService.deleteIfEmpty(tripId);
+        auditLogService.record(userId, "ITINERARY_DELETE", "ITINERARY", id,
+                Map.of("tripDeleted", tripDeleted), null);
         return new ItineraryDtos.DeleteResponse(id,
-                mapService.statusFor(userId, itinerary.getCountryCode()));
+                mapService.statusFor(userId, itinerary.getCountryCode()), tripDeleted);
     }
 
     @Transactional
@@ -261,12 +291,18 @@ public class ItineraryService {
                 dayMapper.insert(day);
                 int order = 0;
                 for (GenerateItineraryResponse.SpotPlan spot : planDay.spots()) {
-                    insertSpot(day.getId(), order++, SpotSource.AI, spot.name(),
-                            spot.description(), spot.suggestedDuration());
+                    insertSpot(day.getId(), order++, SpotSource.AI, spotFields(
+                            spot.name(), spot.description(), spot.suggestedDuration(),
+                            spot.category(), spot.ticketPrice(), spot.highlights(),
+                            spot.bestTime(), spot.nearestStation(),
+                            spot.reservationRequired(), spot.area(), spot.warningNotes()));
                 }
                 for (ItinerarySpot manual : merged.getOrDefault(planDay.dayIndex(), List.of())) {
-                    insertSpot(day.getId(), order++, SpotSource.MANUAL, manual.getName(),
-                            manual.getDescription(), manual.getSuggestedDuration());
+                    insertSpot(day.getId(), order++, SpotSource.MANUAL, spotFields(
+                            manual.getName(), manual.getDescription(), manual.getSuggestedDuration(),
+                            manual.getCategory(), manual.getTicketPrice(), manual.getHighlights(),
+                            manual.getBestTime(), manual.getNearestStation(),
+                            manual.getReservationRequired(), manual.getArea(), manual.getWarningNotes()));
                 }
             }
             itinerary.setPreparationsJson(toJson(plan.preparations()));
@@ -276,6 +312,9 @@ public class ItineraryService {
                 tripService.recalculateDates(itinerary.getTripId());
             }
             ItineraryDtos.Response response = toResponse(requireOwned(userId, id));
+            auditLogService.record(userId, "ITINERARY_GENERATE", "ITINERARY", id,
+                    Map.of("mode", "REGENERATE", "dayCount", plan.days().size(),
+                            "manualSpotCount", manualSpots.size()), null);
             return new ItineraryDtos.RegenerateResponse(
                     response,
                     manualSpots.size(),
@@ -310,9 +349,11 @@ public class ItineraryService {
         spot.setDayId(dayId);
         spot.setSortOrder(index);
         spot.setSource(SpotSource.MANUAL);
-        spot.setName(request.getName());
-        spot.setDescription(request.getDescription());
-        spot.setSuggestedDuration(request.getSuggestedDuration());
+        applySpot(spot, spotFields(
+                request.getName(), request.getDescription(), request.getSuggestedDuration(),
+                request.getCategory(), request.getTicketPrice(), request.getHighlights(),
+                request.getBestTime(), request.getNearestStation(),
+                request.getReservationRequired(), request.getArea(), request.getWarningNotes()));
         spotMapper.insert(spot);
         return new ItineraryDtos.AddSpotResponse(
                 spot.getId(), dayId, index, SpotSource.MANUAL.name(),
@@ -324,8 +365,11 @@ public class ItineraryService {
                                                        ItineraryDtos.UpdateSpotRequest request) {
         ItinerarySpot spot = requireSpot(userId, spotId);
         spot.setName(request.getName());
-        spot.setDescription(request.getDescription());
-        spot.setSuggestedDuration(request.getSuggestedDuration());
+        applySpot(spot, spotFields(
+                request.getName(), request.getDescription(), request.getSuggestedDuration(),
+                request.getCategory(), request.getTicketPrice(), request.getHighlights(),
+                request.getBestTime(), request.getNearestStation(),
+                request.getReservationRequired(), request.getArea(), request.getWarningNotes()));
         spotMapper.updateById(spot);
         return new ItineraryDtos.UpdateSpotResponse(
                 spotId, spot.getSource().name(), spot.getName());
@@ -457,22 +501,72 @@ public class ItineraryService {
             for (ItineraryDtos.SpotRequest spot : spots) {
                 SpotSource source = "MANUAL".equalsIgnoreCase(spot.getSource())
                         ? SpotSource.MANUAL : SpotSource.AI;
-                insertSpot(day.getId(), order++, source, spot.getName(),
-                        spot.getDescription(), spot.getSuggestedDuration());
+                insertSpot(day.getId(), order++, source, spotFields(
+                        spot.getName(), spot.getDescription(), spot.getSuggestedDuration(),
+                        spot.getCategory(), spot.getTicketPrice(), spot.getHighlights(),
+                        spot.getBestTime(), spot.getNearestStation(),
+                        spot.getReservationRequired(), spot.getArea(), spot.getWarningNotes()));
             }
         }
     }
 
-    private void insertSpot(Long dayId, int order, SpotSource source, String name,
-                            String description, String suggestedDuration) {
+    private void insertSpot(Long dayId, int order, SpotSource source, SpotFields fields) {
         ItinerarySpot spot = new ItinerarySpot();
         spot.setDayId(dayId);
         spot.setSortOrder(order);
         spot.setSource(source);
-        spot.setName(name);
-        spot.setDescription(description);
-        spot.setSuggestedDuration(suggestedDuration);
+        applySpot(spot, fields);
         spotMapper.insert(spot);
+    }
+
+    private void applySpot(ItinerarySpot spot, SpotFields fields) {
+        spot.setName(fields.name());
+        spot.setDescription(fields.description());
+        spot.setSuggestedDuration(fields.suggestedDuration());
+        spot.setCategory(fields.category());
+        spot.setTicketPrice(fields.ticketPrice());
+        spot.setHighlights(fields.highlights());
+        spot.setBestTime(fields.bestTime());
+        spot.setNearestStation(fields.nearestStation());
+        spot.setReservationRequired(fields.reservationRequired());
+        spot.setArea(fields.area());
+        spot.setWarningNotes(fields.warningNotes());
+    }
+
+    private static SpotFields spotFields(String name, String description, String suggestedDuration,
+                                         String category, String ticketPrice, String highlights,
+                                         String bestTime, String nearestStation,
+                                         Boolean reservationRequired, String area, String warningNotes) {
+        return new SpotFields(
+                orEmpty(name),
+                orEmpty(description),
+                orEmpty(suggestedDuration),
+                truncate(category, CATEGORY_MAX),
+                truncate(ticketPrice, TICKET_PRICE_MAX),
+                truncate(highlights, HIGHLIGHTS_MAX),
+                truncate(bestTime, BEST_TIME_MAX),
+                truncate(nearestStation, NEAREST_STATION_MAX),
+                Boolean.TRUE.equals(reservationRequired),
+                truncate(area, AREA_MAX),
+                truncate(warningNotes, WARNING_NOTES_MAX));
+    }
+
+    private static String truncate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        String trimmed = value.trim();
+        return trimmed.length() > maxLength ? trimmed.substring(0, maxLength) : trimmed;
+    }
+
+    private static String orEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private record SpotFields(String name, String description, String suggestedDuration,
+                              String category, String ticketPrice, String highlights,
+                              String bestTime, String nearestStation, boolean reservationRequired,
+                              String area, String warningNotes) {
     }
 
     private ItineraryDtos.Response toResponse(Itinerary itinerary) {
@@ -485,7 +579,12 @@ public class ItineraryService {
             List<ItineraryDtos.SpotView> spots = spotMapper.selectByDay(day.getId()).stream()
                     .map(spot -> new ItineraryDtos.SpotView(
                             spot.getId(), spot.getSortOrder(), spot.getSource().name(),
-                            spot.getName(), spot.getDescription(), spot.getSuggestedDuration()))
+                            spot.getName(), spot.getDescription(), spot.getSuggestedDuration(),
+                            orEmpty(spot.getCategory()), orEmpty(spot.getTicketPrice()),
+                            orEmpty(spot.getHighlights()), orEmpty(spot.getBestTime()),
+                            orEmpty(spot.getNearestStation()),
+                            Boolean.TRUE.equals(spot.getReservationRequired()),
+                            orEmpty(spot.getArea()), orEmpty(spot.getWarningNotes())))
                     .toList();
             dayViews.add(new ItineraryDtos.DayView(
                     day.getId(), day.getDayIndex(), day.getVisitDate(),

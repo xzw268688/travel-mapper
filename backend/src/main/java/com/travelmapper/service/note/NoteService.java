@@ -2,11 +2,16 @@ package com.travelmapper.service.note;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
+import com.travelmapper.common.api.PageRequest;
+import com.travelmapper.common.api.PageResult;
 import com.travelmapper.common.security.CurrentUser;
+import com.travelmapper.controller.admin.dto.AdminNoteDetailView;
+import com.travelmapper.controller.admin.dto.AdminNoteView;
 import com.travelmapper.controller.note.dto.NoteDtos;
 import com.travelmapper.controller.note.dto.ShareDtos;
 import com.travelmapper.repository.entity.City;
@@ -33,6 +38,7 @@ import com.travelmapper.service.trip.TripService;
 import org.jsoup.Jsoup;
 import org.jsoup.safety.Safelist;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -70,6 +76,7 @@ public class NoteService {
     private final SensitiveWordFilter sensitiveWordFilter;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbcTemplate;
     private final SecureRandom random = new SecureRandom();
 
     @Value("${app.share.base-url:http://localhost:8080}")
@@ -81,7 +88,8 @@ public class NoteService {
                        TripService tripService, MapService mapService,
                        StorageUrlService storageUrlService, NoteMediaValidator mediaValidator,
                        SensitiveWordFilter sensitiveWordFilter,
-                       AuditLogService auditLogService, ObjectMapper objectMapper) {
+                       AuditLogService auditLogService, ObjectMapper objectMapper,
+                       JdbcTemplate jdbcTemplate) {
         this.noteMapper = noteMapper;
         this.shareMapper = shareMapper;
         this.itineraryMapper = itineraryMapper;
@@ -96,15 +104,17 @@ public class NoteService {
         this.sensitiveWordFilter = sensitiveWordFilter;
         this.auditLogService = auditLogService;
         this.objectMapper = objectMapper;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional
     public NoteDtos.CreateResponse create(Long userId, NoteDtos.CreateRequest request) {
-        String title = request.getTitle();
+        String rawTitle = request.getTitle();
         String rawContent = request.getContent();
-        if (title == null || title.isBlank() || title.length() > 50) {
+        if (rawTitle == null || rawTitle.isBlank() || rawTitle.length() > 50) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "标题必须为 1-50 字");
         }
+        String title = normalizeTitle(rawTitle);
         if (rawContent == null || rawContent.isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "正文必填");
         }
@@ -168,12 +178,68 @@ public class NoteService {
         note.setVisibility(request.getVisibility() == null ? Visibility.PRIVATE : request.getVisibility());
         note.setTakedown(false);
         noteMapper.insert(note);
+        auditLogService.record(userId, "NOTE_CREATE", "NOTE", note.getId(),
+                Map.of("visibility", note.getVisibility().name(),
+                        "imageCount", images.size(), "videoCount", videos.size()), null);
         return new NoteDtos.CreateResponse(note.getId(), tripId, tripInherited,
                 mapService.statusFor(userId, countryCode));
     }
 
     public NoteDtos.Response detail(Long userId, Long id) {
         return toResponse(requireOwned(userId, id));
+    }
+
+    /** 本人游记列表：关键字匹配标题与正文摘要，日期按创建时间筛选。 */
+    public PageResult<NoteDtos.ListItem> list(Long userId, String keyword,
+                                              LocalDate from, LocalDate to,
+                                              int page, int size) {
+        PageRequest pageRequest = new PageRequest();
+        pageRequest.setPage(page);
+        pageRequest.setSize(size);
+        pageRequest.validate();
+
+        LambdaQueryWrapper<TravelNote> query = new LambdaQueryWrapper<TravelNote>()
+                .eq(TravelNote::getUserId, userId);
+        if (keyword != null && !keyword.isBlank()) {
+            String value = keyword.trim();
+            query.and(wrapper -> wrapper
+                    .like(TravelNote::getTitle, value)
+                    .or()
+                    .like(TravelNote::getContentText, value));
+        }
+        if (from != null) {
+            query.ge(TravelNote::getCreatedAt, from.atStartOfDay());
+        }
+        if (to != null) {
+            query.lt(TravelNote::getCreatedAt, to.plusDays(1).atStartOfDay());
+        }
+        query.orderByDesc(TravelNote::getCreatedAt).orderByDesc(TravelNote::getId);
+
+        Page<TravelNote> result = noteMapper.selectPage(new Page<>(page, size), query);
+        List<NoteDtos.ListItem> items = new ArrayList<>();
+        for (TravelNote note : result.getRecords()) {
+            items.add(new NoteDtos.ListItem(
+                    note.getId(),
+                    note.getTitle(),
+                    summary(note.getContentText(), 80),
+                    note.getCoverImage() == null ? null : signUrl(note.getCoverImage(), 600),
+                    note.getCountryCode(),
+                    catalogService.countryName(note.getCountryCode()),
+                    note.getCityCode(),
+                    catalogService.cityName(note.getCountryCode(), note.getCityCode()),
+                    note.getVisibility().name(),
+                    Boolean.TRUE.equals(note.getTakedown()),
+                    note.getCreatedAt(),
+                    note.getUpdatedAt()));
+        }
+        return PageResult.of(result.getTotal(), pageRequest, items);
+    }
+
+    private String summary(String text, int maxLength) {
+        if (text == null) {
+            return "";
+        }
+        return text.substring(0, Math.min(maxLength, text.length()));
     }
 
     @Transactional
@@ -199,11 +265,13 @@ public class NoteService {
                     ? normalizedVideos : parseVideos(note.getVideosJson());
             mediaValidator.validate(userId, effectiveImages, effectiveVideos);
         }
+        List<String> changed = new ArrayList<>();
         if (request.getTitle() != null) {
             if (request.getTitle().isBlank() || request.getTitle().length() > 50) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, "标题必须为 1-50 字");
             }
-            note.setTitle(request.getTitle());
+            note.setTitle(normalizeTitle(request.getTitle()));
+            changed.add("title");
         }
         if (request.getContent() != null) {
             if (request.getContent().getBytes(StandardCharsets.UTF_8).length > MAX_CONTENT_BYTES) {
@@ -212,21 +280,30 @@ public class NoteService {
             String sanitized = sanitize(request.getContent());
             note.setContent(sanitized);
             note.setContentText(summaryOf(sanitized));
+            changed.add("content");
         }
         if (normalizedImages != null) {
             note.setImagesJson(normalizedImages.isEmpty() ? null : toJson(normalizedImages));
             note.setCoverImage(normalizeCover(request.getCoverImage(), normalizedImages));
+            changed.add("images");
         } else if (request.getCoverImage() != null) {
             note.setCoverImage(normalizeCover(request.getCoverImage(),
                     parseImages(note.getImagesJson())));
         }
         if (normalizedVideos != null) {
             note.setVideosJson(normalizedVideos.isEmpty() ? null : toJson(normalizedVideos));
+            changed.add("videos");
+        }
+        if (request.getCoverImage() != null) {
+            changed.add("cover");
         }
         if (request.getVisibility() != null) {
             note.setVisibility(request.getVisibility());
+            changed.add("visibility");
         }
         noteMapper.updateById(note);
+        auditLogService.record(userId, "NOTE_UPDATE", "NOTE", id,
+                Map.of("changed", changed), null);
         return toResponse(requireOwned(userId, id));
     }
 
@@ -235,8 +312,11 @@ public class NoteService {
         TravelNote note = requireOwned(userId, id);
         noteMapper.deleteById(id);
         int revoked = revokeAllShares(id);
+        boolean tripDeleted = tripService.deleteIfEmpty(note.getTripId());
+        auditLogService.record(userId, "NOTE_DELETE", "NOTE", id,
+                Map.of("revokedShares", revoked, "tripDeleted", tripDeleted), null);
         return new NoteDtos.DeleteResponse(id,
-                mapService.statusFor(userId, note.getCountryCode()), revoked);
+                mapService.statusFor(userId, note.getCountryCode()), revoked, tripDeleted);
     }
 
     @Transactional
@@ -261,6 +341,8 @@ public class NoteService {
         shareMapper.insert(share);
         note.setVisibility(Visibility.SHARED);
         noteMapper.updateById(note);
+        auditLogService.record(userId, "NOTE_SHARE", "NOTE", noteId,
+                Map.of("expireDays", days), null);
         return shareResponse(share, true);
     }
 
@@ -270,7 +352,31 @@ public class NoteService {
         int revoked = revokeAllShares(noteId);
         note.setVisibility(Visibility.PRIVATE);
         noteMapper.updateById(note);
+        auditLogService.record(userId, "NOTE_UNSHARE", "NOTE", noteId,
+                Map.of("revokedShares", revoked), null);
         return new ShareDtos.RevokeResponse(revoked);
+    }
+
+    /** 举报前复用分享页的失效判定，返回当前可举报的游记。 */
+    public TravelNote shareNoteForReport(String token) {
+        NoteShare share = shareMapper.selectOne(new LambdaQueryWrapper<NoteShare>()
+                .eq(NoteShare::getToken, token));
+        if (share == null || Boolean.TRUE.equals(share.getRevoked())
+                || (share.getExpireAt() != null && share.getExpireAt().isBefore(LocalDateTime.now()))) {
+            throw new BusinessException(ErrorCode.SHARE_INVALID);
+        }
+        TravelNote note = noteMapper.selectById(share.getNoteId());
+        if (note == null) {
+            throw new BusinessException(ErrorCode.SHARE_INVALID);
+        }
+        User user = userMapper.selectByIdIncludingDeleted(note.getUserId());
+        if (user == null || user.getStatus() == UserStatus.DELETED) {
+            throw new BusinessException(ErrorCode.SHARE_INVALID);
+        }
+        if (Boolean.TRUE.equals(note.getTakedown())) {
+            throw new BusinessException(ErrorCode.SHARE_INVALID);
+        }
+        return note;
     }
 
     public ShareDtos.SharePageResponse publicPage(String token) {
@@ -313,6 +419,127 @@ public class NoteService {
                 catalogService.cityName(note.getCountryCode(), note.getCityCode()),
                 note.getCreatedAt(),
                 maskNickname(user.getNickname()));
+    }
+
+    /** 管理端内容列表：只返回元信息，不返回正文。 */
+    public PageResult<AdminNoteView> adminList(String keyword, String status,
+                                               LocalDate from, LocalDate to,
+                                               PageRequest request) {
+        request.validate();
+        StringBuilder where = new StringBuilder(
+                " FROM travel_note n LEFT JOIN `user` u ON u.id = n.user_id WHERE n.deleted = 0");
+        List<Object> params = new ArrayList<>();
+        if (keyword != null && !keyword.isBlank()) {
+            String like = "%" + keyword.trim() + "%";
+            where.append(" AND (n.title LIKE ? OR u.username LIKE ? OR u.nickname LIKE ?)");
+            params.add(like);
+            params.add(like);
+            params.add(like);
+        }
+        if (status != null && !status.isBlank()) {
+            String normalized = status.trim().toUpperCase(Locale.ROOT);
+            if ("TAKEDOWN".equals(normalized)) {
+                where.append(" AND n.takedown = 1");
+            } else if ("NORMAL".equals(normalized)) {
+                where.append(" AND n.takedown = 0");
+            } else {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "status 必须为 TAKEDOWN 或 NORMAL");
+            }
+        }
+        if (from != null) {
+            where.append(" AND n.created_at >= ?");
+            params.add(from.atStartOfDay());
+        }
+        if (to != null) {
+            where.append(" AND n.created_at < ?");
+            params.add(to.plusDays(1).atStartOfDay());
+        }
+
+        Long total = jdbcTemplate.queryForObject("SELECT COUNT(*)" + where, Long.class, params.toArray());
+        List<Object> pageParams = new ArrayList<>(params);
+        pageParams.add(request.getSize());
+        pageParams.add(request.offset());
+        List<AdminNoteView> rows = jdbcTemplate.query(
+                "SELECT n.id, n.title, n.user_id, n.country_code, n.city_code, n.visibility, "
+                        + "n.takedown, n.takedown_reason, n.created_at, n.updated_at, "
+                        + "u.username, u.nickname" + where
+                        + " ORDER BY n.created_at DESC, n.id DESC LIMIT ? OFFSET ?",
+                (rs, rowNum) -> {
+                    String countryCode = rs.getString("country_code");
+                    String cityCode = rs.getString("city_code");
+                    String nickname = rs.getString("nickname");
+                    String username = rs.getString("username");
+                    Long authorId = rs.getObject("user_id") == null ? null : rs.getLong("user_id");
+                    return new AdminNoteView(
+                            rs.getLong("id"),
+                            rs.getString("title"),
+                            authorId,
+                            nickname == null || nickname.isBlank() ? username : nickname,
+                            countryCode,
+                            catalogService.countryName(countryCode),
+                            cityCode,
+                            catalogService.cityName(countryCode, cityCode),
+                            rs.getString("visibility"),
+                            rs.getInt("takedown") == 1,
+                            rs.getString("takedown_reason"),
+                            rs.getTimestamp("created_at") == null ? null
+                                    : rs.getTimestamp("created_at").toLocalDateTime(),
+                            rs.getTimestamp("updated_at") == null ? null
+                                    : rs.getTimestamp("updated_at").toLocalDateTime());
+                },
+                pageParams.toArray());
+        return PageResult.of(total == null ? 0 : total, request, rows);
+    }
+
+    /** 管理员查看任意游记完整内容，包含私密、已下架与软删除记录。 */
+    public AdminNoteDetailView adminDetail(Long noteId) {
+        TravelNote note = noteMapper.selectByIdIncludingDeleted(noteId);
+        if (note == null) {
+            throw new BusinessException(ErrorCode.NOTE_NOT_FOUND);
+        }
+        User author = userMapper.selectByIdIncludingDeleted(note.getUserId());
+        String authorName;
+        if (author == null || author.getStatus() == UserStatus.DELETED) {
+            authorName = "已注销用户";
+        } else {
+            authorName = author.getNickname() == null || author.getNickname().isBlank()
+                    ? author.getUsername() : author.getNickname();
+        }
+
+        List<NoteDtos.ImageView> images = new ArrayList<>();
+        for (String key : parseImages(note.getImagesJson())) {
+            images.add(new NoteDtos.ImageView(key, signUrl(key, 600)));
+        }
+        List<NoteDtos.VideoView> videos = new ArrayList<>();
+        for (String key : parseVideos(note.getVideosJson())) {
+            videos.add(new NoteDtos.VideoView(key, signUrl(key, 600)));
+        }
+        NoteShare active = activeShare(note.getId());
+        City city = catalogService.findCity(note.getCountryCode(), note.getCityCode());
+        AdminNoteDetailView view = new AdminNoteDetailView(
+                note.getId(),
+                note.getTitle(),
+                note.getContent(),
+                note.getContentText(),
+                images,
+                videos,
+                note.getCoverImage() == null ? null : signUrl(note.getCoverImage(), 600),
+                note.getUserId(),
+                authorName,
+                note.getCountryCode(),
+                catalogService.countryName(note.getCountryCode()),
+                note.getCityCode(),
+                city == null ? note.getCityCode() : city.getName(),
+                note.getVisibility() == null ? null : note.getVisibility().name(),
+                active != null,
+                active == null ? null : active.getExpireAt(),
+                Boolean.TRUE.equals(note.getTakedown()),
+                note.getTakedownReason(),
+                note.getTakedownAt(),
+                note.getDeleted() != null && note.getDeleted() == 1,
+                note.getCreatedAt(),
+                note.getUpdatedAt());
+        return view;
     }
 
     @Transactional
@@ -383,6 +610,8 @@ public class NoteService {
                 note.getVisibility().name(),
                 shareState,
                 Boolean.TRUE.equals(note.getTakedown()),
+                note.getTakedownReason(),
+                note.getTakedownAt(),
                 note.getCreatedAt(),
                 note.getUpdatedAt());
     }
@@ -492,6 +721,11 @@ public class NoteService {
     private String summaryOf(String html) {
         String text = Jsoup.parse(html).text();
         return text.length() > 600 ? text.substring(0, 600) : text;
+    }
+
+    private String normalizeTitle(String title) {
+        String filtered = sensitiveWordFilter.filter(title.trim());
+        return filtered.length() > 50 ? filtered.substring(0, 50) : filtered;
     }
 
     private List<String> parseImages(String json) {

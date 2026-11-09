@@ -4,9 +4,14 @@ import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { getCountries } from '../api/catalog'
+import {
+  getActiveAnnouncements,
+  markAnnouncementRead,
+  type AnnouncementView
+} from '../api/announcements'
 import { countryGuideStream, getCachedGuide, type CountryGuide } from '../api/guide'
 import { getCountryDrawer, getMapStats } from '../api/map'
-import { getTimeline, updateTripStatus, type TripTimelineItem } from '../api/trips'
+import { getTimeline, resetTripStatus, updateTripStatus, type TripTimelineItem } from '../api/trips'
 import type { Country, CountryDrawer, CountryStat } from '../api/types'
 import { useMapStore } from '../stores/map'
 import { newRequestId } from '../utils/uuid'
@@ -23,6 +28,13 @@ const drawerVisible = ref(false)
 const drawerSize = ref(window.innerWidth < 640 ? '92%' : '480px')
 const fallback = ref(false)
 const loading = ref(false)
+const announcements = ref<AnnouncementView[]>([])
+const announcementUnread = ref(0)
+const announcementDialogVisible = ref(false)
+const selectedAnnouncementId = ref<number | null>(null)
+const dismissedBannerId = ref<number | null>(
+  Number(sessionStorage.getItem('tm.announcement.dismissed') || 0) || null
+)
 const viewMode = ref<'map' | 'timeline'>('map')
 const timeline = ref<TripTimelineItem[]>([])
 const timelineLoading = ref(false)
@@ -68,14 +80,54 @@ const statusColor = (stat?: CountryStat): string =>
   stat?.status === 'GREEN' ? '#2e7d32' : stat?.status === 'YELLOW' ? '#f9a825' : '#37474f'
 
 const statusLabel = (stat?: { status?: string }): string =>
-  stat?.status === 'GREEN' ? '已完成' : stat?.status === 'YELLOW' ? '计划中' : '未点亮'
+  stat?.status === 'GREEN' ? '有游记' : stat?.status === 'YELLOW' ? '仅有行程' : '无记录'
 
+const inProgressTrips = computed(() =>
+  (drawer.value?.trips ?? []).filter((trip) => trip.effectiveStatus === 'IN_PROGRESS')
+)
 const plannedTrips = computed(() =>
-  (drawer.value?.trips ?? []).filter((trip) => trip.status !== 'COMPLETED')
+  (drawer.value?.trips ?? []).filter((trip) => trip.effectiveStatus === 'PLANNED')
 )
 const completedTrips = computed(() =>
-  (drawer.value?.trips ?? []).filter((trip) => trip.status === 'COMPLETED')
+  (drawer.value?.trips ?? []).filter((trip) => trip.effectiveStatus === 'COMPLETED')
 )
+const tripGroups = computed(() => [
+  { key: 'IN_PROGRESS', title: '进行中的旅行', trips: inProgressTrips.value },
+  { key: 'PLANNED', title: '计划中的旅行', trips: plannedTrips.value },
+  { key: 'COMPLETED', title: '已完成的旅行', trips: completedTrips.value }
+])
+
+const tripStatusText = (status: string): string =>
+  status === 'COMPLETED' ? '已完成' : status === 'IN_PROGRESS' ? '进行中' : '计划中'
+
+const tripStatusTagType = (status: string): 'success' | 'primary' | 'warning' =>
+  status === 'COMPLETED' ? 'success' : status === 'IN_PROGRESS' ? 'primary' : 'warning'
+
+function tripDateRange(trip: CountryDrawer['trips'][number]): string {
+  const start = trip.effectiveStartDate
+  const end = trip.effectiveEndDate
+  if (!start && !end) return ''
+  if (start && end) return `${start} ~ ${end}`
+  return start || end || ''
+}
+
+function tripStats(trip: CountryDrawer['trips'][number]): string[] {
+  const items: string[] = []
+  if (tripItineraryCount(trip) > 0) items.push(`行程 ${tripItineraryCount(trip)}`)
+  if (tripNoteCount(trip) > 0) items.push(`游记 ${tripNoteCount(trip)}`)
+  if (Number(trip.subtotalCny) > 0) items.push(`花费 ¥${trip.subtotalCny}`)
+  return items
+}
+
+const drawerSummaryStats = computed(() => {
+  const summary = drawer.value?.summary
+  if (!summary) return []
+  const items: string[] = []
+  if (summary.itineraryCount > 0) items.push(`行程 ${summary.itineraryCount}`)
+  if (summary.noteCount > 0) items.push(`游记 ${summary.noteCount}`)
+  if (Number(summary.totalExpenseCny) > 0) items.push(`花费 ¥${summary.totalExpenseCny}`)
+  return items
+})
 
 async function switchView(mode: 'map' | 'timeline'): Promise<void> {
   viewMode.value = mode
@@ -95,6 +147,7 @@ async function loadTimeline(): Promise<void> {
   }
 }
 
+
 async function toggleStatus(tripId: number, current: string): Promise<void> {
   try {
     await updateTripStatus(tripId, current === 'COMPLETED' ? 'PLANNED' : 'COMPLETED')
@@ -103,19 +156,25 @@ async function toggleStatus(tripId: number, current: string): Promise<void> {
       await loadTimeline()
     }
   } catch (error) {
-    ElMessage.error((error as Error).message || '更新归档状态失败')
+    ElMessage.error((error as Error).message || '更新旅行状态失败')
+  }
+}
+
+async function resetStatus(tripId: number): Promise<void> {
+  try {
+    await resetTripStatus(tripId)
+    await openCountry(drawer.value?.countryCode ?? '')
+    if (viewportHasTimeline()) {
+      await loadTimeline()
+    }
+  } catch (error) {
+    ElMessage.error((error as Error).message || '恢复自动状态失败')
   }
 }
 
 function viewportHasTimeline(): boolean {
   return viewMode.value === 'timeline'
 }
-
-const hasUngrouped = computed(() => {
-  const ungrouped = drawer.value?.ungrouped
-  if (!ungrouped) return false
-  return ungrouped.itineraries.length + ungrouped.notes.length + ungrouped.expenses.length > 0
-})
 
 function tripItineraryCount(trip: CountryDrawer['trips'][number]): number {
   return trip.cities.reduce((total, city) => total + city.itineraries.length, 0)
@@ -151,7 +210,7 @@ const statusTagType = (status: string): 'success' | 'warning' | 'info' =>
   status === 'GREEN' ? 'success' : status === 'YELLOW' ? 'warning' : 'info'
 
 const drawerStatusLabel = (status: string): string =>
-  status === 'GREEN' ? '已完成' : status === 'YELLOW' ? '计划中' : '未点亮'
+  status === 'GREEN' ? '有游记' : status === 'YELLOW' ? '仅有行程' : '无记录'
 
 async function load(): Promise<void> {
   loading.value = true
@@ -168,6 +227,52 @@ async function load(): Promise<void> {
   }
 }
 
+const POLAR_GEO_URLS = ['/antarctica.json']
+
+async function loadPolarFeatures(): Promise<any[]> {
+  const results = await Promise.allSettled(
+    POLAR_GEO_URLS.map(async (url) => {
+      const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error(`${url} ${response.status}`)
+      }
+      return response.json()
+    })
+  )
+  const features: any[] = []
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled' && Array.isArray(result.value?.features)) {
+      features.push(...result.value.features)
+    } else {
+      console.warn(`极地底图加载失败：${POLAR_GEO_URLS[index]}`)
+    }
+  })
+  return features
+}
+
+function mergeGeoFeatures(base: any, extraFeatures: any[]): any {
+  const features = Array.isArray(base?.features) ? [...base.features] : []
+  const indexByName = new Map<string, number>()
+  features.forEach((feature, index) => {
+    const name = feature?.properties?.name
+    if (typeof name === 'string' && name) {
+      indexByName.set(name, index)
+    }
+  })
+  for (const feature of extraFeatures) {
+    const name = feature?.properties?.name
+    if (typeof name === 'string' && name && indexByName.has(name)) {
+      features[indexByName.get(name)!] = feature
+    } else {
+      if (typeof name === 'string' && name) {
+        indexByName.set(name, features.length)
+      }
+      features.push(feature)
+    }
+  }
+  return { ...base, features }
+}
+
 async function initMap(): Promise<void> {
   if (!chartEl.value) return
   try {
@@ -176,7 +281,9 @@ async function initMap(): Promise<void> {
       throw new Error('地图底图加载失败')
     }
     const geo = await response.json()
-    echarts.registerMap('world', geo)
+    const polarFeatures = await loadPolarFeatures()
+    const mergedGeo = mergeGeoFeatures(geo, polarFeatures)
+    echarts.registerMap('world', mergedGeo)
 
     countryByName = new Map<string, Country>()
     for (const country of countries.value) {
@@ -184,7 +291,7 @@ async function initMap(): Promise<void> {
       if (country.nameEn) countryByName.set(country.nameEn, country)
     }
     countryByCode = new Map(countries.value.map((country) => [country.code, country]))
-    geoFeatures = Array.isArray(geo.features) ? geo.features : []
+    geoFeatures = Array.isArray(mergedGeo.features) ? mergedGeo.features : []
     const data = buildMapData()
 
     chart?.dispose()
@@ -202,6 +309,7 @@ async function initMap(): Promise<void> {
       },
       series: [
         {
+          id: 'countries',
           type: 'map',
           map: 'world',
           roam: true,
@@ -218,6 +326,12 @@ async function initMap(): Promise<void> {
             itemStyle: { areaColor: '#ffd54f' }
           },
           select: { disabled: true },
+          markPoint: {
+            symbol: 'circle',
+            symbolSize: 14,
+            animation: false,
+            data: buildArcticMarker()
+          },
           data
         }
       ]
@@ -225,7 +339,9 @@ async function initMap(): Promise<void> {
     chart.on('click', (params: any) => {
       if (params.data?.code) {
         void openCountry(params.data.code)
+        return
       }
+      ElMessage.info('该区域暂未收录')
     })
     window.addEventListener('resize', resizeChart)
     fallback.value = false
@@ -251,11 +367,51 @@ function buildMapData(): any[] {
   })
 }
 
+function buildArcticMarker(): any[] {
+  const stat = stats.value.find((item) => item.countryCode === 'X3')
+  const color = statusColor(stat)
+  return [
+    {
+      name: 'Arctic',
+      coord: [0, 88],
+      code: 'X3',
+      stat,
+      itemStyle: {
+        color,
+        borderColor: '#ffffff',
+        borderWidth: 2,
+        shadowBlur: 8,
+        shadowColor: 'rgba(31, 45, 61, 0.25)'
+      },
+      label: {
+        show: true,
+        position: 'bottom',
+        offset: [0, 6],
+        formatter: '北极地区',
+        color,
+        backgroundColor: 'rgba(255, 255, 255, 0.92)',
+        padding: [2, 6],
+        borderRadius: 6,
+        fontWeight: 600,
+        fontSize: 12
+      }
+    }
+  ]
+}
+
 async function refreshStats(): Promise<void> {
   try {
     const mapStats = await getMapStats()
     stats.value = mapStats.countries
-    chart?.setOption({ series: [{ data: buildMapData() }] } as any)
+    chart?.setOption({
+      series: [
+        {
+          id: 'countries',
+          data: buildMapData(),
+          markPoint: { data: buildArcticMarker() }
+        }
+      ]
+    } as any)
   } catch {
     // 地图统计刷新失败时保留旧数据
   }
@@ -353,10 +509,74 @@ function syncDrawerSize(): void {
   drawerSize.value = window.innerWidth < 640 ? '92%' : '480px'
 }
 
+const bannerAnnouncement = computed(() => announcements.value[0] ?? null)
+const selectedAnnouncement = computed(() =>
+  announcements.value.find((item) => item.id === selectedAnnouncementId.value)
+  ?? announcements.value[0]
+  ?? null
+)
+const showAnnouncementBanner = computed(() =>
+  Boolean(bannerAnnouncement.value) && bannerAnnouncement.value?.id !== dismissedBannerId.value
+)
+
 onMounted(() => {
   void load()
+  void loadAnnouncements()
   window.addEventListener('resize', syncDrawerSize)
 })
+
+async function loadAnnouncements(): Promise<void> {
+  try {
+    const result = await getActiveAnnouncements()
+    announcements.value = result.list
+    announcementUnread.value = result.unread
+    selectedAnnouncementId.value = result.list[0]?.id ?? null
+  } catch {
+    // 公告失败不影响地图主流程。
+  }
+}
+
+function openAnnouncementDialog(id?: number): void {
+  announcementDialogVisible.value = true
+  const target = id ?? announcements.value[0]?.id
+  if (target) {
+    void selectAnnouncement(target)
+  }
+}
+
+function openBannerAnnouncement(): void {
+  if (bannerAnnouncement.value) {
+    openAnnouncementDialog(bannerAnnouncement.value.id)
+  }
+}
+
+async function selectAnnouncement(id: number): Promise<void> {
+  selectedAnnouncementId.value = id
+  const item = announcements.value.find((entry) => entry.id === id)
+  if (!item || item.read) {
+    return
+  }
+  item.read = true
+  announcementUnread.value = Math.max(0, announcementUnread.value - 1)
+  try {
+    await markAnnouncementRead(id)
+  } catch {
+    item.read = false
+    announcementUnread.value += 1
+  }
+}
+
+function dismissAnnouncementBanner(): void {
+  if (!bannerAnnouncement.value) {
+    return
+  }
+  dismissedBannerId.value = bannerAnnouncement.value.id
+  sessionStorage.setItem('tm.announcement.dismissed', String(bannerAnnouncement.value.id))
+}
+
+function formatAnnouncementTime(value: string | null): string {
+  return value ? value.replace('T', ' ').slice(0, 16) : '长期有效'
+}
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeChart)
@@ -387,9 +607,39 @@ onBeforeUnmount(() => {
       </el-button-group>
     </div>
 
+    <div
+      v-if="showAnnouncementBanner && bannerAnnouncement"
+      class="map-announcement"
+      role="button"
+      tabindex="0"
+      @click="openBannerAnnouncement"
+      @keydown.enter="openBannerAnnouncement"
+    >
+      <el-tag size="small" :type="bannerAnnouncement.type === 'ANNOUNCEMENT' ? 'success' : 'info'">
+        {{ bannerAnnouncement.type === 'ANNOUNCEMENT' ? '公告' : '通知' }}
+      </el-tag>
+      <span class="map-announcement-title">{{ bannerAnnouncement.title }}</span>
+      <span v-if="announcements.length > 1 || announcementUnread > 0" class="map-announcement-more">
+        共 {{ announcements.length }} 条<template v-if="announcementUnread > 0"> · 未读 {{ announcementUnread }}</template>
+      </span>
+      <button
+        type="button"
+        class="map-announcement-close"
+        aria-label="关闭公告横幅"
+        @click.stop="dismissAnnouncementBanner"
+      >
+        ×
+      </button>
+    </div>
+
     <div v-if="viewMode === 'timeline'" class="timeline-panel" v-loading="timelineLoading">
       <el-empty v-if="timeline.length === 0" description="还没有归档，先去规划或记录一次旅行吧" />
-      <div v-for="(item, index) in timeline" :key="item.id" class="timeline-node" @click="router.push(`/trips/${item.id}`)">
+      <div
+        v-for="(item, index) in timeline"
+        :key="item.id"
+        class="timeline-node"
+        @click="router.push(`/trips/${item.id}`)"
+      >
         <div class="timeline-axis">
           <span class="timeline-dot" :class="{ completed: item.status === 'COMPLETED' }" />
           <span v-if="index < timeline.length - 1" class="timeline-line" />
@@ -397,8 +647,8 @@ onBeforeUnmount(() => {
         <div class="timeline-card">
           <div class="archive-head">
             <strong>{{ item.name }}</strong>
-            <el-tag :type="item.status === 'COMPLETED' ? 'success' : 'warning'" size="small">
-              {{ item.status === 'COMPLETED' ? '已完成' : '计划中' }}
+            <el-tag :type="tripStatusTagType(item.status)" size="small">
+              {{ tripStatusText(item.status) }}
             </el-tag>
           </div>
           <div class="meta">
@@ -456,9 +706,8 @@ onBeforeUnmount(() => {
           <el-tag :type="statusTagType(drawer.status)" effect="dark">
             {{ drawerStatusLabel(drawer.status) }}
           </el-tag>
-          <span class="meta" style="margin-left: 8px">
-            行程 {{ drawer.summary.itineraryCount }} · 游记 {{ drawer.summary.noteCount }} ·
-            花费 ¥{{ drawer.summary.totalExpenseCny }}
+          <span v-if="drawerSummaryStats.length > 0" class="meta" style="margin-left: 8px">
+            {{ drawerSummaryStats.join(' · ') }}
           </span>
           <el-alert
             v-if="drawer.summary.hasUnconfiguredCurrency"
@@ -534,70 +783,263 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="drawer-section">
-          <div class="trip-title">计划中</div>
-          <el-empty v-if="plannedTrips.length === 0" description="暂无计划中的归档" :image-size="60" />
-          <div
-            v-for="trip in plannedTrips"
-            :key="trip.tripId"
-            class="archive-card"
-            @click="router.push(`/trips/${trip.tripId}`)"
-          >
-            <div class="archive-head">
-              <strong>{{ trip.tripName }}</strong>
-              <span class="archive-link">查看全部 ›</span>
-            </div>
-            <div class="meta">{{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }}</div>
-            <div class="archive-stats">
-              <span>行程 {{ tripItineraryCount(trip) }}</span>
-              <span>游记 {{ tripNoteCount(trip) }}</span>
-              <span>花费 ¥{{ trip.subtotalCny }}</span>
-            </div>
-            <div class="archive-actions">
-              <el-button text size="small" type="success" @click.stop="toggleStatus(trip.tripId, trip.status)">
-                标记完成
-              </el-button>
-            </div>
-          </div>
+        <div v-if="tripGroups.some((group) => group.trips.length > 0)" class="meta drawer-group-hint">
+          状态自动判断，手动标记优先
         </div>
 
-        <div class="drawer-section">
-          <div class="trip-title">已完成</div>
-          <el-empty v-if="completedTrips.length === 0" description="暂无已完成的归档" :image-size="60" />
-          <div
-            v-for="trip in completedTrips"
-            :key="trip.tripId"
-            class="archive-card completed"
-            @click="router.push(`/trips/${trip.tripId}`)"
-          >
-            <div class="archive-head">
-              <strong>{{ trip.tripName }}</strong>
-              <el-tag type="success" size="small">已完成</el-tag>
-            </div>
-            <div class="meta">{{ trip.startDate || '无日期' }} ~ {{ trip.endDate || '无日期' }}</div>
-            <div class="archive-stats">
-              <span>行程 {{ tripItineraryCount(trip) }}</span>
-              <span>游记 {{ tripNoteCount(trip) }}</span>
-              <span>花费 ¥{{ trip.subtotalCny }}</span>
-            </div>
-            <div class="archive-actions">
-              <el-button text size="small" @click.stop="toggleStatus(trip.tripId, trip.status)">
-                改回计划中
-              </el-button>
+        <template v-for="group in tripGroups" :key="group.key">
+          <div v-if="group.trips.length > 0" class="drawer-section">
+            <div class="trip-title">{{ group.title }}</div>
+            <div
+              v-for="trip in group.trips"
+              :key="trip.tripId"
+              class="archive-card"
+              :class="{ completed: group.key === 'COMPLETED' }"
+              @click="router.push(`/trips/${trip.tripId}`)"
+            >
+              <div class="archive-head">
+                <strong>{{ trip.tripName }}</strong>
+                <div class="trip-tags">
+                  <el-tag :type="tripStatusTagType(group.key)" size="small">
+                    {{ tripStatusText(group.key) }}
+                  </el-tag>
+                  <el-tooltip
+                    v-if="trip.statusManual"
+                    content="这个状态是你自己改的。<br/>之后添加游记、消费或日期变化，系统都不会自动改变它。"
+                    raw-content
+                    popper-class="tm-tooltip"
+                    placement="top"
+                    :show-after="100"
+                  >
+                    <el-tag type="info" size="small" effect="plain">手动标记</el-tag>
+                  </el-tooltip>
+                  <el-tag v-if="trip.expired" type="warning" size="small" effect="plain">
+                    已过期
+                  </el-tag>
+                </div>
+              </div>
+              <div v-if="tripDateRange(trip)" class="meta">{{ tripDateRange(trip) }}</div>
+              <div class="archive-stats">
+                <span v-for="stat in tripStats(trip)" :key="stat">{{ stat }}</span>
+              </div>
+              <div class="archive-actions">
+                <el-button text size="small" @click.stop="toggleStatus(trip.tripId, trip.effectiveStatus)">
+                  {{ trip.effectiveStatus === 'COMPLETED' ? '改回计划中' : '标记完成' }}
+                </el-button>
+                <el-tooltip
+                  v-if="trip.statusManual"
+                  content="让系统重新判断：<br/>旅行结束后有游记或消费 → 已完成；旅行中 → 进行中；否则 → 计划中。"
+                    raw-content
+                    popper-class="tm-tooltip"
+                  placement="top"
+                  :show-after="100"
+                >
+                  <el-button text size="small" @click.stop="resetStatus(trip.tripId)">
+                    恢复自动
+                  </el-button>
+                </el-tooltip>
+              </div>
             </div>
           </div>
-        </div>
+        </template>
 
-        <div v-if="hasUngrouped" class="drawer-section">
-          <div class="trip-title">未归组</div>
-          <div class="meta">
-            行程 {{ drawer.ungrouped.itineraries.length }} ·
-            游记 {{ drawer.ungrouped.notes.length }} ·
-            消费 {{ drawer.ungrouped.expenses.length }} ·
-            花费 ¥{{ drawer.ungrouped.expenseCny }}
-          </div>
-        </div>
       </div>
     </el-drawer>
+
+    <el-dialog v-model="announcementDialogVisible" title="通知公告" width="720px">
+      <div v-if="announcements.length === 0" class="announcement-empty">暂无生效公告</div>
+      <div v-else class="announcement-dialog">
+        <div class="announcement-nav">
+          <button
+            v-for="item in announcements"
+            :key="item.id"
+            type="button"
+            class="announcement-nav-item"
+            :class="{ active: selectedAnnouncement?.id === item.id }"
+            @click="selectAnnouncement(item.id)"
+          >
+            <span class="announcement-nav-title">
+              <span v-if="!item.read" class="announcement-unread-dot" />
+              {{ item.title }}
+            </span>
+            <span class="announcement-nav-meta">
+              {{ item.type === 'ANNOUNCEMENT' ? '公告' : '通知' }}
+              · {{ formatAnnouncementTime(item.publishAt) }}
+            </span>
+          </button>
+        </div>
+        <div v-if="selectedAnnouncement" class="announcement-detail">
+          <div class="announcement-detail-head">
+            <el-tag
+              size="small"
+              :type="selectedAnnouncement.type === 'ANNOUNCEMENT' ? 'success' : 'info'"
+            >
+              {{ selectedAnnouncement.type === 'ANNOUNCEMENT' ? '公告' : '通知' }}
+            </el-tag>
+            <strong>{{ selectedAnnouncement.title }}</strong>
+          </div>
+          <div class="announcement-detail-meta">
+            {{ formatAnnouncementTime(selectedAnnouncement.publishAt) }}
+          </div>
+          <pre class="announcement-detail-content">{{ selectedAnnouncement.content }}</pre>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.map-announcement {
+  position: absolute;
+  top: 72px;
+  left: 20px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, calc(100vw - 40px));
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--tm-border);
+  border-radius: 999px;
+  box-shadow: var(--tm-shadow);
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+
+.map-announcement-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tm-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-announcement-more {
+  color: var(--tm-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.map-announcement-close {
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: var(--tm-text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.announcement-dialog {
+  display: flex;
+  gap: 16px;
+  min-height: 260px;
+}
+
+.announcement-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 240px;
+  max-height: 420px;
+  overflow: auto;
+  flex-shrink: 0;
+}
+
+.announcement-nav-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--tm-border);
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.announcement-nav-item.active {
+  border-color: var(--tm-brand);
+  background: var(--tm-brand-soft);
+}
+
+.announcement-nav-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tm-text);
+}
+
+.announcement-nav-meta {
+  font-size: 12px;
+  color: var(--tm-text-muted);
+}
+
+.announcement-unread-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tm-brand);
+  flex-shrink: 0;
+}
+
+.announcement-detail {
+  flex: 1;
+  min-width: 0;
+}
+
+.announcement-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+}
+
+.announcement-detail-meta {
+  margin: 8px 0 12px;
+  font-size: 12px;
+  color: var(--tm-text-muted);
+}
+
+.announcement-detail-content {
+  margin: 0;
+  padding: 14px 16px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--tm-brand-soft);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.announcement-empty {
+  padding: 32px 0;
+  text-align: center;
+  color: var(--tm-text-muted);
+}
+
+@media (max-width: 640px) {
+  .map-announcement {
+    top: 62px;
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
+
+  .announcement-dialog {
+    flex-direction: column;
+  }
+
+  .announcement-nav {
+    width: auto;
+    max-height: 160px;
+  }
+}
+</style>

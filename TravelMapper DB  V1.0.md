@@ -94,7 +94,7 @@ ON DUPLICATE KEY UPDATE
 
 ### 1.6 子表使用物理删除
 
-`itinerary_day`、`itinerary_spot` 不设 `deleted` 字段，重新生成时**物理删除**旧子行再插入新行。
+`itinerary_day`、`itinerary_spot` 不设 `deleted` 字段，重新生成时**物理删除**旧子行再插入新行。`feedback` 与 `note_report` 同样不设 `deleted`，因为反馈与举报没有用户删除入口。
 
 **理由**：两者存在 `UNIQUE(itinerary_id, day_index)` 约束；若软删除，重新插入同一天序号会冲突，而把 `deleted` 加进唯一键又会导致多条已删行互相冲突。子行没有"恢复"需求（父行程软删除即整体不可见），物理删除最简单可靠。
 
@@ -167,7 +167,7 @@ ON DUPLICATE KEY UPDATE
 
 ## 3. 表清单与删除策略
 
-共 **19 张表**（另有 1 张可选历史表）。
+共 **21 张表**（另有 1 张可选历史表）。
 
 | # | 表名 | 中文名 | 软删除 | 说明 |
 |---|---|---|---|---|
@@ -189,8 +189,13 @@ ON DUPLICATE KEY UPDATE
 | 16 | `quota_pack` | 次数包批次 | ❌ | 支撑 365 天过期与先进先出扣减 |
 | 17 | `quota_ledger` | 额度流水 | ❌ | 只追加，不清洗 |
 | 18 | `sys_config` | 系统配置 | ❌ | 键值表 |
-| 19 | `audit_log` | 审计日志 | ❌ | 只追加，30 天保留 |
-| 20 | `exchange_rate_history` | 汇率变更历史 | ❌ | **可选**，见 6.3 |
+| 19 | `audit_log` | 操作日志（含用户操作） | ❌ | 只追加，30 天保留；`actor_role` 写入时快照 |
+| 20 | `feedback` | 用户反馈 | ❌ | 用户提交、管理员处理；注销时清空内容 |
+| 21 | `note_report` | 游记举报 | ❌ | 分享页提交、管理员处理；保留快照 |
+| 22 | `exchange_rate_history` | 汇率变更历史 | ❌ | **可选**，见 6.3 |
+| 23 | `login_log` | 登录日志 | ❌ | 只追加，90 天保留 |
+| 24 | `announcement` | 通知公告 | ✅ | 软删除；生效时间存 epoch 毫秒 |
+| 25 | `announcement_read` | 公告已读 | ❌ | 公告+用户唯一；删除公告时保留 |
 
 ---
 
@@ -551,18 +556,92 @@ CREATE TABLE `sys_config` (
 -- 审计日志（只追加）
 CREATE TABLE `audit_log` (
   `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `user_id`     BIGINT UNSIGNED NULL COMMENT '操作人；系统任务为 NULL',
-  `action`      VARCHAR(64)     NOT NULL COMMENT '如 CARD_REDEEM / USER_BAN / NOTE_TAKEDOWN',
-  `target_type` VARCHAR(32)     NULL COMMENT 'CARD / USER / NOTE / CONFIG / RATE',
+  `user_id`     BIGINT UNSIGNED NULL COMMENT '操作人；系统任务或匿名请求为 NULL',
+  `actor_role`  VARCHAR(16)     NULL COMMENT 'ADMIN/USER/SYSTEM/ANONYMOUS，写入时快照',
+  `action`      VARCHAR(64)     NOT NULL COMMENT '如 CARD_REDEEM / USER_BAN / NOTE_UPDATE',
+  `target_type` VARCHAR(32)     NULL COMMENT 'CARD / USER / NOTE / CONFIG / RATE / FEEDBACK / REPORT / TRIP / ITINERARY / EXPENSE',
   `target_id`   BIGINT UNSIGNED NULL,
-  `detail`      JSON            NULL COMMENT '脱敏后的操作详情',
+  `detail`      JSON            NULL COMMENT '脱敏后的操作详情，只含 ID/字段名/数量/枚举',
   `ip`          VARCHAR(45)     NULL COMMENT '支持 IPv6',
   `created_at`  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_user_time` (`user_id`, `created_at`),
+  KEY `idx_actor_time` (`actor_role`, `created_at`),
   KEY `idx_action_time` (`action`, `created_at`),
   KEY `idx_target` (`target_type`, `target_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='审计日志';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='操作日志';
+
+-- 登录日志（只追加）：记录每次登录尝试，成功与失败都保留。
+-- 不保存密码、令牌；username 为登录时提交的账号快照（邮箱已归一化）。
+CREATE TABLE `login_log` (
+  `id`         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`    BIGINT UNSIGNED NULL COMMENT '解析到的用户；账号不存在时为 NULL',
+  `username`   VARCHAR(64)     NOT NULL COMMENT '登录时提交的账号快照',
+  `role`       VARCHAR(16)     NULL COMMENT 'ADMIN / USER；已解析用户时记录',
+  `success`    TINYINT(1)      NOT NULL COMMENT '1=成功，0=失败',
+  `reason`     VARCHAR(32)     NULL COMMENT 'SUCCESS / USER_NOT_FOUND / BAD_CREDENTIALS / ACCOUNT_BANNED / ACCOUNT_DELETED / EMAIL_NOT_VERIFIED / RATE_LIMITED',
+  `ip`         VARCHAR(45)     NULL COMMENT '支持 IPv6',
+  `user_agent` VARCHAR(255)    NULL,
+  `created_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_time` (`user_id`, `created_at`),
+  KEY `idx_username_time` (`username`, `created_at`),
+  KEY `idx_success_time` (`success`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='登录日志';
+```
+
+### 4.7.1 用户反馈
+
+```sql
+-- 用户反馈：登录用户提交，管理员在后台筛选与处理。
+-- 不存 IP；不做软删除，反馈没有用户删除入口。
+CREATE TABLE `feedback` (
+  `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`     BIGINT UNSIGNED NOT NULL,
+  `type`        VARCHAR(16)     NOT NULL COMMENT 'FEATURE / BUG / UX / OTHER',
+  `title`       VARCHAR(50)     NOT NULL,
+  `content`     TEXT            NOT NULL,
+  `contact`     VARCHAR(100)    NULL,
+  `page_path`   VARCHAR(255)    NULL,
+  `user_agent`  VARCHAR(512)    NULL,
+  `app_version` VARCHAR(32)     NULL,
+  `status`      VARCHAR(16)     NOT NULL DEFAULT 'NEW' COMMENT 'NEW / PROCESSING / RESOLVED',
+  `admin_note`  VARCHAR(1000)   NULL,
+  `handled_by`  BIGINT UNSIGNED NULL,
+  `handled_at`  DATETIME        NULL,
+  `created_at`  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_time` (`user_id`, `created_at`),
+  KEY `idx_status_time` (`status`, `created_at`),
+  KEY `idx_type_time` (`type`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户反馈';
+```
+
+### 4.7.2 游记举报
+
+```sql
+-- 游记举报：分享页匿名/登录用户提交，管理员在后台处理。
+-- 不存 IP；不做软删除。
+CREATE TABLE `note_report` (
+  `id`                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `note_id`           BIGINT UNSIGNED NOT NULL,
+  `reporter_user_id`  BIGINT UNSIGNED NULL COMMENT '登录举报人；匿名为 NULL',
+  `reason`            VARCHAR(16)     NOT NULL COMMENT 'SPAM/ABUSE/PORN/ILLEGAL/PRIVACY/OTHER',
+  `description`       VARCHAR(200)    NULL,
+  `note_title`        VARCHAR(50)     NOT NULL COMMENT '举报时的标题快照',
+  `note_content_text` TEXT            NULL COMMENT '举报时的纯文本摘要快照',
+  `note_updated_at`   DATETIME        NULL COMMENT '举报时的游记更新时间',
+  `status`            VARCHAR(16)     NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/ACCEPTED/REJECTED',
+  `handled_by`        BIGINT UNSIGNED NULL,
+  `handled_at`        DATETIME        NULL,
+  `created_at`        DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`        DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_status_time` (`status`, `created_at`),
+  KEY `idx_note_time` (`note_id`, `created_at`),
+  KEY `idx_reporter_note` (`reporter_user_id`, `note_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='游记举报';
 ```
 
 ### 4.8 可选：汇率变更历史
@@ -580,6 +659,40 @@ CREATE TABLE `exchange_rate_history` (
   PRIMARY KEY (`id`),
   KEY `idx_currency_time` (`currency`, `changed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='汇率变更历史';
+```
+
+### 4.9 通知公告
+
+```sql
+-- 通知公告：正文为纯文本，保留换行；生效时间存 epoch 毫秒，避免数据库时区差异。
+CREATE TABLE `announcement` (
+  `id`         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `title`      VARCHAR(100)    NOT NULL,
+  `content`    TEXT            NOT NULL COMMENT '纯文本正文，保留换行',
+  `type`       VARCHAR(16)     NOT NULL DEFAULT 'NOTICE' COMMENT 'NOTICE/ANNOUNCEMENT',
+  `pinned`     TINYINT(1)      NOT NULL DEFAULT 0,
+  `status`     VARCHAR(16)     NOT NULL DEFAULT 'DRAFT' COMMENT 'DRAFT/PUBLISHED/OFFLINE',
+  `publish_at` BIGINT          NULL COMMENT '开始生效时间（epoch 毫秒）',
+  `expire_at`  BIGINT          NULL COMMENT '结束生效时间（epoch 毫秒）',
+  `created_by` BIGINT UNSIGNED NULL,
+  `created_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted`    TINYINT(1)      NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `idx_status_time` (`status`, `publish_at`, `expire_at`),
+  KEY `idx_pinned_time` (`pinned`, `publish_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='通知公告';
+
+-- 公告已读：按公告与用户逐条记录；重复打开幂等。
+CREATE TABLE `announcement_read` (
+  `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `announcement_id` BIGINT UNSIGNED NOT NULL,
+  `user_id`         BIGINT UNSIGNED NOT NULL,
+  `read_at`         DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_announcement_user` (`announcement_id`, `user_id`),
+  KEY `idx_user_time` (`user_id`, `read_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='公告已读';
 ```
 
 ---
@@ -616,6 +729,13 @@ CREATE TABLE `exchange_rate_history` (
 | `card_key` | `uk_code` | 兑换查码 |
 | `sys_config` | `uk_key` | 配置读取 |
 | `audit_log` | `idx_user_time` / `idx_action_time` | 审计检索 |
+| `feedback` | `idx_user_time` | 用户本人的反馈历史 |
+| `feedback` | `idx_status_time` / `idx_type_time` | 后台按状态/分类筛选，按时间倒序 |
+| `note_report` | `idx_status_time` | 后台按举报状态筛选，按时间倒序 |
+| `note_report` | `idx_note_time` | 同一游记的举报列表与联动处理 |
+| `note_report` | `idx_reporter_note` | 登录用户待处理举报去重 |
+| `announcement` | `idx_status_time` / `idx_pinned_time` | 用户端生效公告、置顶排序 |
+| `announcement_read` | `uk_announcement_user` | 已读幂等；按用户查已读集合 |
 
 ### 5.3 唯一索引与软删除的冲突处理
 
@@ -1029,7 +1149,12 @@ WHERE s.token = ?;
 | 用户、行程、游记、消费、旅行、清单、景点 | 至用户删除或注销 | 注销后软删除 + 匿名化 |
 | `quota_ledger` | 永久 | 财务与审计依据 |
 | `card_key` | 永久 | 已使用不可回滚 |
-| `audit_log` | 30 天 | 到期物理清理 |
+| `audit_log` | 30 天 | 到期物理清理；管理员与用户操作共用 |
+| `login_log` | 90 天 | 到期物理清理；失败尝试同样保留 |
+| `announcement` | 永久 | 管理员软删除；生效时间实时计算 |
+| `announcement_read` | 永久 | 删除公告时保留，用于历史阅读统计 |
+| `feedback` | 至用户注销 | 注销时清空标题、正文、联系方式与内部备注，保留记录骨架 |
+| `note_report` | 至用户注销 | 注销时举报人置空；作者注销时清空标题与纯文本快照 |
 | `email_token` | 过期后 30 天清理 | 防表膨胀 |
 | `note_share` | 撤销/过期后 30 天清理 | 保留短期排查窗口 |
 | `user`（已注销） | 永久保留空壳 | `username=deleted_{id}`，不可检索内容 |
@@ -1048,8 +1173,11 @@ WHERE s.token = ?;
 | `trip` | `deleted=1`、`name='已注销旅行'` |
 | `note_share` | `revoked=1`、`revoked_at=NOW()`、`expire_at=NOW()` |
 | `trip_checklist` | `deleted=1` |
+| `feedback` | `title=''`、`content=''`、`contact=NULL`、`admin_note=NULL`；保留 `type`、`status` 与时间 |
+| `note_report` | `reporter_user_id=NULL`；该作者游记相关的 `note_title=''`、`note_content_text=NULL`；保留原因、状态与时间 |
 | `email_token` | 全部 `used=1` |
-| `quota_ledger` / `audit_log` / `card_key` | 保留；`audit_log.detail` 脱敏 |
+| `announcement_read` | 保留；公告为平台内容，不随用户注销删除，统计口径按当前正常用户数计算 |
+| `quota_ledger` / `audit_log` / `login_log` / `card_key` | 保留；`audit_log.detail` 脱敏且不含标题/正文/金额/备注，`actor_role` 为写入时快照；`login_log.username` 为登录快照，按 90 天保留期清理，不保存密码或令牌 |
 
 > 全部操作在**单个事务**内完成；`token_version` 自增使旧 JWT 立即失效。
 
@@ -1061,6 +1189,7 @@ WHERE s.token = ?;
 | 每日 03:00 | 卡密过期标记 | `UPDATE card_key SET status='EXPIRED' WHERE status='UNUSED' AND expire_at IS NOT NULL AND expire_at < NOW()` |
 | 每日 03:05 | 清理已过期次数包批次 | `DELETE FROM quota_pack WHERE expire_at < DATE_SUB(NOW(), INTERVAL 90 DAY)`（保留 90 天便于对账，余额计算已按 `expire_at > NOW()` 过滤） |
 | 每日 03:10 | 清理审计日志 | `DELETE FROM audit_log WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)` |
+| 每日 03:15 | 清理登录日志 | `DELETE FROM login_log WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY)` |
 | 每日 03:20 | 清理失效分享令牌 | `DELETE FROM note_share WHERE revoked=1 OR (expire_at IS NOT NULL AND expire_at < DATE_SUB(NOW(), INTERVAL 30 DAY))` |
 | 每日 02:00 | 数据库备份 | 见第 9 章 |
 | 每周日 | 一致性巡检 | 执行 7.6 的 SQL，异常告警 |
@@ -1158,6 +1287,8 @@ systemctl start travelmapper
 | 二次校验 | `sys_config` | 新增 `search.domain-whitelist` | 对应需求"域名白名单后台可配，V1 不强制拦截" |
 | 二次校验 | `trip` | `start_date/end_date` 明确为**派生字段**，新增 7.1.1 重算 SQL | 行程增删改后旅行日期区间必须同步，否则抽屉展示不符 |
 | 二次校验 | `country` | 明确全量 ISO 3166-1 导入、后台不提供国家增删 | 避免管理员新增城市时国家悬空 |
+| 用户反馈 | 新增 `feedback` 表 | 记录分类、标题、正文、联系方式、页面上下文、状态与内部备注；不存 IP、不做软删除；注销时清空内容与内部备注 | 建立用户反馈闭环（change: user-feedback） |
+| 内容审核与举报 | 新增 `note_report` 表 | 记录举报原因、说明、标题/纯文本/版本时间快照、状态与处理人；不存 IP、不做软删除；注销时匿名化举报人并清空快照 | 建立内容治理闭环（change: note-moderation） |
 
 ---
 

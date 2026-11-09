@@ -62,6 +62,27 @@ body {
   z-index: 20;
 }
 
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--tm-border);
+  border-radius: 8px;
+  background: var(--tm-surface);
+  color: var(--tm-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.back-button:hover {
+  background: var(--tm-brand-soft);
+  border-color: var(--tm-brand);
+  color: var(--tm-brand);
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -297,8 +318,43 @@ nav a.router-link-active {
   background: var(--tm-brand-soft);
 }
 
+.spot-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .fallback-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .fallback-row .spot-row-main {
+    flex-basis: 100%;
+  }
+}
+
 .drawer-section {
   margin-bottom: 18px;
+}
+
+.drawer-ungrouped-note {
+  margin-top: 6px;
+}
+
+.drawer-group-hint {
+  margin: 0 0 8px;
+}
+
+.trip-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tm-tooltip {
+  max-width: 280px;
+  line-height: 1.6;
 }
 
 .archive-card {
@@ -513,6 +569,32 @@ nav a.router-link-active {
   box-shadow: var(--tm-shadow);
 }
 
+.timeline-year {
+  display: inline-block;
+  margin: 12px 0 2px 32px;
+  padding: 2px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tm-brand);
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: 999px;
+}
+
+.timeline-dot.trip {
+  border-color: #909399;
+}
+
+.timeline-card-trip {
+  background: #f7f9fd;
+}
+
+.timeline-trip-link {
+  color: var(--tm-brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .trip-title {
   font-weight: 600;
   color: var(--tm-text);
@@ -545,6 +627,9 @@ nav a.router-link-active {
   padding: 24px;
   max-width: 1080px;
   margin: 0 auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .plan-page .el-card {
@@ -625,6 +710,14 @@ nav a.router-link-active {
 
   .brand {
     flex: 1;
+  }
+
+  .back-button {
+    padding: 0 8px;
+  }
+
+  .back-text {
+    display: none;
   }
 
   .header-right {
@@ -718,5 +811,82 @@ nav a.router-link-active {
 
   .plan-page .el-card__body {
     padding: 14px;
+  }
+}
+
+/* ---------- 监控中心 ---------- */
+
+.monitor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.monitor-toolbar .monitor-hint {
+  font-size: 12px;
+  color: var(--tm-text-muted);
+}
+
+.monitor-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.monitor-card {
+  padding: 14px 16px;
+  border: 1px solid var(--tm-border);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.monitor-card-label {
+  font-size: 13px;
+  color: var(--tm-text-muted);
+}
+
+.monitor-card-value {
+  margin: 6px 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--tm-text);
+}
+
+.monitor-card-sub {
+  font-size: 12px;
+  color: var(--tm-text-muted);
+}
+
+.monitor-block {
+  margin-top: 18px;
+}
+
+.monitor-block h4 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: var(--tm-text);
+}
+
+.monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.monitor-sub {
+  font-size: 12px;
+  color: var(--tm-text-3, #909399);
+}
+
+@media (max-width: 640px) {
+  .monitor-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .monitor-card-value {
+    font-size: 20px;
   }
 }

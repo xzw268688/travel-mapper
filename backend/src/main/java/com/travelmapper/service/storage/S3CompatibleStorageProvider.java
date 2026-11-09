@@ -12,6 +12,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
+import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
@@ -125,6 +126,42 @@ public class S3CompatibleStorageProvider implements AutoCloseable, StorageProvid
         } catch (SdkException ex) {
             throw new BusinessException(ErrorCode.STORAGE_UNAVAILABLE, "列举对象失败");
         }
+    }
+
+    @Override
+    public ProbeResult probe() {
+        long start = System.nanoTime();
+        try {
+            client.headBucket(builder -> builder.bucket(config.bucket()));
+            return new ProbeResult(true, elapsedMs(start), null);
+        } catch (SdkException ex) {
+            return new ProbeResult(false, elapsedMs(start), ex.getMessage());
+        }
+    }
+
+    @Override
+    public Stats stats(int maxObjects) {
+        long count = 0;
+        long bytes = 0;
+        boolean truncated = false;
+        try {
+            for (S3Object object : client.listObjectsV2Paginator(
+                    builder -> builder.bucket(config.bucket())).contents()) {
+                if (count >= maxObjects) {
+                    truncated = true;
+                    break;
+                }
+                count++;
+                bytes += object.size() == null ? 0 : object.size();
+            }
+            return new Stats(count, bytes, truncated);
+        } catch (SdkException ex) {
+            throw new BusinessException(ErrorCode.STORAGE_UNAVAILABLE, "统计对象失败");
+        }
+    }
+
+    private long elapsedMs(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000;
     }
 
     @Override

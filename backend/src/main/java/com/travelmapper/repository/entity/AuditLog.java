@@ -14,6 +14,7 @@ public class AuditLog {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long userId;
+    private String actorRole;
     private String action;
     private String targetType;
     private Long targetId;

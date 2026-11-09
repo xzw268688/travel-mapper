@@ -8,11 +8,13 @@ import com.travelmapper.controller.itinerary.dto.GenerateItineraryRequest;
 import com.travelmapper.controller.itinerary.dto.GenerateItineraryResponse;
 import com.travelmapper.repository.entity.Country;
 import com.travelmapper.repository.mapper.UserMapper;
+import com.travelmapper.service.audit.AuditLogService;
 import com.travelmapper.service.catalog.CatalogService;
 import com.travelmapper.service.config.ConfigKeys;
 import com.travelmapper.service.config.ConfigService;
 import com.travelmapper.service.llm.LlmItineraryRequest;
 import com.travelmapper.service.llm.LlmProviderRegistry;
+import com.travelmapper.service.llm.LlmTimeoutException;
 import com.travelmapper.service.quota.QuotaDeduction;
 import com.travelmapper.service.quota.QuotaService;
 import com.travelmapper.service.quota.QuotaSummary;
@@ -63,13 +65,15 @@ public class ItineraryGenerationService {
     private final ObjectMapper objectMapper;
     private final ConfigService configService;
     private final UserMapper userMapper;
+    private final AuditLogService auditLogService;
 
     public ItineraryGenerationService(CatalogService catalogService, QuotaService quotaService,
                                       LlmProviderRegistry llmProviderRegistry,
                                       SearchProviderHolder searchProviderHolder,
                                       GuideLinkSanitizer guideLinkSanitizer,
                                       StringRedisTemplate redis, ObjectMapper objectMapper,
-                                      ConfigService configService, UserMapper userMapper) {
+                                      ConfigService configService, UserMapper userMapper,
+                                      AuditLogService auditLogService) {
         this.catalogService = catalogService;
         this.quotaService = quotaService;
         this.llmProviderRegistry = llmProviderRegistry;
@@ -79,6 +83,7 @@ public class ItineraryGenerationService {
         this.objectMapper = objectMapper;
         this.configService = configService;
         this.userMapper = userMapper;
+        this.auditLogService = auditLogService;
     }
 
     public GenerateItineraryResponse generate(Long userId, GenerateItineraryRequest request) {
@@ -92,7 +97,12 @@ public class ItineraryGenerationService {
         if (cached != null) {
             try {
                 CachedGeneration generation = objectMapper.readValue(cached, CachedGeneration.class);
-                return buildResponse(normalized.requestId(), generation, true, userId);
+                GenerateItineraryResponse response =
+                        buildResponse(normalized.requestId(), generation, true, userId);
+                auditLogService.record(userId, "ITINERARY_GENERATE", "ITINERARY", null,
+                        Map.of("mode", "DRAFT", "dayCount", response.days().size(),
+                                "deduplicated", true), null);
+                return response;
             } catch (Exception ex) {
                 redis.delete(resultKey);
             }
@@ -151,6 +161,9 @@ public class ItineraryGenerationService {
             } catch (Exception ex) {
                 log.warn("failed to cache generation dedupe result", ex);
             }
+            auditLogService.record(userId, "ITINERARY_GENERATE", "ITINERARY", null,
+                    Map.of("mode", "DRAFT", "dayCount", response.days().size(),
+                            "deduplicated", false), null);
             return response;
         } finally {
             redis.delete(lockKey);
@@ -231,28 +244,52 @@ public class ItineraryGenerationService {
         LlmItineraryRequest llmRequest = new LlmItineraryRequest(
                 request.countryCode(), request.countryName(), request.cityCodes(),
                 request.cityNames(), request.days(), request.startDate(), request.preference());
+        // 整次生成共用一个预算：超时不重试，避免把用户等待时间翻倍。
+        long deadline = System.currentTimeMillis()
+                + (configService.getInt(ConfigKeys.LLM_TIMEOUT_SECONDS, 30) + 10L) * 1000L;
+        // 重试次数来自后台配置；受整体时间预算约束，最快也只可能多试几次。
+        int retries = Math.max(0, Math.min(3, configService.getInt(ConfigKeys.LLM_MAX_RETRY, 1)));
+        int attempts = 1 + retries;
         RuntimeException last = null;
-        for (int attempt = 0; attempt < 2; attempt++) {
+        for (int attempt = 0; attempt < attempts; attempt++) {
+            if (remainingMs(deadline) < 5_000) {
+                break;
+            }
+            long startedAt = System.currentTimeMillis();
             try {
-                return parsePlan(callLlm(llmRequest), llmRequest);
+                GeneratedPlan plan = parsePlan(callLlm(llmRequest, deadline), llmRequest);
+                log.info("itinerary generation attempt {} succeeded in {}ms", attempt + 1,
+                        System.currentTimeMillis() - startedAt);
+                return plan;
+            } catch (LlmTimeoutException ex) {
+                log.warn("itinerary generation attempt {} timed out after {}ms, no retry",
+                        attempt + 1, System.currentTimeMillis() - startedAt);
+                throw ex;
             } catch (InvalidPlanException | BusinessException ex) {
+                log.warn("itinerary generation attempt {} failed in {}ms: {}",
+                        attempt + 1, System.currentTimeMillis() - startedAt, ex.getMessage());
                 last = ex;
             }
         }
-        if (request.cityCodes().size() > 1) {
+        if (request.cityCodes().size() > 1 && remainingMs(deadline) >= 5_000) {
             String firstCode = request.cityCodes().get(0);
             String firstName = request.cityNames().get(0);
             LlmItineraryRequest single = new LlmItineraryRequest(
                     request.countryCode(), request.countryName(),
                     List.of(firstCode), List.of(firstName),
                     request.days(), request.startDate(), request.preference());
-            for (int attempt = 0; attempt < 2; attempt++) {
+            for (int attempt = 0; attempt < attempts; attempt++) {
+                if (remainingMs(deadline) < 5_000) {
+                    break;
+                }
                 try {
-                    GeneratedPlan plan = parsePlan(callLlm(single), single);
+                    GeneratedPlan plan = parsePlan(callLlm(single, deadline), single);
                     List<String> warnings = new ArrayList<>(plan.warnings());
                     warnings.add("多城市生成不稳定，已按单城市（" + firstName
                             + "）生成，可重新调整或分城市生成");
                     return new GeneratedPlan(plan.days(), plan.preparations(), warnings);
+                } catch (LlmTimeoutException ex) {
+                    throw ex;
                 } catch (InvalidPlanException | BusinessException ex) {
                     last = ex;
                 }
@@ -264,14 +301,22 @@ public class ItineraryGenerationService {
         throw new BusinessException(ErrorCode.AI_UNAVAILABLE);
     }
 
-    private String callLlm(LlmItineraryRequest request) {
+    private long remainingMs(long deadline) {
+        return deadline - System.currentTimeMillis();
+    }
+
+    private String callLlm(LlmItineraryRequest request, long deadline) {
+        long remaining = remainingMs(deadline);
+        if (remaining < 5_000) {
+            throw new LlmTimeoutException();
+        }
         try {
             return CompletableFuture.supplyAsync(
                             () -> llmProviderRegistry.get().generateItinerary(request))
-                    .get(configService.getInt(ConfigKeys.LLM_TIMEOUT_SECONDS, 30) + 10L,
-                            TimeUnit.SECONDS);
+                    .get(Math.min(remaining, (configService.getInt(ConfigKeys.LLM_TIMEOUT_SECONDS, 30) + 10L) * 1000L),
+                            TimeUnit.MILLISECONDS);
         } catch (TimeoutException ex) {
-            throw new BusinessException(ErrorCode.AI_UNAVAILABLE, "AI 服务超时");
+            throw new LlmTimeoutException();
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new BusinessException(ErrorCode.AI_UNAVAILABLE);
@@ -319,8 +364,16 @@ public class ItineraryGenerationService {
                     }
                     spots.add(new GenerateItineraryResponse.SpotPlan(
                             name,
-                            spot.path("description").asText(""),
-                            spot.path("suggestedDuration").asText(""),
+                            safeText(spot, "description", 200),
+                            safeText(spot, "suggestedDuration", 20),
+                            safeText(spot, "category", 32),
+                            safeText(spot, "ticketPrice", 64),
+                            safeText(spot, "highlights", 255),
+                            safeText(spot, "bestTime", 64),
+                            safeText(spot, "nearestStation", 128),
+                            safeBoolean(spot, "reservationRequired"),
+                            safeText(spot, "area", 128),
+                            safeText(spot, "warningNotes", 255),
                             "AI"));
                 }
                 days.add(new GenerateItineraryResponse.DayPlan(
@@ -348,6 +401,34 @@ public class ItineraryGenerationService {
 
     private GenerateItineraryResponse.Preparations emptyPreparations() {
         return new GenerateItineraryResponse.Preparations("", "", "", "", List.of());
+    }
+
+    /** 扩展字段一律可降级：非文本取空，超长截断，不因单字段异常让整份行程重试。 */
+    static String safeText(JsonNode node, String field, int maxLength) {
+        JsonNode value = node.path(field);
+        if (!value.isTextual()) {
+            return "";
+        }
+        String text = value.asText().trim();
+        return text.length() > maxLength ? text.substring(0, maxLength) : text;
+    }
+
+    static boolean safeBoolean(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        if (value.isBoolean()) {
+            return value.asBoolean();
+        }
+        if (value.isNumber()) {
+            return value.asInt() != 0;
+        }
+        if (value.isTextual()) {
+            String text = value.asText().trim().toLowerCase(Locale.ROOT);
+            return switch (text) {
+                case "true", "yes", "y", "1", "是", "需要", "需预约", "需要预约", "必须预约" -> true;
+                default -> false;
+            };
+        }
+        return false;
     }
 
     private List<GuideLink> loadGuides(Long userId, NormalizedRequest request) {

@@ -19,6 +19,7 @@ import com.travelmapper.repository.mapper.ExpenseMapper.SummaryRow;
 import com.travelmapper.repository.mapper.ItineraryDayMapper;
 import com.travelmapper.repository.mapper.ItineraryMapper;
 import com.travelmapper.repository.mapper.TripMapper;
+import com.travelmapper.service.audit.AuditLogService;
 import com.travelmapper.service.catalog.CatalogService;
 import com.travelmapper.service.trip.TripService;
 import org.springframework.stereotype.Service;
@@ -52,11 +53,12 @@ public class ExpenseService {
     private final TripMapper tripMapper;
     private final TripService tripService;
     private final CatalogService catalogService;
+    private final AuditLogService auditLogService;
 
     public ExpenseService(ExpenseMapper expenseMapper, ExchangeRateMapper rateMapper,
                           ItineraryMapper itineraryMapper, ItineraryDayMapper itineraryDayMapper,
                           TripMapper tripMapper, TripService tripService,
-                          CatalogService catalogService) {
+                          CatalogService catalogService, AuditLogService auditLogService) {
         this.expenseMapper = expenseMapper;
         this.rateMapper = rateMapper;
         this.itineraryMapper = itineraryMapper;
@@ -64,6 +66,7 @@ public class ExpenseService {
         this.tripMapper = tripMapper;
         this.tripService = tripService;
         this.catalogService = catalogService;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -102,6 +105,8 @@ public class ExpenseService {
         expense.setRemark(request.getRemark());
         expenseMapper.insert(expense);
         Expense saved = expenseMapper.selectById(expense.getId());
+        auditLogService.record(userId, "EXPENSE_CREATE", "EXPENSE", saved.getId(),
+                Map.of("category", saved.getCategory().name(), "currency", saved.getCurrency()), null);
         return toCreateResponse(saved, tripInherited);
     }
 
@@ -109,22 +114,26 @@ public class ExpenseService {
     public ExpenseDtos.CreateResponse update(Long userId, Long id, ExpenseDtos.UpdateRequest request) {
         Expense expense = requireOwned(userId, id);
         boolean recalcRate = false;
+        List<String> changed = new ArrayList<>();
         if (request.getItineraryId() != null) {
             ResolvedContext context = resolveContext(userId, request.getItineraryId(),
                     null, request.getCityCode());
             expense.setCountryCode(context.countryCode());
             expense.setCityCode(context.cityCode());
             expense.setTripId(context.tripId());
+            changed.add("trip");
         } else {
             if (request.getCountryCode() != null) {
                 String countryCode = request.getCountryCode().toUpperCase(Locale.ROOT);
                 catalogService.requireEnabledCountry(countryCode);
                 expense.setCountryCode(countryCode);
+                changed.add("country");
             }
             if (request.getCityCode() != null) {
                 String cityCode = request.getCityCode().toUpperCase(Locale.ROOT);
                 catalogService.requireEnabledCity(expense.getCountryCode(), cityCode);
                 expense.setCityCode(cityCode);
+                changed.add("city");
             }
             if (request.getTripId() != null) {
                 Trip trip = tripService.requireOwnedTrip(userId, request.getTripId());
@@ -132,31 +141,39 @@ public class ExpenseService {
                     throw new BusinessException(ErrorCode.PARAM_INVALID, "旅行国家与消费不一致");
                 }
                 expense.setTripId(request.getTripId());
+                changed.add("trip");
             }
         }
         if (request.getCurrency() != null) {
             expense.setCurrency(normalizeCurrency(request.getCurrency()));
             recalcRate = true;
+            changed.add("currency");
         }
         if (request.getAmount() != null) {
             expense.setAmount(parseAmount(request.getAmount()));
             recalcRate = true;
+            changed.add("amount");
         }
         if (recalcRate) {
             expense.setExchangeRateSnapshot(findRate(expense.getCurrency()));
         }
         if (request.getCategory() != null) {
             expense.setCategory(ExpenseCategory.valueOf(normalizeCategory(request.getCategory())));
+            changed.add("category");
         }
         if (request.getExpenseDate() != null) {
             validateDate(request.getExpenseDate());
             expense.setExpenseDate(request.getExpenseDate());
+            changed.add("date");
         }
         if (request.getRemark() != null) {
             validateRemark(request.getRemark());
             expense.setRemark(request.getRemark());
+            changed.add("remark");
         }
         expenseMapper.updateById(expense);
+        auditLogService.record(userId, "EXPENSE_UPDATE", "EXPENSE", id,
+                Map.of("changed", changed), null);
         return toCreateResponse(expenseMapper.selectById(id), false);
     }
 
@@ -164,7 +181,10 @@ public class ExpenseService {
     public ExpenseDtos.DeleteResponse delete(Long userId, Long id) {
         Expense expense = requireOwned(userId, id);
         expenseMapper.deleteById(expense.getId());
-        return new ExpenseDtos.DeleteResponse(id);
+        boolean tripDeleted = tripService.deleteIfEmpty(expense.getTripId());
+        auditLogService.record(userId, "EXPENSE_DELETE", "EXPENSE", id,
+                Map.of("tripDeleted", tripDeleted), null);
+        return new ExpenseDtos.DeleteResponse(id, tripDeleted);
     }
 
     public PageResult<ExpenseDtos.Response> list(Long userId, String countryCode, String cityCode,
@@ -252,16 +272,27 @@ public class ExpenseService {
     }
 
     public ExpenseDtos.SummaryResponse summary(Long userId, String groupByCsv, String countryCode,
-                                               Long tripId, LocalDate from, LocalDate to) {
+                                               String cityCode, Long tripId, String category,
+                                               LocalDate from, LocalDate to) {
         List<String> groupBy = parseGroupBy(groupByCsv);
         String country = countryCode == null || countryCode.isBlank()
                 ? null : countryCode.toUpperCase(Locale.ROOT);
+        String city = cityCode == null || cityCode.isBlank()
+                ? null : cityCode.toUpperCase(Locale.ROOT);
+        String categoryValue = null;
+        if (category != null && !category.isBlank()) {
+            try {
+                categoryValue = ExpenseCategory.valueOf(category.toUpperCase(Locale.ROOT)).name();
+            } catch (IllegalArgumentException ex) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "未知消费分类");
+            }
+        }
         List<String> groupColumns = groupBy.stream().map(SUMMARY_GROUP_COLUMNS::get).toList();
 
         List<ExpenseMapper.SummaryRow> rows = expenseMapper.selectSummaryGroups(
-                userId, groupColumns, country, tripId, from, to);
+                userId, groupColumns, country, city, tripId, categoryValue, from, to);
         List<String> unconfigured = expenseMapper.selectUnconfiguredCurrencies(
-                userId, country, tripId, from, to);
+                userId, country, city, tripId, categoryValue, from, to);
 
         Map<Long, String> tripNames = new LinkedHashMap<>();
         if (groupBy.contains("trip")) {

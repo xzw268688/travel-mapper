@@ -24,13 +24,16 @@ public class RequestIdentityFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final UserStatusCache userStatusCache;
     private final ObjectMapper objectMapper;
+    private final OnlineUserRegistry onlineUserRegistry;
 
     public RequestIdentityFilter(AppProperties properties, JwtService jwtService,
-                                 UserStatusCache userStatusCache, ObjectMapper objectMapper) {
+                                 UserStatusCache userStatusCache, ObjectMapper objectMapper,
+                                 OnlineUserRegistry onlineUserRegistry) {
         this.properties = properties;
         this.jwtService = jwtService;
         this.userStatusCache = userStatusCache;
         this.objectMapper = objectMapper;
+        this.onlineUserRegistry = onlineUserRegistry;
     }
 
     @Override
@@ -64,6 +67,7 @@ public class RequestIdentityFilter extends OncePerRequestFilter {
 
         request.setAttribute(RequestIdentity.ATTRIBUTE, identity);
         RequestContext.set(identity);
+        onlineUserRegistry.touch(identity, clientIp(request), request.getHeader("User-Agent"));
         try {
             chain.doFilter(request, response);
         } finally {
@@ -97,6 +101,17 @@ public class RequestIdentityFilter extends OncePerRequestFilter {
             return new RequestIdentity(Long.valueOf(rawUserId), role);
         }
         return RequestIdentity.ANONYMOUS;
+    }
+
+    private String clientIp(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            String first = forwarded.split(",")[0].trim();
+            if (!first.isEmpty()) {
+                return first;
+            }
+        }
+        return request.getRemoteAddr();
     }
 
     private void writeError(HttpServletResponse response, ErrorCode errorCode) throws IOException {

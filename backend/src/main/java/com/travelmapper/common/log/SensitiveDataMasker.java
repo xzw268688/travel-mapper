@@ -10,6 +10,7 @@ public final class SensitiveDataMasker {
                     + "\\s*[:=]\\s*)(\"[^\"]*\"|'[^']*'|[^\\s,;}\\]]+)");
     private static final Pattern BEARER = Pattern.compile("(?i)(bearer)\\s+[A-Za-z0-9._~+/=-]+");
     private static final Pattern JWT = Pattern.compile("eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+");
+    private static final Pattern JSON_NUMBER = Pattern.compile("-?\\d+(\\.\\d+)?([eE][+-]?\\d+)?");
 
     private SensitiveDataMasker() {
     }
@@ -23,7 +24,10 @@ public final class SensitiveDataMasker {
         while (matcher.find()) {
             String value = matcher.group(2);
             boolean quoted = value.startsWith("\"") || value.startsWith("'");
-            String replacement = matcher.group(1) + (quoted ? "\"****\"" : "****");
+            // JSON 中的 null / 布尔 / 数字没有引号；直接替换成裸 **** 会让 detail 变成非法 JSON。
+            boolean jsonLiteral = !quoted && ("null".equals(value) || "true".equals(value)
+                    || "false".equals(value) || JSON_NUMBER.matcher(value).matches());
+            String replacement = matcher.group(1) + (quoted || jsonLiteral ? "\"****\"" : "****");
             matcher.appendReplacement(buffer, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(buffer);

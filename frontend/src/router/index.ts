@@ -16,7 +16,12 @@ import PosterView from '../views/PosterView.vue'
 import ExpensesView from '../views/ExpensesView.vue'
 import AdminRatesView from '../views/AdminRatesView.vue'
 import AdminNotesView from '../views/AdminNotesView.vue'
+import AdminFeedbackView from '../views/AdminFeedbackView.vue'
+import AdminReportsView from '../views/AdminReportsView.vue'
 import AdminSettingsView from '../views/AdminSettingsView.vue'
+import AdminLogsView from '../views/AdminLogsView.vue'
+import AdminAnnouncementsView from '../views/AdminAnnouncementsView.vue'
+import AdminMonitorView from '../views/AdminMonitorView.vue'
 import AdminUsersView from '../views/AdminUsersView.vue'
 import AdminCardsView from '../views/AdminCardsView.vue'
 import AdminCitiesView from '../views/AdminCitiesView.vue'
@@ -33,7 +38,7 @@ const router = createRouter({
     { path: '/reset-password', name: 'reset-password', component: ResetPasswordView, meta: { public: true, bare: true } },
     { path: '/admin/login', name: 'admin-login', component: AdminLoginView, meta: { public: true, bare: true } },
     { path: '/profile', name: 'profile', component: ProfileView },
-    { path: '/', name: 'map', component: MapView },
+    { path: '/', name: 'map', component: MapView, meta: { hideBack: true } },
     { path: '/plan', name: 'plan', component: PlanView },
     { path: '/itineraries/:id', name: 'itinerary-edit', component: ItineraryEditView },
     { path: '/trips/:id', name: 'trip-detail', component: TripDetailView },
@@ -43,12 +48,21 @@ const router = createRouter({
     { path: '/expenses', name: 'expenses', component: ExpensesView },
     { path: '/admin/rates', name: 'admin-rates', component: AdminRatesView, meta: { admin: true } },
     { path: '/admin/notes', name: 'admin-notes', component: AdminNotesView, meta: { admin: true } },
+    { path: '/admin/feedback', name: 'admin-feedback', component: AdminFeedbackView, meta: { admin: true } },
+    { path: '/admin/reports', name: 'admin-reports', component: AdminReportsView, meta: { admin: true } },
+    { path: '/admin/logs', name: 'admin-logs', component: AdminLogsView, meta: { admin: true } },
+    { path: '/admin/announcements', name: 'admin-announcements', component: AdminAnnouncementsView, meta: { admin: true } },
+    { path: '/admin/monitor/:section?', name: 'admin-monitor', component: AdminMonitorView, meta: { admin: true } },
+    {
+      path: '/admin/audit',
+      redirect: { path: '/admin/logs', query: { tab: 'operations' } }
+    },
     { path: '/admin/settings', name: 'admin-settings', component: AdminSettingsView, meta: { admin: true } },
     { path: '/admin/users', name: 'admin-users', component: AdminUsersView, meta: { admin: true } },
     { path: '/admin/cards', name: 'admin-cards', component: AdminCardsView, meta: { admin: true } },
     { path: '/admin/cities', name: 'admin-cities', component: AdminCitiesView, meta: { admin: true } },
     { path: '/admin/official-links', name: 'admin-links', component: AdminLinksView, meta: { admin: true } },
-    { path: '/share/:token', name: 'share', component: ShareView, meta: { public: true } }
+    { path: '/share/:token', name: 'share', component: ShareView, meta: { public: true, hideBack: true } }
   ]
 })
 

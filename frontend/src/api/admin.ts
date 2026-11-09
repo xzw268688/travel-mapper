@@ -1,4 +1,6 @@
 import { apiDelete, apiDownload, apiGet, apiPost, apiPut } from './http'
+import type { FeedbackStatus, FeedbackType } from './feedback'
+import type { ReportReason, ReportStatus } from './reports'
 
 export interface PageResult<T> {
   total: number
@@ -38,6 +40,18 @@ export interface SearchConfig {
   timeoutSeconds: number
   cacheHours: number
   domainWhitelist: string
+}
+
+export interface QuotaConfig {
+  freeLimit: number
+}
+
+export function getQuotaConfig(): Promise<QuotaConfig> {
+  return apiGet<QuotaConfig>('/admin/config/quota')
+}
+
+export function updateQuotaConfig(body: QuotaConfig): Promise<QuotaConfig> {
+  return apiPut<QuotaConfig>('/admin/config/quota', body)
 }
 
 export function getLlmConfig(): Promise<LlmConfig> {
@@ -113,10 +127,95 @@ export interface CardKeyView {
   code: string
   type: string
   value: number
+  priceCny: string | null
   status: string
   expireAt: string | null
   usedBy: number | null
   usedAt: string | null
+  createdAt: string
+}
+
+export interface CardRedemptionView {
+  cardId: number
+  code: string
+  batchId: string
+  type: string
+  value: number
+  priceCny: string | null
+  userId: number | null
+  username: string | null
+  usedAt: string | null
+}
+
+export interface CardBatchStatsView {
+  batchId: string
+  type: string
+  value: number
+  priceCny: string | null
+  createdAt: string | null
+  total: number
+  used: number
+  unused: number
+  voided: number
+  expired: number
+  estimatedRevenueCny: string | null
+}
+
+export interface AdminUserDetailView {
+  id: number
+  username: string
+  nickname: string
+  email: string
+  role: string
+  status: string
+  vipExpireAt: string | null
+  freeUsedToday: number
+  packBalance: number
+  noteCount: number
+  itineraryCount: number
+  tripCount: number
+  createdAt: string
+  recentRedemptions: CardRedemptionView[]
+}
+
+export interface AdminNoteView {
+  id: number
+  title: string
+  authorId: number | null
+  authorName: string | null
+  countryCode: string
+  countryName: string
+  cityCode: string
+  cityName: string
+  visibility: string
+  takenDown: boolean
+  takedownReason: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminAuditView {
+  id: number
+  userId: number | null
+  actorRole: string | null
+  username: string | null
+  action: string
+  targetType: string | null
+  targetId: number | null
+  detail: string | null
+  ip: string | null
+  createdAt: string
+}
+
+export interface AdminLoginLogView {
+  id: number
+  userId: number | null
+  username: string
+  role: string | null
+  success: boolean
+  reason: string | null
+  ip: string | null
+  userAgent: string | null
   createdAt: string
 }
 
@@ -158,14 +257,48 @@ export function adjustUserQuota(
   return apiPut(`/admin/users/${id}/quota`, body)
 }
 
+export function getUserDetail(id: number): Promise<AdminUserDetailView> {
+  return apiGet<AdminUserDetailView>(`/admin/users/${id}`)
+}
+
+export function setUserVip(
+  id: number,
+  expireAt: string | null
+): Promise<{ userId: number; vipExpireAt: string | null }> {
+  return apiPut(`/admin/users/${id}/vip`, { expireAt })
+}
+
 export function generateCards(body: {
   type: string
   value: number
+  priceCny?: number | null
   quantity: number
   expireAt?: string | null
   prefix?: string
 }): Promise<{ batchId: string; quantity: number; codes: string[] }> {
   return apiPost('/admin/cards/generate', body)
+}
+
+export function getCardBatchStats(): Promise<CardBatchStatsView[]> {
+  return apiGet<CardBatchStatsView[]>('/admin/cards/stats')
+}
+
+export function listCardRedemptions(
+  params: Record<string, unknown>
+): Promise<PageResult<CardRedemptionView>> {
+  return apiGet<PageResult<CardRedemptionView>>('/admin/cards/redemptions', params)
+}
+
+export function listAdminNotes(params: Record<string, unknown>): Promise<PageResult<AdminNoteView>> {
+  return apiGet<PageResult<AdminNoteView>>('/admin/notes', params)
+}
+
+export function listAuditLogs(params: Record<string, unknown>): Promise<PageResult<AdminAuditView>> {
+  return apiGet<PageResult<AdminAuditView>>('/admin/audit', params)
+}
+
+export function listLoginLogs(params: Record<string, unknown>): Promise<PageResult<AdminLoginLogView>> {
+  return apiGet<PageResult<AdminLoginLogView>>('/admin/login-logs', params)
 }
 
 export function listCards(params: Record<string, unknown>): Promise<PageResult<CardKeyView>> {
@@ -253,4 +386,416 @@ export function takedownNote(noteId: number, reason: string): Promise<TakedownRe
 
 export function restoreNote(noteId: number): Promise<RestoreResponse> {
   return apiPut<RestoreResponse>(`/admin/notes/${noteId}/restore`)
+}
+
+export interface AdminFeedbackView {
+  id: number
+  userId: number | null
+  submitter: string
+  type: FeedbackType
+  title: string
+  status: FeedbackStatus
+  contact: string | null
+  createdAt: string
+  updatedAt: string
+  handledAt: string | null
+}
+
+export interface AdminFeedbackDetailView {
+  id: number
+  userId: number | null
+  submitter: string
+  type: FeedbackType
+  title: string
+  content: string
+  contact: string | null
+  pagePath: string | null
+  userAgent: string | null
+  appVersion: string | null
+  status: FeedbackStatus
+  adminNote: string | null
+  handledBy: number | null
+  handledByName: string | null
+  handledAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface FeedbackStatsView {
+  total: number
+  newCount: number
+  processingCount: number
+  resolvedCount: number
+}
+
+export function listAdminFeedback(params: {
+  type?: string
+  status?: string
+  keyword?: string
+  from?: string
+  to?: string
+  page?: number
+  size?: number
+}): Promise<PageResult<AdminFeedbackView>> {
+  return apiGet<PageResult<AdminFeedbackView>>('/admin/feedback', params)
+}
+
+export function getFeedbackStats(): Promise<FeedbackStatsView> {
+  return apiGet<FeedbackStatsView>('/admin/feedback/stats')
+}
+
+export function getAdminFeedback(id: number): Promise<AdminFeedbackDetailView> {
+  return apiGet<AdminFeedbackDetailView>(`/admin/feedback/${id}`)
+}
+
+export function updateAdminFeedback(
+  id: number,
+  body: { status?: FeedbackStatus; adminNote?: string | null }
+): Promise<AdminFeedbackDetailView> {
+  return apiPut<AdminFeedbackDetailView>(`/admin/feedback/${id}`, body)
+}
+
+export interface AdminNoteImageView {
+  objectKey: string
+  url: string | null
+}
+
+export interface AdminNoteDetailView {
+  id: number
+  title: string
+  content: string
+  contentText: string
+  images: AdminNoteImageView[]
+  videos: AdminNoteImageView[]
+  coverImageUrl: string | null
+  authorId: number | null
+  authorName: string
+  countryCode: string
+  countryName: string
+  cityCode: string
+  cityName: string
+  visibility: string
+  hasActiveShare: boolean
+  shareExpireAt: string | null
+  takedown: boolean
+  takedownReason: string | null
+  takedownAt: string | null
+  deleted: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export function getAdminNoteDetail(id: number): Promise<AdminNoteDetailView> {
+  return apiGet<AdminNoteDetailView>(`/admin/notes/${id}`)
+}
+
+export interface AdminReportView {
+  id: number
+  noteId: number
+  reporterName: string
+  reason: ReportReason
+  status: ReportStatus
+  description: string | null
+  noteTitle: string
+  currentNoteTitle: string | null
+  authorName: string
+  createdAt: string
+  handledAt: string | null
+}
+
+export interface AdminReportDetailView {
+  id: number
+  noteId: number
+  reporterUserId: number | null
+  reporterName: string
+  reason: ReportReason
+  description: string | null
+  noteTitle: string
+  noteContentText: string | null
+  noteUpdatedAt: string | null
+  status: ReportStatus
+  handledBy: number | null
+  handledByName: string | null
+  handledAt: string | null
+  createdAt: string
+  authorId: number | null
+  authorName: string
+  currentNoteTitle: string | null
+  currentNoteVisibility: string | null
+  currentNoteUpdatedAt: string | null
+  currentNoteTakedown: boolean
+  currentNoteDeleted: boolean
+  authorAcceptedReportCount: number
+}
+
+export interface ReportStatsView {
+  total: number
+  pendingCount: number
+  acceptedCount: number
+  rejectedCount: number
+}
+
+export function listAdminReports(params: {
+  status?: string
+  reason?: string
+  keyword?: string
+  from?: string
+  to?: string
+  page?: number
+  size?: number
+}): Promise<PageResult<AdminReportView>> {
+  return apiGet<PageResult<AdminReportView>>('/admin/reports', params)
+}
+
+export function getReportStats(): Promise<ReportStatsView> {
+  return apiGet<ReportStatsView>('/admin/reports/stats')
+}
+
+export function getAdminReport(id: number): Promise<AdminReportDetailView> {
+  return apiGet<AdminReportDetailView>(`/admin/reports/${id}`)
+}
+
+export function acceptReport(id: number, noteReason: string): Promise<AdminReportDetailView> {
+  return apiPut<AdminReportDetailView>(`/admin/reports/${id}/accept`, { noteReason })
+}
+
+export function rejectReport(id: number): Promise<AdminReportDetailView> {
+  return apiPut<AdminReportDetailView>(`/admin/reports/${id}/reject`)
+}
+
+export interface ExchangeRateRefreshItem {
+  currency: string
+  oldRate: string
+  newRate: string | null
+  status: 'CHANGED' | 'UNCHANGED' | 'UNSUPPORTED'
+}
+
+export interface ExchangeRateRefreshResponse {
+  source: string
+  fetchedAt: string
+  applied: boolean
+  updatedCount: number
+  unchangedCount: number
+  unsupportedCount: number
+  items: ExchangeRateRefreshItem[]
+}
+
+export function previewExchangeRateRefresh(): Promise<ExchangeRateRefreshResponse> {
+  return apiGet<ExchangeRateRefreshResponse>('/admin/exchange-rates/refresh-preview')
+}
+
+export function applyExchangeRateRefresh(): Promise<ExchangeRateRefreshResponse> {
+  return apiPost<ExchangeRateRefreshResponse>('/admin/exchange-rates/refresh')
+}
+
+// ---------- 通知公告 ----------
+
+export type AnnouncementType = 'NOTICE' | 'ANNOUNCEMENT'
+export type AnnouncementStatus = 'DRAFT' | 'PUBLISHED' | 'OFFLINE'
+
+export interface AdminAnnouncementView {
+  id: number
+  title: string
+  type: AnnouncementType
+  pinned: boolean
+  status: AnnouncementStatus
+  publishAt: string | null
+  expireAt: string | null
+  readCount: number
+  totalUsers: number
+  readRate: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminAnnouncementDetailView extends AdminAnnouncementView {
+  content: string
+  createdBy: number | null
+}
+
+export interface AnnouncementBody {
+  title: string
+  content: string
+  type: AnnouncementType
+  pinned: boolean
+  publishAt: string | null
+  expireAt: string | null
+}
+
+export function listAdminAnnouncements(params: Record<string, unknown>): Promise<PageResult<AdminAnnouncementView>> {
+  return apiGet<PageResult<AdminAnnouncementView>>('/admin/announcements', params)
+}
+
+export function getAdminAnnouncement(id: number): Promise<AdminAnnouncementDetailView> {
+  return apiGet<AdminAnnouncementDetailView>(`/admin/announcements/${id}`)
+}
+
+export function createAnnouncement(body: AnnouncementBody): Promise<AdminAnnouncementDetailView> {
+  return apiPost<AdminAnnouncementDetailView>('/admin/announcements', body)
+}
+
+export function updateAnnouncement(id: number, body: AnnouncementBody): Promise<AdminAnnouncementDetailView> {
+  return apiPut<AdminAnnouncementDetailView>(`/admin/announcements/${id}`, body)
+}
+
+export function publishAnnouncement(id: number): Promise<AdminAnnouncementDetailView> {
+  return apiPut<AdminAnnouncementDetailView>(`/admin/announcements/${id}/publish`)
+}
+
+export function offlineAnnouncement(id: number): Promise<AdminAnnouncementDetailView> {
+  return apiPut<AdminAnnouncementDetailView>(`/admin/announcements/${id}/offline`)
+}
+
+export function deleteAnnouncement(id: number): Promise<void> {
+  return apiDelete<void>(`/admin/announcements/${id}`)
+}
+
+// ---------- 监控中心 ----------
+
+export interface OnlineUserView {
+  userId: number
+  username: string | null
+  nickname: string | null
+  role: string | null
+  ip: string | null
+  userAgent: string | null
+  lastActiveAt: string
+}
+
+export interface DiskView {
+  name: string
+  mount: string
+  totalBytes: number
+  usableBytes: number
+}
+
+export interface JvmView {
+  heapUsedBytes: number
+  heapMaxBytes: number
+  heapCommittedBytes: number
+  nonHeapUsedBytes: number
+  threadCount: number
+  peakThreadCount: number
+  gcCount: number
+  gcTimeMs: number
+  uptimeMs: number
+  javaVersion: string
+  javaVendor: string
+  startTime: string
+}
+
+export interface ServerMetrics {
+  osName: string
+  osVersion: string
+  osArch: string
+  availableProcessors: number
+  logicalCpuCount: number
+  physicalCpuCount: number
+  systemCpuUsage: number
+  processCpuUsage: number
+  totalMemoryBytes: number
+  freeMemoryBytes: number
+  systemUptimeSeconds: number
+  disks: DiskView[]
+  jvm: JvmView
+  partial: boolean
+}
+
+export interface DatabaseMetrics {
+  activeConnections: number
+  idleConnections: number
+  totalConnections: number
+  waitingThreads: number
+  maxPoolSize: number
+  minIdle: number
+  connectionTimeoutMs: number
+  acquireCount: number
+  acquireAvgMs: number
+  acquireMaxMs: number
+  partial: boolean
+}
+
+export interface CacheOverview {
+  usedMemory: string
+  maxMemory: string
+  connectedClients: number
+  hitRate: number
+  keyspaceHits: number
+  keyspaceMisses: number
+  dbKeys: number
+}
+
+export interface CacheGroupView {
+  key: string
+  label: string
+  keyCount: number
+  minTtlSeconds: number | null
+  maxTtlSeconds: number | null
+  truncated: boolean
+  clearable: boolean
+}
+
+export interface CacheMetrics {
+  overview: CacheOverview
+  groups: CacheGroupView[]
+}
+
+export interface CacheClearResponse {
+  group: string
+  deleted: number
+}
+
+export interface StorageMetrics {
+  provider: string
+  endpoint: string
+  bucket: string
+  pathStyle: boolean
+  configured: boolean
+  reachable: boolean
+  latencyMs: number
+  message: string | null
+}
+
+export interface StorageStats {
+  objectCount: number
+  totalBytes: number
+  truncated: boolean
+  available: boolean
+  measuredAt: string
+}
+
+export function listOnlineUsers(params: Record<string, unknown>): Promise<PageResult<OnlineUserView>> {
+  return apiGet<PageResult<OnlineUserView>>('/admin/monitor/online-users', params)
+}
+
+export function kickOnlineUser(userId: number): Promise<void> {
+  return apiDelete<void>(`/admin/monitor/online-users/${userId}`)
+}
+
+export function getServerMetrics(): Promise<ServerMetrics> {
+  return apiGet<ServerMetrics>('/admin/monitor/server')
+}
+
+export function getDatabaseMetrics(): Promise<DatabaseMetrics> {
+  return apiGet<DatabaseMetrics>('/admin/monitor/database')
+}
+
+export function getCacheMetrics(): Promise<CacheMetrics> {
+  return apiGet<CacheMetrics>('/admin/monitor/cache')
+}
+
+export function clearCacheGroup(group: string): Promise<CacheClearResponse> {
+  return apiDelete<CacheClearResponse>(`/admin/monitor/cache/${group}`)
+}
+
+export function getStorageMetrics(): Promise<StorageMetrics> {
+  return apiGet<StorageMetrics>('/admin/monitor/storage')
+}
+
+export function getStorageStats(): Promise<StorageStats> {
+  return apiGet<StorageStats>('/admin/monitor/storage/stats')
+}
+
+export function getApiDocs(): Promise<Record<string, unknown>> {
+  return apiGet<Record<string, unknown>>('/admin/monitor/api-docs')
 }

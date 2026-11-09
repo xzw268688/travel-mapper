@@ -36,7 +36,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-Flyway 会自动建表并写入种子数据；`V4__more_cities.sql` 额外预置常用中国地级市与热门外国城市。首次启动后：
+Flyway 会自动建表并写入种子数据；`V4__more_cities.sql` 额外预置常用中国地级市与热门外国城市；`V10__all_world_countries.sql` 预置 `world.json` 中全部有名称的国家/地区（含 `X1` 锡亚琴冰川、`X2` 北塞浦路斯两个自定义区域），使地图上每个区域都能打开国家抽屉；`V11__polar_regions.sql` 补充南极洲（`AQ`）与北极地区（`X3`）；前端合并 `antarctica.json` 把底图扩展到 -90°~90°，主图整体缩放，北极地区则以地图顶部的可点击点标记展示。注意：新增国家与极地地区默认没有城市，规划行程与写游记前需要管理员在后台补充城市；记账的城市可选，可直接使用。旅行状态会按日期与游记/消费自动推导（计划中/进行中/已完成），手动标记优先；没有任何内容的旅行会被自动清理。首次启动后：
 
 - 健康检查：`http://localhost:8080/actuator/health`
 - Swagger UI：`http://localhost:8080/swagger-ui.html`
@@ -103,7 +103,7 @@ npm run dev
 - `/poster/:id?` 游记海报：确保分享令牌、地图足迹 Canvas 连线、统计、二维码与 PNG 下载。
 - `/expenses` 记账：新增/编辑/删除、筛选、分页、快捷录入与金额表达式、「明细 / 按日期」切换、月度合计、按国家/城市/旅行/日期汇总与图表。
 - `/profile` 个人中心：昵称/头像、额度、卡密兑换、注销；`/forgot-password`、`/reset-password` 找回密码。
-- 导航“管理”菜单（ADMIN）：用户、卡密、城市、官方链接、汇率、内容管理、AI 配置。
+- 导航“管理”菜单（ADMIN）：用户、卡密、城市、内容管理、反馈、举报、汇率、通知公告与日志管理（操作日志 / 登录日志）；另有「配置」与「监控」菜单（在线用户、服务/数据库/缓存/存储监控、接口文档）。地图首页会展示当前生效公告的横幅。
 - `/admin/settings` 管理员 LLM/搜索配置：填写 OpenAI 兼容 Base URL、模型与 API Key；Key 留空会保留原 Key。生成行程提示 `2012` 或 HTTP 503 时先检查这里。
 - `/share/:token` 公开只读分享页；分享链接与海报二维码均指向该路由。后端 API 返回的 `share.url` 仍是 `/s/{token}`（契约字段），前端展示与二维码统一使用 `/share/{token}`。
 - 开发环境预置管理员 `admin / Admin@123456`；管理员登录后导航栏显示“汇率”“内容管理”。
@@ -129,7 +129,9 @@ curl -H 'X-User-Id: 2' -H 'X-User-Role: USER' \
 # => HTTP 403, code 4002
 ```
 
-生产 profile（`SPRING_PROFILES_ACTIVE=prod`）默认关闭该身份头，必须等 change-02 的 JWT 才能访问后台。
+生产 profile（`SPRING_PROFILES_ACTIVE=prod`）默认关闭该身份头，必须使用 JWT 访问后台。
+如果开启 `admin-stub-enabled` 却没有同时设置 `allow-insecure-dev-stub=true`，应用会拒绝启动。
+生产环境必须设置 `TRAVELMAPPER_ADMIN_PASSWORD`，否则种子管理员默认密码会被启动校验拒绝。
 
 ## 对象存储配置
 

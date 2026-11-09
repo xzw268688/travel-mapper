@@ -46,6 +46,10 @@ public enum ErrorCode {
     VIDEO_COUNT_LIMIT(2028, "视频数量超限", 400),
     VIDEO_SIZE_LIMIT(2029, "单个视频超限", 400),
     VIDEO_TYPE_UNSUPPORTED(2030, "不支持的视频类型", 400),
+    FEEDBACK_NOT_FOUND(2031, "反馈不存在", 404),
+    REPORT_NOT_FOUND(2032, "举报不存在", 404),
+    RATE_FEED_UNAVAILABLE(2033, "汇率数据源不可用", 503),
+    ANNOUNCEMENT_NOT_FOUND(2034, "公告不存在或未生效", 404),
 
     DUPLICATE_REQUEST(3001, "重复请求 / 相同请求正在处理", 409),
     CONCURRENT_CONFLICT(3002, "并发操作冲突", 409),

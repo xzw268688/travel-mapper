@@ -39,6 +39,16 @@ public class UnavailableStorageProvider implements StorageProvider {
     }
 
     @Override
+    public ProbeResult probe() {
+        return new ProbeResult(false, 0, reason);
+    }
+
+    @Override
+    public Stats stats(int maxObjects) {
+        return new Stats(0, 0, false);
+    }
+
+    @Override
     public String providerName() {
         return "unconfigured";
     }

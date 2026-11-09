@@ -27,6 +27,15 @@ class SensitiveDataMaskerTest {
     }
 
     @Test
+    void masksJsonLiteralsAndKeepsItValid() throws Exception {
+        String json = "{\"apiKey\":null,\"token\":123,\"secret\":false,\"note\":\"ok\"}";
+        String masked = SensitiveDataMasker.mask(json);
+        objectMapper.readTree(masked);
+        assertThat(masked).contains("\"apiKey\":\"****\"");
+        assertThat(masked).doesNotContain("123", "false");
+    }
+
+    @Test
     void leavesSafeTextUntouched() {
         String text = "provider=qwen results=3 elapsedMs=42";
         assertThat(SensitiveDataMasker.mask(text)).isEqualTo(text);

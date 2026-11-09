@@ -18,6 +18,8 @@ import com.travelmapper.repository.entity.User;
 import com.travelmapper.repository.enums.Role;
 import com.travelmapper.repository.enums.UserStatus;
 import com.travelmapper.repository.mapper.UserMapper;
+import com.travelmapper.service.audit.AuditLogService;
+import com.travelmapper.service.audit.LoginLogService;
 import com.travelmapper.service.quota.QuotaService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -26,7 +28,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -39,12 +44,15 @@ public class AuthService {
     private final LoginAttemptService loginAttemptService;
     private final UserStatusCache userStatusCache;
     private final QuotaService quotaService;
+    private final LoginLogService loginLogService;
+    private final AuditLogService auditLogService;
 
     public AuthService(UserMapper userMapper, PasswordEncoder passwordEncoder,
                        EmailCodeService emailCodeService,
                        JwtService jwtService,
                        LoginAttemptService loginAttemptService, UserStatusCache userStatusCache,
-                       QuotaService quotaService) {
+                       QuotaService quotaService, LoginLogService loginLogService,
+                       AuditLogService auditLogService) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.emailCodeService = emailCodeService;
@@ -52,6 +60,8 @@ public class AuthService {
         this.loginAttemptService = loginAttemptService;
         this.userStatusCache = userStatusCache;
         this.quotaService = quotaService;
+        this.loginLogService = loginLogService;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -120,28 +130,40 @@ public class AuthService {
         return new EmailSentResponse(true);
     }
 
-    public LoginResponse login(LoginRequest request) {
+    public LoginResponse login(LoginRequest request, String clientIp, String userAgent) {
         String account = request.getAccount().trim();
         if (account.contains("@")) {
             account = account.toLowerCase(Locale.ROOT);
         }
-        loginAttemptService.checkNotLocked(account);
+        try {
+            loginAttemptService.checkNotLocked(account);
+        } catch (BusinessException ex) {
+            String reason = ex.getErrorCode() == ErrorCode.RATE_LIMITED
+                    ? LoginLogService.RATE_LIMITED : ex.getErrorCode().name();
+            recordLogin(null, account, false, reason, clientIp, userAgent);
+            throw ex;
+        }
 
         User user = userMapper.selectByAccountIncludingDeleted(account);
         if (user == null) {
+            recordLogin(null, account, false, LoginLogService.USER_NOT_FOUND, clientIp, userAgent);
             loginAttemptService.recordFailure(account);
             throw new BusinessException(ErrorCode.USERNAME_OR_PASSWORD);
         }
         if (user.getStatus() == UserStatus.DELETED) {
+            recordLogin(user, account, false, LoginLogService.ACCOUNT_DELETED, clientIp, userAgent);
             throw new BusinessException(ErrorCode.ACCOUNT_DELETED);
         }
         if (user.getStatus() == UserStatus.BANNED) {
+            recordLogin(user, account, false, LoginLogService.ACCOUNT_BANNED, clientIp, userAgent);
             throw new BusinessException(ErrorCode.ACCOUNT_BANNED);
         }
         if (!Boolean.TRUE.equals(user.getEmailVerified())) {
+            recordLogin(user, account, false, LoginLogService.EMAIL_NOT_VERIFIED, clientIp, userAgent);
             throw new BusinessException(ErrorCode.EMAIL_NOT_VERIFIED);
         }
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            recordLogin(user, account, false, LoginLogService.BAD_CREDENTIALS, clientIp, userAgent);
             loginAttemptService.recordFailure(account);
             throw new BusinessException(ErrorCode.USERNAME_OR_PASSWORD);
         }
@@ -149,8 +171,21 @@ public class AuthService {
         loginAttemptService.clear(account);
         user.setLastLoginAt(LocalDateTime.now());
         userMapper.updateById(user);
+        recordLogin(user, account, true, null, clientIp, userAgent);
         String jwt = jwtService.issue(user.getId(), user.getRole().name(), user.getTokenVersion());
         return new LoginResponse(jwt, jwtService.ttlSeconds(), toUserView(user));
+    }
+
+    private void recordLogin(User user, String account, boolean success, String reason,
+                             String clientIp, String userAgent) {
+        loginLogService.record(
+                user == null ? null : user.getId(),
+                account,
+                user == null || user.getRole() == null ? null : user.getRole().name(),
+                success,
+                reason,
+                clientIp,
+                userAgent);
     }
 
     @Transactional
@@ -188,13 +223,18 @@ public class AuthService {
 
     public UserView updateProfile(Long userId, UpdateProfileRequest request) {
         User user = requireActive(userId);
+        List<String> changed = new ArrayList<>();
         if (request.getNickname() != null) {
             user.setNickname(request.getNickname().trim());
+            changed.add("nickname");
         }
         if (request.getAvatarPreset() != null) {
             user.setAvatarPreset(request.getAvatarPreset());
+            changed.add("avatarPreset");
         }
         userMapper.updateById(user);
+        auditLogService.record(userId, "USER_PROFILE_UPDATE", "USER", userId,
+                Map.of("changed", changed), null);
         return toUserView(user);
     }
 

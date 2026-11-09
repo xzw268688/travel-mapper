@@ -11,7 +11,7 @@
 
 1. 通用约定
 2. 错误码
-3. 认证与账号 `/auth`、`/user`
+3. 认证与账号 `/auth`、`/user`、`/feedback`
 4. 国家、城市与旅行 `/countries`、`/cities`、`/trips`
 5. 地图与攻略 `/map`、`/country-guide`
 6. 行程与 AI `/itinerary`、`/ai`
@@ -159,12 +159,16 @@ Idempotency-Key: <uuid>
 | 3002 | 并发操作冲突 | 409 | 卡密并发兑换 |
 | 4001 | 无权访问该资源 | 403 | 行级隔离越权 |
 | 4002 | 需要管理员权限 | 403 | 访问后台 |
+| 2031 | 反馈不存在 | 404 | 反馈详情/处理 |
+| 2032 | 举报不存在 | 404 | 举报详情/处理 |
+| 2033 | 汇率数据源不可用 | 503 | 汇率一键更新 |
+| 2034 | 公告不存在或未生效 | 404 | 用户公告详情/已读 |
 | 5001 | 系统内部错误 | 500 | 未捕获异常 |
 | 5002 | 数据库操作失败 | 500 | DB 异常 |
 | 5003 | 存储服务不可用 | 503 | OSS/MinIO 异常 |
 | 5004 | 限流拦截 | 429 | 接口级限流 |
 
-> 另有 `1008`、`2015`～`2026` 共 13 个业务码，覆盖注册查重、旅行/景点 404、游记大小限制、内容下架、城市引用等场景，明细见 **第 15 章**。
+> 另有 `1008`、`2015`～`2034` 等业务码，覆盖注册查重、旅行/景点 404、游记大小限制、内容下架、城市引用、反馈/举报/公告不存在等场景，明细见 **第 15 章**。
 
 ---
 
@@ -298,7 +302,7 @@ Idempotency-Key: <uuid>
 
 **错误**：`1001`、`1002`（邮箱未验证）、`1003`（封禁）、`1007`（已注销）、`5004`（登录限流）
 
-**说明**：连续失败 5 次锁定 15 分钟（Redis 计数），锁定期间返回 `1001` 或 `5004`。
+**说明**：连续失败 5 次锁定 15 分钟（Redis 计数），锁定期间返回 `1001` 或 `5004`。每次登录尝试（成功或失败）都会写入登录日志，可由管理员在 12.27 查看；登录日志写入失败不影响登录结果。
 
 ---
 
@@ -429,6 +433,96 @@ Idempotency-Key: <uuid>
 
 ---
 
+### 3.11 提交反馈
+
+`POST /feedback` ｜ 需鉴权
+
+**请求**
+
+```json
+{
+  "type": "BUG",
+  "title": "地图按钮无响应",
+  "content": "在首页点击地点标记后，右侧抽屉没有打开，刷新后仍然如此。",
+  "contact": "me@example.com",
+  "pagePath": "/map",
+  "appVersion": "0.1.0"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `type` | 是 | `FEATURE` / `BUG` / `UX` / `OTHER` |
+| `title` | 是 | 1–50 字；入库前经过敏感词过滤 |
+| `content` | 是 | 10–1000 字；入库前经过敏感词过滤 |
+| `contact` | 否 | 联系方式，≤100 字 |
+| `pagePath` | 否 | 提交时所在页面路径，≤255 字 |
+| `appVersion` | 否 | 前端版本号，≤32 字 |
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 12,
+    "type": "BUG",
+    "title": "地图按钮无响应",
+    "content": "在首页点击地点标记后，右侧抽屉没有打开，刷新后仍然如此。",
+    "contact": "me@example.com",
+    "status": "NEW",
+    "createdAt": "2025-06-01T10:00:00"
+  }
+}
+```
+
+**错误**：`1006`（未登录）、`2001`（字段校验失败）、`5004`（当天已提交 5 条）
+
+**说明**
+
+- 浏览器 UA 由服务端从 `User-Agent` 请求头记录，前端无需传
+- 每用户每个自然日最多成功提交 5 条
+- 新反馈状态固定为 `NEW`
+
+---
+
+### 3.12 我的反馈
+
+`GET /feedback/mine?page=1&size=10` ｜ 需鉴权
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 1,
+    "page": 1,
+    "size": 10,
+    "list": [
+      {
+        "id": 12,
+        "type": "BUG",
+        "title": "地图按钮无响应",
+        "content": "在首页点击地点标记后，右侧抽屉没有打开，刷新后仍然如此。",
+        "contact": "me@example.com",
+        "status": "NEW",
+        "createdAt": "2025-06-01T10:00:00",
+        "updatedAt": "2025-06-01T10:00:00"
+      }
+    ]
+  }
+}
+```
+
+**说明**：只返回当前用户本人的反馈，按创建时间倒序；响应不包含管理员内部备注与处理人信息。
+
+**错误**：`1006`
+
+---
+
 ## 4. 城市与旅行
 
 ### 4.1 查询城市列表
@@ -522,7 +616,7 @@ Idempotency-Key: <uuid>
 
 ---
 
-### 4.2.1 归档状态
+### 4.2.1 旅行状态
 
 `PUT /trips/{id}/status` ｜ 需鉴权
 
@@ -530,7 +624,15 @@ Idempotency-Key: <uuid>
 { "status": "COMPLETED" }
 ```
 
-**说明**：`PLANNED` / `COMPLETED`，默认 `PLANNED`；仅本人可改，他人返回 `2015`，非法值返回 `2001`。
+`DELETE /trips/{id}/status` ｜ 需鉴权（恢复自动判断）
+
+**说明**：
+
+- 手动状态只允许 `PLANNED` / `COMPLETED`，仅本人可改，他人返回 `2015`，非法值返回 `2001`。
+- 响应包含 `status`、`effectiveStatus`、`statusManual`、`expired`、`effectiveStartDate`、`effectiveEndDate`。
+- `effectiveStatus` 由后端自动计算：手动标记优先；否则有游记/消费且结束日期已过为 `COMPLETED`，在起止日期内为 `IN_PROGRESS`，其余为 `PLANNED`。
+- 只有自动计划中、结束日期已过且没有记录时 `expired=true`。
+- `PUT` 会设置 `statusManual=true`；`DELETE` 清除手动标记并重新计算。
 
 ---
 
@@ -538,7 +640,32 @@ Idempotency-Key: <uuid>
 
 `GET /trips/timeline` ｜ 需鉴权
 
-返回本人全部归档，按起始日期正序（无日期用创建日期），字段包含名称、国家、日期、状态、行程/游记/消费数与花费。
+返回本人全部归档，按起始日期正序（无日期用创建日期），字段包含名称、国家、日期、状态、行程/游记/消费数与花费。前端在地图与时间线之间切换；点击节点进入归档详情。
+
+**响应示例**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": [
+    {
+      "id": 101,
+      "name": "日本关西行",
+      "countryCode": "JP",
+      "countryName": "日本",
+      "startDate": "2024-05-01",
+      "endDate": "2024-05-05",
+      "status": "PLANNED",
+      "itineraryCount": 2,
+      "noteCount": 1,
+      "expenseCount": 8,
+      "expenseCny": "3240.00"
+    }
+  ],
+  "traceId": "..."
+}
+```
 
 ---
 
@@ -582,12 +709,16 @@ Idempotency-Key: <uuid>
       "itineraries": 2,
       "notes": 1,
       "expenses": 12
-    }
+    },
+    "newTripId": 102,
+    "newTripName": "未命名旅行 · 2025-06"
   }
 }
 ```
 
 **错误**：`2017`（存在挂载数据且 `force` 不为 `true`）、`2015`
+
+**说明**：`force=true` 时，原旅行若仍有挂载数据，系统会新建“未命名旅行 · yyyy-MM”并把行程/游记/消费迁移过去，原旅行软删除；`detached` 表示迁移数量。没有挂载数据时直接软删除，`newTripId`/`newTripName` 为 `null`。
 
 ---
 
@@ -657,8 +788,9 @@ Idempotency-Key: <uuid>
 
 **说明**
 
-- 删除旅行**不删除**挂载数据；其 `trip_id` 置 NULL，进入"未归组"
+- 删除旅行**不删除**挂载数据；`force=true` 时迁移到新的“未命名旅行 · yyyy-MM”
 - 前端应先调 `force=false` 探测；收到 `2017` 后弹二次确认，用户确认后再用 `force=true` 重试
+- 空旅行会被自动软删除，不再出现在列表、抽屉或时间线中
 
 ---
 
@@ -929,6 +1061,14 @@ Idempotency-Key: <uuid>
             "name": "浅草寺",
             "description": "东京最古老的寺庙，适合上午游览",
             "suggestedDuration": "2小时",
+            "category": "寺庙",
+            "ticketPrice": "免费",
+            "highlights": "雷门大灯笼、仲见世商店街",
+            "bestTime": "上午",
+            "nearestStation": "浅草站",
+            "reservationRequired": false,
+            "area": "台东区",
+            "warningNotes": "周末与节假日人流密集",
             "source": "AI"
           }
         ]
@@ -1039,7 +1179,20 @@ Idempotency-Key: <uuid>
       "date": "2025-06-01",
       "cityCode": "TYO",
       "spots": [
-        { "name": "浅草寺", "description": "…", "suggestedDuration": "2小时", "source": "AI" },
+        {
+          "name": "浅草寺",
+          "description": "…",
+          "suggestedDuration": "2小时",
+          "category": "寺庙",
+          "ticketPrice": "免费",
+          "highlights": "…",
+          "bestTime": "上午",
+          "nearestStation": "浅草站",
+          "reservationRequired": false,
+          "area": "台东区",
+          "warningNotes": "…",
+          "source": "AI"
+        },
         { "name": "我的私藏咖啡店", "description": "…", "suggestedDuration": "1小时", "source": "MANUAL" }
       ]
     }
@@ -1058,6 +1211,14 @@ Idempotency-Key: <uuid>
 | `preparations` | 否 | 五项结构；可为 `null` |
 | `days[].cityCode` | 是 | 必须属于 `countryCode` 下的 ENABLED 城市 |
 | `days[].spots` | 是 | 每天 0–10 个；总量内 `MANUAL` 最多 30 个 |
+| `days[].spots[].category` | 否 | 类别，≤ 32 字 |
+| `days[].spots[].ticketPrice` | 否 | 门票，原币文本（如「约 2000 円」），≤ 64 字 |
+| `days[].spots[].highlights` | 否 | 亮点，≤ 255 字 |
+| `days[].spots[].bestTime` | 否 | 最佳时段，≤ 64 字 |
+| `days[].spots[].nearestStation` | 否 | 最近车站，≤ 128 字 |
+| `days[].spots[].reservationRequired` | 否 | 是否需预约，缺省 `false` |
+| `days[].spots[].area` | 否 | 区域，≤ 128 字 |
+| `days[].spots[].warningNotes` | 否 | 避雷备注，≤ 255 字 |
 
 **响应**
 
@@ -1127,7 +1288,15 @@ Idempotency-Key: <uuid>
             "source": "AI",
             "name": "浅草寺",
             "description": "…",
-            "suggestedDuration": "2小时"
+            "suggestedDuration": "2小时",
+            "category": "寺庙",
+            "ticketPrice": "免费",
+            "highlights": "…",
+            "bestTime": "上午",
+            "nearestStation": "浅草站",
+            "reservationRequired": false,
+            "area": "台东区",
+            "warningNotes": "…"
           }
         ]
       }
@@ -1200,7 +1369,8 @@ Idempotency-Key: <uuid>
 **说明**
 
 - 软删除；`countryStatusAfter` 为删除后该国的最新点亮状态（`GREEN` / `YELLOW` / `GRAY`），前端直接刷新地图
-- 不删除旅行；若该行程是某旅行的最后一条，旅行仍保留在列表中
+- `tripDeleted=true` 表示这是该旅行最后一条内容，旅行已被自动软删除；前端提示并离开详情页
+- 若旅行仍有游记/消费，则旅行保留，`tripDeleted=false`
 
 **错误**：`2003`
 
@@ -1271,6 +1441,14 @@ Idempotency-Key: <uuid>
   "name": "私藏咖啡店",
   "description": "表参道巷子里，手冲不错",
   "suggestedDuration": "1小时",
+  "category": "咖啡馆",
+  "ticketPrice": "人均约 1200 円",
+  "highlights": "手冲与自家烘焙豆",
+  "bestTime": "下午",
+  "nearestStation": "表参道站",
+  "reservationRequired": false,
+  "area": "港区",
+  "warningNotes": "周末需排队",
   "insertIndex": 2
 }
 ```
@@ -1280,7 +1458,14 @@ Idempotency-Key: <uuid>
 | `name` | 是 | 1–50 字 |
 | `description` | 否 | ≤ 200 字 |
 | `suggestedDuration` | 否 | ≤ 20 字 |
+| `category` / `bestTime` | 否 | ≤ 32 / ≤ 64 字 |
+| `ticketPrice` / `highlights` | 否 | 原币文本 ≤ 64 字 / ≤ 255 字 |
+| `nearestStation` / `area` | 否 | ≤ 128 字 |
+| `reservationRequired` | 否 | 布尔，缺省 `false` |
+| `warningNotes` | 否 | ≤ 255 字 |
 | `insertIndex` | 否 | 插入位置；缺省追加到末尾 |
+
+> 扩展字段超长时服务端截断保存，不返回错误。
 
 **响应**
 
@@ -1312,7 +1497,15 @@ Idempotency-Key: <uuid>
 {
   "name": "表参道咖啡",
   "description": "…",
-  "suggestedDuration": "1.5小时"
+  "suggestedDuration": "1.5小时",
+  "category": "咖啡馆",
+  "ticketPrice": "人均约 1200 円",
+  "highlights": "…",
+  "bestTime": "下午",
+  "nearestStation": "表参道站",
+  "reservationRequired": true,
+  "area": "港区",
+  "warningNotes": "…"
 }
 ```
 
@@ -1510,47 +1703,58 @@ Idempotency-Key: <uuid>
 
 ## 7. 行前准备
 
-### 7.1 获取清单状态
+### 7.1 获取默认模板
 
-`GET /prep/checklist?itineraryId=12` ｜ 需鉴权
+`GET /prep/checklist/template` ｜ 需鉴权
 
-**响应**
+返回默认 10 项，`checked=false`，用于新建规划：
 
 ```json
 {
   "code": 0,
   "message": "ok",
   "data": {
-    "itineraryId": 12,
-    "countryCode": "JP",
+    "itineraryId": null,
+    "countryCode": null,
     "items": [
-      { "itemKey": "VISA", "label": "签证已办", "checked": true },
-      { "itemKey": "FLIGHT", "label": "机票已订", "checked": false },
-      { "itemKey": "HOTEL", "label": "住宿已订", "checked": false },
-      { "itemKey": "INSURANCE", "label": "保险已买", "checked": false },
-      { "itemKey": "CURRENCY", "label": "货币已换", "checked": false },
-      { "itemKey": "PLUG", "label": "插头转换器已备", "checked": false },
-      { "itemKey": "SIM", "label": "电话卡/流量已办", "checked": false }
+      {
+        "id": null,
+        "itemKey": "VISA",
+        "label": "签证",
+        "title": "签证",
+        "description": "确认签证类型、所需材料和办理时长…",
+        "daysBefore": 60,
+        "checked": false,
+        "custom": false,
+        "sortOrder": 10
+      }
     ]
   }
 }
 ```
 
+---
+
+### 7.2 获取清单状态
+
+`GET /prep/checklist?itineraryId=12` ｜ 需鉴权
+
+响应与模板相同，但包含该行程已保存的勾选状态与自定义项。默认 10 项按固定顺序返回，自定义项按 `sortOrder, id` 追加在后。
+
 **说明**
 
-- 固定 7 项、固定顺序；**不提供自定义项**
-- 未落库的项返回 `checked=false`
-- 按"用户 + 国家 + 行程"隔离，越权访问返回 `2003`/`4001`
+- 默认键：`VISA`、`FLIGHT`、`HOTEL`、`INSURANCE`、`SIM`、`CURRENCY`、`PLUG`、`APPS`、`PACKING`、`CUSTOMS`
+- 自定义项 `itemKey` 以 `CUSTOM_` 开头，`custom=true`，可删除；默认项不可删除
+- 未落库的默认项返回 `checked=false`
+- 按“用户 + 行程”隔离，越权访问返回 `2003`
 
 **错误**：`2003`
 
 ---
 
-### 7.2 勾选/取消清单项
+### 7.3 勾选/取消清单项
 
 `PUT /prep/checklist` ｜ 需鉴权
-
-**请求**
 
 ```json
 {
@@ -1560,27 +1764,65 @@ Idempotency-Key: <uuid>
 }
 ```
 
-**响应**
+**说明**：upsert 语义，默认项与自定义项均支持；不消耗额度；不影响地图点亮。
 
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "itemKey": "VISA",
-    "checked": true,
-    "updatedAt": "2025-06-01T10:00:00"
-  }
-}
-```
-
-**说明**：upsert 语义；不消耗额度；不影响地图点亮。
-
-**错误**：`2003`、`2022`（`itemKey` 不在固定枚举内）
+**错误**：`2003`、`2022`（自定义项不存在或非法）
 
 ---
 
-### 7.3 获取官方链接
+### 7.4 添加自定义项
+
+`POST /prep/checklist/items` ｜ 需鉴权
+
+```json
+{
+  "itineraryId": 12,
+  "title": "租车",
+  "description": "提前预订",
+  "daysBefore": 10
+}
+```
+
+返回完整 Item（含服务端生成的 `CUSTOM_...` 键、`custom=true`、`id`）。
+
+**错误**：`2003`、`2001`（标题/天数/说明校验失败）
+
+---
+
+### 7.5 删除自定义项
+
+`DELETE /prep/checklist/items/{itemId}` ｜ 需鉴权
+
+**说明**：仅允许删除自定义项；默认项返回 `2001`。越权返回 `2003`。
+
+---
+
+### 7.6 批量保存清单
+
+`PUT /prep/checklist/batch` ｜ 需鉴权
+
+```json
+{
+  "itineraryId": 12,
+  "items": [
+    { "itemKey": "VISA", "title": "签证", "checked": true },
+    {
+      "itemKey": "CUSTOM_xxx",
+      "title": "租车",
+      "description": "提前预订",
+      "daysBefore": 10,
+      "checked": false,
+      "custom": true
+    }
+  ]
+}
+```
+
+**说明**：用于新建行程保存后的批量写入。同一事务内更新默认项、创建/更新自定义项、删除未提交的自定义项；默认项始终保留。返回完整清单。
+
+---
+
+### 7.7 获取官方链接
 
 `GET /prep/official-links?countryCode=JP` ｜ 需鉴权
 
@@ -1748,6 +1990,52 @@ Idempotency-Key: <uuid>
 - `images`/`videos` 中的 objectKey 必须属于当前用户（`note/{userId}/`）且已真实上传，否则 `2027`
 
 **错误**：`2001`（缺国家/城市）、`2002`（城市非法/停用）、`2003`（行程无权）、`2018`（图片 > 20 张）、`2020`（正文 > 200KB）、`2027`（媒体无效）、`2028`（视频 > 3 个）
+
+---
+
+### 9.1.1 游记列表
+
+`GET /notes` ｜ 需鉴权
+
+**查询参数**
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `keyword` | 否 | 匹配标题或正文纯文本摘要 |
+| `from` / `to` | 否 | 按创建时间筛选（`YYYY-MM-DD`，闭区间） |
+| `page` / `size` | 否 | 默认 `1` / `10`，`size` ≤ 100 |
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 3,
+    "page": 1,
+    "size": 10,
+    "list": [
+      {
+        "id": 11,
+        "title": "东京散步",
+        "summary": "正文前 80 字…",
+        "coverImageUrl": "https://…600秒签名URL…",
+        "countryCode": "JP",
+        "countryName": "日本",
+        "cityCode": "TYO",
+        "cityName": "东京",
+        "visibility": "PRIVATE",
+        "takenDown": false,
+        "createdAt": "2025-06-01T10:00:00",
+        "updatedAt": "2025-06-01T10:00:00"
+      }
+    ]
+  }
+}
+```
+
+**说明**：只返回本人未删除游记；按创建时间倒序；签名 URL 不可用时 `coverImageUrl=null`。
 
 ---
 
@@ -1942,6 +2230,49 @@ Idempotency-Key: <uuid>
 
 ---
 
+### 9.8 分享页举报
+
+`POST /s/{token}/reports` ｜ **无需鉴权**（登录用户会自动记录举报人）
+
+**请求**
+
+```json
+{
+  "reason": "ABUSE",
+  "description": "正文包含辱骂性内容"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `reason` | 是 | `SPAM` / `ABUSE` / `PORN` / `ILLEGAL` / `PRIVACY` / `OTHER` |
+| `description` | 否 | ≤200 字；`OTHER` 时必填 |
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "reportId": 21,
+    "duplicate": false,
+    "createdAt": "2025-06-08T10:00:00"
+  }
+}
+```
+
+**说明**
+
+- 举报时保存标题、纯文本摘要与游记更新时间的快照，仅管理员可见
+- 登录用户对同一游记只保留一条待处理举报；重复提交返回 `duplicate=true`
+- 匿名访客按「IP + 游记」24 小时去重，每 IP 每天最多 5 条；IP 不落库
+- 作者本人举报自己的游记返回 `2001`
+
+**错误**：`2001`（参数错误 / 自举报）、`2007`（分享失效）、`5004`（匿名每日限流）
+
+---
+
 ## 10. 记账
 
 ### 10.1 新增消费
@@ -2097,7 +2428,9 @@ Idempotency-Key: <uuid>
 |---|---|---|
 | `groupBy` | 否 | 逗号分隔，可选 `country`、`city`、`trip`、`date`；默认 `country` |
 | `countryCode` | 否 | 范围过滤 |
+| `cityCode` | 否 | 范围过滤，需与 `countryCode` 一致 |
 | `tripId` | 否 | 范围过滤 |
+| `category` | 否 | 分类过滤 |
 | `from` / `to` | 否 | 日期区间 |
 
 **响应**
@@ -2390,7 +2723,21 @@ Idempotency-Key: 0b5c8e41-2f3a-4d5b-9c6e-7f8a9b0c1d2e
 
 ---
 
-### 12.4.1 邮件 SMTP 配置
+### 12.4.1 每日免费额度配置
+
+`GET /admin/config/quota` ｜ `PUT /admin/config/quota`
+
+**请求 / 响应**
+
+```json
+{ "freeLimit": 3 }
+```
+
+**说明**：`freeLimit` 为每用户每日免费 AI 次数（行程生成与润色共用），范围 `0–100`；`0` 表示不提供免费次数。保存后立即生效。
+
+---
+
+### 12.4.2 邮件 SMTP 配置
 
 `GET /admin/config/mail` ｜ `PUT /admin/config/mail`
 
@@ -2441,6 +2788,7 @@ Idempotency-Key: 0b5c8e41-2f3a-4d5b-9c6e-7f8a9b0c1d2e
 {
   "type": "VIP",
   "value": 30,
+  "priceCny": 29.90,
   "expireAt": "2026-12-31T23:59:59",
   "quantity": 100,
   "prefix": "TM"
@@ -2451,6 +2799,7 @@ Idempotency-Key: 0b5c8e41-2f3a-4d5b-9c6e-7f8a9b0c1d2e
 |---|---|---|
 | `type` | 是 | `AI_QUOTA` / `VIP` |
 | `value` | 是 | 次数包为次数（1–100000）；VIP 为天数（1–3650） |
+| `priceCny` | 否 | 售价（CNY，≥0，最多两位小数）；用于批次估算收入，不代表实际收款 |
 | `expireAt` | 否 | 卡密自身失效时间；缺省永久有效 |
 | `quantity` | 是 | 1–500 |
 | `prefix` | 否 | 默认 `TM`；2–6 位大写字母 |
@@ -2499,6 +2848,7 @@ Idempotency-Key: 0b5c8e41-2f3a-4d5b-9c6e-7f8a9b0c1d2e
         "code": "TM-7K2P-9QX4-RT8M",
         "type": "VIP",
         "value": 30,
+        "priceCny": 29.90,
         "status": "UNUSED",
         "expireAt": "2026-12-31T23:59:59",
         "usedBy": null,
@@ -2524,12 +2874,79 @@ Content-Disposition: attachment; filename="cards_B20250601100000_20250601100000.
 **文件内容**（UTF-8 with BOM）
 
 ```csv
-code,type,value,expireAt,status,createdAt
-TM-7K2P-9QX4-RT8M,VIP,30,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00
-TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00
+code,type,value,expireAt,status,createdAt,priceCny
+TM-7K2P-9QX4-RT8M,VIP,30,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00,29.90
+TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00,
 ```
 
-**说明**：字段顺序固定；时间格式 `yyyy-MM-dd HH:mm:ss`；Excel 直接打开不乱码。
+**说明**：原有列顺序不变，`priceCny` 追加在末尾；时间格式 `yyyy-MM-dd HH:mm:ss`；Excel 直接打开不乱码。
+
+---
+
+### 12.7.1 批次统计
+
+`GET /admin/cards/stats`
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": [
+    {
+      "batchId": "B20250601100000",
+      "type": "VIP",
+      "value": 30,
+      "priceCny": 29.90,
+      "createdAt": "2025-06-01T10:00:00",
+      "total": 100,
+      "used": 30,
+      "unused": 62,
+      "voided": 6,
+      "expired": 2,
+      "estimatedRevenueCny": 897.00
+    }
+  ]
+}
+```
+
+**说明**：按批次聚合；估算收入 = 已用数量 × 售价，售价为空时返回 `null`（不按 0 计算）。
+
+---
+
+### 12.7.2 兑换记录
+
+`GET /admin/cards/redemptions?userId=12&page=1&size=20`
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 1,
+    "page": 1,
+    "size": 20,
+    "list": [
+      {
+        "cardId": 5001,
+        "code": "TM-7K2P-9QX4-RT8M",
+        "batchId": "B20250601100000",
+        "type": "VIP",
+        "value": 30,
+        "priceCny": 29.90,
+        "userId": 12,
+        "username": "traveler",
+        "usedAt": "2025-06-02T09:30:00"
+      }
+    ]
+  }
+}
+```
+
+**说明**：仅返回已使用卡密；`userId` 可选，用于用户详情筛选。
 
 ---
 
@@ -2659,6 +3076,73 @@ TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00
 - 两类调整都写 `quota_ledger`（`source=ADMIN`）与 `audit_log`
 
 **错误**：`2001`（`reason` 为空 / 扣减后余额小于 0）、`4002`
+
+---
+
+### 12.11.1 用户详情
+
+`GET /admin/users/{id}`
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 12,
+    "username": "traveler",
+    "nickname": "旅行者",
+    "email": "traveler@example.com",
+    "role": "USER",
+    "status": "NORMAL",
+    "vipExpireAt": "2026-12-31T23:59:59",
+    "freeUsedToday": 1,
+    "packBalance": 20,
+    "noteCount": 3,
+    "itineraryCount": 5,
+    "tripCount": 2,
+    "createdAt": "2025-01-01T10:00:00",
+    "recentRedemptions": [
+      {
+        "cardId": 5001,
+        "code": "TM-7K2P-9QX4-RT8M",
+        "batchId": "B20250601100000",
+        "type": "VIP",
+        "value": 30,
+        "priceCny": 29.90,
+        "userId": 12,
+        "username": "traveler",
+        "usedAt": "2025-06-02T09:30:00"
+      }
+    ]
+  }
+}
+```
+
+**说明**：已注销用户只返回匿名化资料，内容数量为 0、兑换记录为空。
+
+---
+
+### 12.11.2 设置 VIP 到期日
+
+`PUT /admin/users/{id}/vip`
+
+**请求**
+
+```json
+{ "expireAt": "2027-12-31T23:59:59" }
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `expireAt` | 否 | 目标到期时间；为空表示清除 VIP；设为过去时间表示立即收回 |
+
+**响应**：`data: { "userId": 12, "vipExpireAt": "2027-12-31T23:59:59" }`
+
+**说明**：该操作直接写 `vip_expire_at` 并记录 `audit_log`（`USER_VIP_SET`），**不写 `quota_ledger`**；按天数调整仍使用 12.11。
+
+**错误**：`2001`（用户不存在或已注销）、`4002`
 
 ---
 
@@ -2849,6 +3333,135 @@ TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00
 
 **错误**：`2001`（币种非 3 位大写字母、汇率 ≤ 0）
 
+**一键更新预览** `GET /admin/exchange-rates/refresh-preview`
+
+**一键更新执行** `POST /admin/exchange-rates/refresh`
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "source": "exchangerate-api.com",
+    "fetchedAt": "2025-06-01T10:00:00",
+    "applied": false,
+    "updatedCount": 1,
+    "unchangedCount": 1,
+    "unsupportedCount": 0,
+    "items": [
+      { "currency": "CNY", "oldRate": "1.000000", "newRate": "1.000000", "status": "UNCHANGED" },
+      { "currency": "JPY", "oldRate": "0.048000", "newRate": "0.047500", "status": "CHANGED" }
+    ]
+  }
+}
+```
+
+**说明**
+
+- 只更新数据库中**已有**的币种，不新增币种、不回填历史消费
+- `refresh-preview` 只预览不改库；`refresh` 按最新数据批量写入
+- 数据源不支持的币种标记为 `UNSUPPORTED`，保持原值
+- 批量更新写审计日志 `RATE_REFRESH`，包含数据源、更新数量和变更明细
+- 数据源不可用返回 `2033`
+
+**错误**：`2033`（汇率数据源不可用）、`4002`
+
+---
+
+### 12.14.1 内容列表
+
+`GET /admin/notes?keyword=东京&status=TAKEDOWN&from=2025-06-01&to=2025-06-30&page=1&size=20`
+
+**查询参数**
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `keyword` | 否 | 匹配标题或作者用户名/昵称 |
+| `status` | 否 | `NORMAL` / `TAKEDOWN` |
+| `from` / `to` | 否 | 按创建时间筛选（`YYYY-MM-DD`） |
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 1,
+    "page": 1,
+    "size": 20,
+    "list": [
+      {
+        "id": 11,
+        "title": "东京散步",
+        "authorId": 12,
+        "authorName": "旅行者",
+        "countryCode": "JP",
+        "countryName": "日本",
+        "cityCode": "TYO",
+        "cityName": "东京",
+        "visibility": "SHARED",
+        "takenDown": true,
+        "takedownReason": "违规内容",
+        "createdAt": "2025-06-01T10:00:00",
+        "updatedAt": "2025-06-02T10:00:00"
+      }
+    ]
+  }
+}
+```
+
+**说明**：只返回元信息，不返回正文；按创建时间倒序。
+
+---
+
+### 12.14.2 内容详情
+
+`GET /admin/notes/{id}` ｜ 管理员
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 11,
+    "title": "东京散步",
+    "content": "<p>正文 HTML</p>",
+    "contentText": "正文纯文本",
+    "images": [{ "objectKey": "note/12/2025/06/a.jpg", "url": "https://…签名URL…" }],
+    "videos": [{ "objectKey": "note/12/2025/06/a.mp4", "url": "https://…签名URL…" }],
+    "coverImageUrl": "https://…签名URL…",
+    "authorId": 12,
+    "authorName": "旅行者",
+    "countryCode": "JP",
+    "countryName": "日本",
+    "cityCode": "TYO",
+    "cityName": "东京",
+    "visibility": "PRIVATE",
+    "hasActiveShare": false,
+    "shareExpireAt": null,
+    "takedown": false,
+    "takedownReason": null,
+    "takedownAt": null,
+    "deleted": false,
+    "createdAt": "2025-06-01T10:00:00",
+    "updatedAt": "2025-06-01T10:00:00"
+  }
+}
+```
+
+**说明**
+
+- 可查看任意游记，包括私密、已分享、已下架与作者软删除的记录
+- 媒体 URL 为 600 秒签名 URL；不返回分享令牌
+- 只读，不写审计日志
+
+**错误**：`2004`（游记不存在）、`4002`（非管理员）
+
 ---
 
 ### 12.15 内容下架
@@ -2908,6 +3521,477 @@ TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00
 - **原分享令牌仍然失效**，需用户重新生成分享（与设计文档 7.12 一致）
 
 **错误**：`2004`
+
+---
+
+### 12.17 审计日志（操作日志）
+
+`GET /admin/audit?action=CONFIG_UPDATE&userId=1&actorRole=ADMIN&targetType=CONFIG&from=2025-06-01&to=2025-06-30&page=1&size=20`
+
+**查询参数**
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `action` | 否 | 动作精确匹配，如 `CONFIG_UPDATE`、`NOTE_UPDATE`、`EXPENSE_CREATE` |
+| `userId` | 否 | 操作人 ID |
+| `actorRole` | 否 | 操作人角色：`ADMIN` / `USER` / `SYSTEM` / `ANONYMOUS` |
+| `targetType` | 否 | `CARD` / `USER` / `NOTE` / `CONFIG` / `RATE` / `FEEDBACK` / `REPORT` / `TRIP` / `ITINERARY` / `EXPENSE` / `ANNOUNCEMENT` / `CACHE` |
+| `from` / `to` | 否 | 按创建时间筛选（`YYYY-MM-DD`） |
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 1,
+    "page": 1,
+    "size": 20,
+    "list": [
+      {
+        "id": 88,
+        "userId": 12,
+        "actorRole": "USER",
+        "username": "traveler",
+        "action": "NOTE_UPDATE",
+        "targetType": "NOTE",
+        "targetId": 31,
+        "detail": "{\"changed\":[\"title\",\"visibility\"]}",
+        "ip": "203.0.113.10",
+        "createdAt": "2025-06-02T10:00:00"
+      }
+    ]
+  }
+}
+```
+
+**用户操作动作**
+
+| 分组 | 动作 |
+|---|---|
+| 旅行 | `TRIP_UPDATE`（重命名）、`TRIP_STATUS`、`TRIP_DELETE` |
+| 行程 | `ITINERARY_CREATE`（保存）、`ITINERARY_UPDATE`、`ITINERARY_DELETE`、`ITINERARY_GENERATE`（生成草稿或重新生成） |
+| 游记 | `NOTE_CREATE`、`NOTE_UPDATE`、`NOTE_DELETE`、`NOTE_SHARE`、`NOTE_UNSHARE`、`NOTE_REPORT` |
+| 消费 | `EXPENSE_CREATE`、`EXPENSE_UPDATE`、`EXPENSE_DELETE` |
+| 清单 | `CHECKLIST_SAVE`（批量保存，`targetType=ITINERARY`） |
+| 账号与反馈 | `USER_PROFILE_UPDATE`、`FEEDBACK_CREATE` |
+| 公告 | `ANNOUNCEMENT_CREATE`、`ANNOUNCEMENT_UPDATE`、`ANNOUNCEMENT_PUBLISH`、`ANNOUNCEMENT_OFFLINE`、`ANNOUNCEMENT_DELETE` |
+| 监控处置 | `USER_KICK`（强制下线）、`CACHE_CLEAR`（清理安全缓存） |
+| 既有 | `CARD_REDEEM`、`ACCOUNT_DELETE` |
+
+**说明**：
+
+- 只读接口，无修改/删除能力；`detail` 在写入时已脱敏。该接口对应后台「日志管理 → 操作日志」页签。
+- 用户操作按语义聚合：天、景点变更并入行程保存；清单只记批量保存。只记录成功操作，失败或被拒绝的请求不写日志。
+- `detail` 只包含对象 ID、变更字段名、数量或枚举值，不包含标题、正文、金额、备注与联系方式原文。
+- 匿名分享页举报的 `userId` 为空、`actorRole=ANONYMOUS`；无 HTTP 请求的系统写入为 `SYSTEM`。
+- 日志写入失败只告警，不影响业务操作；`actor_role` 在写入时快照，不随用户后续升/降级变化。
+
+---
+
+### 12.18 反馈列表
+
+`GET /admin/feedback?type=BUG&status=NEW&keyword=地图&from=2025-06-01&to=2025-06-30&page=1&size=20` ｜ 管理员
+
+**查询参数**
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `type` | 否 | `FEATURE` / `BUG` / `UX` / `OTHER` |
+| `status` | 否 | `NEW` / `PROCESSING` / `RESOLVED` |
+| `keyword` | 否 | 匹配标题、正文、联系方式、提交人用户名/昵称 |
+| `from` / `to` | 否 | 按创建时间筛选（`YYYY-MM-DD`，闭区间） |
+| `page` / `size` | 否 | 默认 `1` / `20` |
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 1,
+    "page": 1,
+    "size": 20,
+    "list": [
+      {
+        "id": 12,
+        "userId": 8,
+        "submitter": "旅人小张",
+        "type": "BUG",
+        "title": "地图按钮无响应",
+        "status": "NEW",
+        "contact": "me@example.com",
+        "createdAt": "2025-06-01T10:00:00",
+        "updatedAt": "2025-06-01T10:00:00",
+        "handledAt": null
+      }
+    ]
+  }
+}
+```
+
+**说明**：按创建时间倒序；已注销用户的 `submitter` 固定为「已注销用户」。
+
+**错误**：`2001`（`type`/`status` 非法）、`4002`
+
+---
+
+### 12.19 反馈统计
+
+`GET /admin/feedback/stats` ｜ 管理员
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 12,
+    "newCount": 5,
+    "processingCount": 4,
+    "resolvedCount": 3
+  }
+}
+```
+
+**错误**：`4002`
+
+---
+
+### 12.20 反馈详情
+
+`GET /admin/feedback/{id}` ｜ 管理员
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 12,
+    "userId": 8,
+    "submitter": "旅人小张",
+    "type": "BUG",
+    "title": "地图按钮无响应",
+    "content": "在首页点击地点标记后，右侧抽屉没有打开，刷新后仍然如此。",
+    "contact": "me@example.com",
+    "pagePath": "/map",
+    "userAgent": "Mozilla/5.0 ...",
+    "appVersion": "0.1.0",
+    "status": "PROCESSING",
+    "adminNote": "已复现，等待修复",
+    "handledBy": 1,
+    "handledByName": "平台管理员",
+    "handledAt": "2025-06-01T11:00:00",
+    "createdAt": "2025-06-01T10:00:00",
+    "updatedAt": "2025-06-01T11:00:00"
+  }
+}
+```
+
+**错误**：`2031`（反馈不存在）、`4002`
+
+---
+
+### 12.21 更新反馈状态与内部备注
+
+`PUT /admin/feedback/{id}` ｜ 管理员
+
+**请求**
+
+```json
+{
+  "status": "PROCESSING",
+  "adminNote": "已复现，等待修复"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `status` | 否 | `NEW` / `PROCESSING` / `RESOLVED`；与 `adminNote` 至少提供一个 |
+| `adminNote` | 否 | 仅管理员可见，≤1000 字；传空字符串表示清空 |
+
+**响应**：返回更新后的反馈详情，字段同 12.20。
+
+**错误**：`2001`（状态非法、备注超长或两者都未提供）、`2031`、`4002`
+
+**说明**
+
+- 成功更新后写入 `handledBy` / `handledAt`
+- 每次成功更新写入审计日志 `audit_log`：`action=FEEDBACK_UPDATE`、`targetType=FEEDBACK`、`targetId=<反馈 ID>`，`detail` 只含反馈 ID、原状态、新状态与是否修改备注，不含正文或备注全文
+- 状态允许在三态之间任意流转
+
+---
+
+### 12.22 举报列表
+
+`GET /admin/reports?status=PENDING&reason=ABUSE&keyword=辱骂&from=2025-06-01&to=2025-06-30&page=1&size=20` ｜ 管理员
+
+**查询参数**
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `status` | 否 | `PENDING` / `ACCEPTED` / `REJECTED` |
+| `reason` | 否 | `SPAM` / `ABUSE` / `PORN` / `ILLEGAL` / `PRIVACY` / `OTHER` |
+| `keyword` | 否 | 匹配说明、标题快照、当前标题、作者用户名/昵称 |
+| `from` / `to` | 否 | 按举报创建时间筛选（`YYYY-MM-DD`） |
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 1,
+    "page": 1,
+    "size": 20,
+    "list": [
+      {
+        "id": 21,
+        "noteId": 11,
+        "reporterName": "匿名访客",
+        "reason": "ABUSE",
+        "status": "PENDING",
+        "description": "正文包含辱骂性内容",
+        "noteTitle": "东京散步",
+        "currentNoteTitle": "东京散步",
+        "authorName": "旅行者",
+        "createdAt": "2025-06-08T10:00:00",
+        "handledAt": null
+      }
+    ]
+  }
+}
+```
+
+**说明**：按举报时间倒序；举报人注销显示「匿名访客」，作者注销显示「已注销用户」。
+
+**错误**：`2001`（`status`/`reason` 非法）、`4002`
+
+---
+
+### 12.23 举报统计
+
+`GET /admin/reports/stats` ｜ 管理员
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 9,
+    "pendingCount": 4,
+    "acceptedCount": 3,
+    "rejectedCount": 2
+  }
+}
+```
+
+**错误**：`4002`
+
+---
+
+### 12.24 举报详情
+
+`GET /admin/reports/{id}` ｜ 管理员
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 21,
+    "noteId": 11,
+    "reporterUserId": null,
+    "reporterName": "匿名访客",
+    "reason": "ABUSE",
+    "description": "正文包含辱骂性内容",
+    "noteTitle": "东京散步",
+    "noteContentText": "举报时的正文纯文本快照",
+    "noteUpdatedAt": "2025-06-01T10:00:00",
+    "status": "PENDING",
+    "handledBy": null,
+    "handledByName": null,
+    "handledAt": null,
+    "createdAt": "2025-06-08T10:00:00",
+    "authorId": 12,
+    "authorName": "旅行者",
+    "currentNoteTitle": "东京散步",
+    "currentNoteVisibility": "PRIVATE",
+    "currentNoteUpdatedAt": "2025-06-08T09:00:00",
+    "currentNoteTakedown": false,
+    "currentNoteDeleted": false,
+    "authorAcceptedReportCount": 1
+  }
+}
+```
+
+**错误**：`2032`、`4002`
+
+---
+
+### 12.25 采纳举报
+
+`PUT /admin/reports/{id}/accept` ｜ 管理员
+
+**请求**
+
+```json
+{ "noteReason": "含辱骂内容" }
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `noteReason` | 是 | 1–100 字，写入游记下架原因，作者可见 |
+
+**响应**：返回更新后的举报详情，字段同 12.24。
+
+**说明**
+
+- 下架游记并撤销其全部分享令牌；该游记全部待处理举报一并置为 `ACCEPTED`
+- 若游记已被作者删除，只把举报置为 `ACCEPTED`，不恢复内容
+- 写入审计 `REPORT_ACCEPT`；下架本身另写 `NOTE_TAKEDOWN`
+- 已处理举报再次操作返回 `2001`
+
+**错误**：`2001`（原因非法或举报已处理）、`2032`、`4002`
+
+---
+
+### 12.26 驳回举报
+
+`PUT /admin/reports/{id}/reject` ｜ 管理员
+
+**响应**：返回更新后的举报详情，字段同 12.24。
+
+**说明**：只把当前举报置为 `REJECTED`，游记与其他举报不受影响；写入审计 `REPORT_REJECT`。
+
+**错误**：`2001`（举报已处理）、`2032`、`4002`
+
+---
+
+### 12.27 登录日志
+
+`GET /admin/login-logs?username=traveler&userId=12&role=USER&success=false&from=2025-06-01&to=2025-06-30&page=1&size=20` ｜ 管理员
+
+**查询参数**
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `username` | 否 | 登录账号，模糊匹配 |
+| `userId` | 否 | 用户 ID |
+| `role` | 否 | `ADMIN` / `USER` |
+| `success` | 否 | `true` 成功 / `false` 失败 |
+| `from` / `to` | 否 | 按创建时间筛选（`YYYY-MM-DD`，闭区间） |
+| `page` / `size` | 否 | 默认 `1` / `20` |
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 1,
+    "page": 1,
+    "size": 20,
+    "list": [
+      {
+        "id": 301,
+        "userId": 12,
+        "username": "traveler",
+        "role": "USER",
+        "success": false,
+        "reason": "BAD_CREDENTIALS",
+        "ip": "203.0.113.10",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...",
+        "createdAt": "2025-06-02T10:00:00"
+      }
+    ]
+  }
+}
+```
+
+**失败原因**
+
+| `reason` | 说明 |
+|---|---|
+| `SUCCESS` | 登录成功 |
+| `USER_NOT_FOUND` | 账号不存在 |
+| `BAD_CREDENTIALS` | 密码错误 |
+| `ACCOUNT_BANNED` | 账号已封禁 |
+| `ACCOUNT_DELETED` | 账号已注销 |
+| `EMAIL_NOT_VERIFIED` | 邮箱未验证 |
+| `RATE_LIMITED` | 失败次数过多被限流 |
+
+**说明**：只读接口，无修改/删除能力；`username` 为登录时提交的账号快照，`userAgent` 截断至 255 字符。后台「日志管理」页以「操作日志 / 登录日志」两个页签展示两类日志，默认保留 90 天。
+
+**错误**：`4002`
+
+---
+
+### 12.28 公告管理
+
+`/admin/announcements` ｜ 管理员
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/admin/announcements` | 分页列表；`status` / `type` / `keyword` / `page` / `size` |
+| GET | `/admin/announcements/{id}` | 详情（含正文与阅读统计） |
+| POST | `/admin/announcements` | 创建草稿 |
+| PUT | `/admin/announcements/{id}` | 更新标题/正文/类型/置顶/生效时间 |
+| PUT | `/admin/announcements/{id}/publish` | 发布；开始时间为空时设为当前时间 |
+| PUT | `/admin/announcements/{id}/offline` | 下线 |
+| DELETE | `/admin/announcements/{id}` | 软删除，保留已读记录 |
+
+**请求示例**
+
+```json
+{
+  "title": "系统维护通知",
+  "content": "今晚 23:00 - 24:00 进行维护，\n期间可能短暂不可用。",
+  "type": "NOTICE",
+  "pinned": true,
+  "publishAt": "2025-06-01T10:00:00",
+  "expireAt": "2025-06-02T10:00:00"
+}
+```
+
+**列表响应字段**：`id`、`title`、`type`、`pinned`、`status`（`DRAFT` / `PUBLISHED` / `OFFLINE`）、`publishAt`、`expireAt`、`readCount`、`totalUsers`、`readRate`（0–1）、`createdAt`、`updatedAt`；详情额外返回 `content` 与 `createdBy`。
+
+**说明**：正文为纯文本并保留换行；阅读率分母为当前 `role=USER` 且状态正常的用户数；所有变更写 `ANNOUNCEMENT_*` 审计；结束时间必须晚于开始时间。
+
+**错误**：`2001`、`2034`、`4002`
+
+---
+
+### 12.29 监控中心
+
+`/admin/monitor/**` ｜ 管理员
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/admin/monitor/online-users` | 在线用户；`keyword` / `role` / `ip` / `page` / `size` |
+| DELETE | `/admin/monitor/online-users/{userId}` | 强制下线（`tokenVersion+1`），写 `USER_KICK` 审计 |
+| GET | `/admin/monitor/server` | CPU、内存、磁盘、操作系统与 JVM 快照 |
+| GET | `/admin/monitor/database` | HikariCP 连接池统计 |
+| GET | `/admin/monitor/cache` | Redis 概览与已知缓存分组 |
+| DELETE | `/admin/monitor/cache/{group}` | 清理安全缓存分组，写 `CACHE_CLEAR` 审计 |
+| GET | `/admin/monitor/storage` | 对象存储配置与连通性探测 |
+| GET | `/admin/monitor/storage/stats` | 按需统计对象数与总大小（上限 10,000，缓存 5 分钟） |
+| GET | `/admin/monitor/api-docs` | OpenAPI 兼容清单（`paths` + `tags` / `summary`，缓存 60 秒），供前端渲染 |
+
+**说明**：监控接口仅管理员可访问，不开放 Actuator metrics；在线状态存 Redis（5 分钟窗口、60 秒登记节流）；缓存分组不返回原始 value；`quota`、`user-auth`、`lock` 等关键分组不可清理；存储统计超出扫描上限时 `truncated=true`。
+
+**错误**：`2001`（分组不可清理）、`4002`、`5003`（存储不可用）
 
 ---
 
@@ -3062,15 +4146,21 @@ location /api/ai/polish/stream {
 
 ### 14.4 行前清单项
 
-| `itemKey` | `label` |
-|---|---|
-| `VISA` | 签证已办 |
-| `FLIGHT` | 机票已订 |
-| `HOTEL` | 住宿已订 |
-| `INSURANCE` | 保险已买 |
-| `CURRENCY` | 货币已换 |
-| `PLUG` | 插头转换器已备 |
-| `SIM` | 电话卡/流量已办 |
+默认 10 项，顺序固定；自定义项 `itemKey` 以 `CUSTOM_` 开头。
+
+| `itemKey` | 标题 | 出发前天数 |
+|---|---|---|
+| `VISA` | 签证 | 60 |
+| `FLIGHT` | 机票 | 45 |
+| `HOTEL` | 住宿 | 30 |
+| `INSURANCE` | 保险 | 30 |
+| `SIM` | 电话卡 / eSIM | 14 |
+| `CURRENCY` | 换汇与银行卡 | 14 |
+| `PLUG` | 转换头 + 插排 | 7 |
+| `APPS` | App 准备 | 7 |
+| `PACKING` | 必备物品 | 7 |
+| `CUSTOMS` | 入境卡与海关 | 1 |
+| `CUSTOM_*` | 用户自定义 | 自定义 |
 
 ### 14.5 消费分类
 
@@ -3126,6 +4216,20 @@ location /api/ai/polish/stream {
 | 手动景点/行程 | ≤ 30 |
 | 每天景点数 | 生成时 ≤ 6；保存时 ≤ 10 |
 
+### 14.11 用户反馈
+
+| 枚举 | 值 |
+|---|---|
+| `type` | `FEATURE`（功能建议）/ `BUG`（问题反馈）/ `UX`（体验问题）/ `OTHER`（其他） |
+| `status` | `NEW`（待处理）/ `PROCESSING`（处理中）/ `RESOLVED`（已处理） |
+
+### 14.12 游记举报
+
+| 枚举 | 值 |
+|---|---|
+| `reason` | `SPAM`（垃圾广告）/ `ABUSE`（辱骂攻击）/ `PORN`（色情低俗）/ `ILLEGAL`（违法信息）/ `PRIVACY`（侵犯隐私）/ `OTHER`（其他） |
+| `status` | `PENDING`（待处理）/ `ACCEPTED`（已采纳）/ `REJECTED`（已驳回） |
+
 ---
 
 ## 15. 接口补充错误码
@@ -3142,7 +4246,7 @@ location /api/ai/polish/stream {
 | 2019 | 单图超限（> 5 MB） | 400 | `POST /upload/presign` |
 | 2020 | 正文超限（> 200 KB） | 400 | `POST/PUT /notes` |
 | 2021 | 不支持的图片类型 | 400 | `POST /upload/presign` |
-| 2022 | 清单项不在固定枚举内 | 400 | `PUT /prep/checklist` |
+| 2022 | 清单项非法或不存在 | 400 | `PUT /prep/checklist` |
 | 2023 | 分享令牌创建失败 | 500 | `POST /notes/{id}/share` |
 | 2024 | 内容已下架，不可操作 | 403 | `PUT /notes/{id}`、`POST /notes/{id}/share` |
 | 2025 | 城市已被引用，不能物理删除 | 409 | `DELETE /admin/cities/{id}` |
@@ -3151,6 +4255,9 @@ location /api/ai/polish/stream {
 | 2028 | 视频数量超限（> 3 个） | 400 | `POST/PUT /notes` |
 | 2029 | 单个视频超限（> 100 MB） | 400 | `POST /upload/presign` |
 | 2030 | 不支持的视频类型 | 400 | `POST /upload/presign` |
+| 2031 | 反馈不存在 | 404 | `GET/PUT /admin/feedback/{id}` |
+| 2032 | 举报不存在 | 404 | `GET /admin/reports/{id}`、`PUT /admin/reports/{id}/accept` |
+| 2033 | 汇率数据源不可用 | 503 | `GET /admin/exchange-rates/refresh-preview`、`POST /admin/exchange-rates/refresh` |
 
 ---
 
@@ -3169,7 +4276,7 @@ location /api/ai/polish/stream {
 | 国家 | GET | `/countries` | 是 | — |
 | 城市 | GET | `/cities` | 是 | — |
 | 旅行 | GET | `/trips` | 是 | — |
-| 旅行 | GET | `/trips/timeline` | 是 | 时间线 |
+| 行程 | GET | `/trips/timeline` | 是 | 时间线（归档节点） |
 | 旅行 | PUT | `/trips/{id}/status` | 是 | 计划中/已完成 |
 | 旅行 | GET | `/trips/{id}` | 是 | 详情聚合（行程/游记/最近消费） |
 | 旅行 | PUT | `/trips/{id}` | 是 | — |
@@ -3192,17 +4299,23 @@ location /api/ai/polish/stream {
 | 行程 | POST | `/itinerary/{id}/days` | 是 | — |
 | 行程 | PUT | `/itinerary/{id}/days/{dayId}` | 是 | — |
 | 行程 | DELETE | `/itinerary/{id}/days/{dayId}` | 是 | — |
-| 行前 | GET | `/prep/checklist` | 是 | — |
-| 行前 | PUT | `/prep/checklist` | 是 | — |
+| 行前 | GET | `/prep/checklist/template` | 是 | 默认 10 项模板 |
+| 行前 | GET | `/prep/checklist` | 是 | 按行程读取 |
+| 行前 | PUT | `/prep/checklist` | 是 | 勾选/取消 |
+| 行前 | POST | `/prep/checklist/items` | 是 | 添加自定义项 |
+| 行前 | DELETE | `/prep/checklist/items/{itemId}` | 是 | 删除自定义项 |
+| 行前 | PUT | `/prep/checklist/batch` | 是 | 批量保存 |
 | 行前 | GET | `/prep/official-links` | 是 | — |
 | 上传 | POST | `/upload/presign` | 是 | — |
 | 游记 | POST | `/notes` | 是 | — |
+| 游记 | GET | `/notes` | 是 | `keyword` / `from` / `to` / `page` / `size` |
 | 游记 | GET | `/notes/{id}` | 是 | — |
 | 游记 | PUT | `/notes/{id}` | 是 | — |
 | 游记 | DELETE | `/notes/{id}` | 是 | — |
 | 游记 | POST | `/notes/{id}/share` | 是 | — |
 | 游记 | DELETE | `/notes/{id}/share` | 是 | — |
 | 分享 | GET | `/s/{token}` | **否** | — |
+| 分享 | POST | `/s/{token}/reports` | **否** | 匿名每 IP 每天 5 条 |
 | 润色 | POST | `/ai/polish/stream` | 是 | **1 次** |
 | 记账 | POST | `/expenses` | 是 | — |
 | 记账 | GET | `/expenses` | 是 | — |
@@ -3212,16 +4325,29 @@ location /api/ai/polish/stream {
 | 记账 | GET | `/expenses/by-date` | 是 | 按日期分组 |
 | 卡密 | POST | `/card/redeem` | 是 | — |
 | 额度 | GET | `/quota/me` | 是 | — |
+| 反馈 | POST | `/feedback` | 是 | 每用户每天 5 条 |
+| 反馈 | GET | `/feedback/mine` | 是 | 本人历史 |
+| 公告 | GET | `/announcements/active` | 是 | 只返回生效公告，含已读标记 |
+| 公告 | POST | `/announcements/{id}/read` | 是 | 幂等标记已读 |
+| 后台 | GET | `/admin/feedback` | 管理员 | `type` / `status` / `keyword` / `from` / `to` / `page` / `size` |
+| 后台 | GET | `/admin/feedback/stats` | 管理员 | — |
+| 后台 | GET | `/admin/feedback/{id}` | 管理员 | — |
+| 后台 | PUT | `/admin/feedback/{id}` | 管理员 | 状态 + 内部备注 |
 | 后台 | GET/PUT | `/admin/config/llm` | 管理员 | — |
+| 后台 | GET/PUT | `/admin/config/quota` | 管理员 | — |
 | 后台 | GET/PUT | `/admin/config/oss` | 管理员 | — |
 | 后台 | GET/PUT | `/admin/config/search` | 管理员 | — |
 | 后台 | GET/PUT | `/admin/config/mail` | 管理员 | — |
 | 后台 | POST | `/admin/cards/generate` | 管理员 | — |
 | 后台 | GET | `/admin/cards` | 管理员 | — |
 | 后台 | GET | `/admin/cards/export` | 管理员 | — |
+| 后台 | GET | `/admin/cards/stats` | 管理员 | — |
+| 后台 | GET | `/admin/cards/redemptions` | 管理员 | `userId` / `page` / `size` |
 | 后台 | PUT | `/admin/cards/{id}/void` | 管理员 | — |
 | 后台 | POST | `/admin/trips/recluster` | 管理员 | — |
 | 后台 | GET | `/admin/users` | 管理员 | — |
+| 后台 | GET | `/admin/users/{id}` | 管理员 | — |
+| 后台 | PUT | `/admin/users/{id}/vip` | 管理员 | — |
 | 后台 | PUT | `/admin/users/{id}/status` | 管理员 | — |
 | 后台 | PUT | `/admin/users/{id}/quota` | 管理员 | — |
 | 后台 | GET/POST | `/admin/cities` | 管理员 | — |
@@ -3229,16 +4355,90 @@ location /api/ai/polish/stream {
 | 后台 | GET/POST | `/admin/official-links` | 管理员 | — |
 | 后台 | PUT/DELETE | `/admin/official-links/{id}` | 管理员 | — |
 | 后台 | GET/PUT | `/admin/exchange-rates` | 管理员 | — |
+| 后台 | GET | `/admin/exchange-rates/refresh-preview` | 管理员 | 一键更新预览 |
+| 后台 | POST | `/admin/exchange-rates/refresh` | 管理员 | 一键更新并写入 |
+| 后台 | GET | `/admin/notes` | 管理员 | `keyword` / `status` / `from` / `to` / `page` / `size` |
+| 后台 | GET | `/admin/notes/{id}` | 管理员 | 完整内容，含软删除 |
+| 后台 | GET | `/admin/reports` | 管理员 | `status` / `reason` / `keyword` / `from` / `to` / `page` / `size` |
+| 后台 | GET | `/admin/reports/stats` | 管理员 | — |
+| 后台 | GET | `/admin/reports/{id}` | 管理员 | — |
+| 后台 | PUT | `/admin/reports/{id}/accept` | 管理员 | 采纳并下架 |
+| 后台 | PUT | `/admin/reports/{id}/reject` | 管理员 | 驳回 |
 | 后台 | PUT | `/admin/notes/{id}/takedown` | 管理员 | — |
 | 后台 | DELETE | `/admin/cities/{id}` | 管理员 | — |
 | 后台 | PUT | `/admin/notes/{id}/restore` | 管理员 | — |
+| 后台 | GET | `/admin/audit` | 管理员 | `action` / `userId` / `actorRole` / `targetType` / `from` / `to` / `page` / `size` |
+| 后台 | GET | `/admin/login-logs` | 管理员 | `username` / `userId` / `role` / `success` / `from` / `to` / `page` / `size` |
+| 后台 | GET/POST | `/admin/announcements` | 管理员 | 列表 `status` / `type` / `keyword` / `page` / `size` |
+| 后台 | GET/PUT/DELETE | `/admin/announcements/{id}` | 管理员 | 详情、更新、软删除 |
+| 后台 | PUT | `/admin/announcements/{id}/publish` | 管理员 | 发布 |
+| 后台 | PUT | `/admin/announcements/{id}/offline` | 管理员 | 下线 |
+| 后台 | GET | `/admin/monitor/online-users` | 管理员 | `keyword` / `role` / `ip` / `page` / `size` |
+| 后台 | DELETE | `/admin/monitor/online-users/{userId}` | 管理员 | 强制下线 |
+| 后台 | GET | `/admin/monitor/server` | 管理员 | 服务器与 JVM |
+| 后台 | GET | `/admin/monitor/database` | 管理员 | HikariCP |
+| 后台 | GET | `/admin/monitor/cache` | 管理员 | Redis 概览与分组 |
+| 后台 | DELETE | `/admin/monitor/cache/{group}` | 管理员 | 仅安全分组 |
+| 后台 | GET | `/admin/monitor/storage` | 管理员 | 连通性 |
+| 后台 | GET | `/admin/monitor/storage/stats` | 管理员 | 按需统计 |
+| 后台 | GET | `/admin/monitor/api-docs` | 管理员 | OpenAPI JSON |
 
 ---
 
-## 16. 修订记录
+## 16. 通知公告（用户端）
+
+### 16.1 查看生效公告
+
+`GET /announcements/active` ｜ 需鉴权
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 1,
+    "unread": 1,
+    "list": [
+      {
+        "id": 3,
+        "title": "系统维护通知",
+        "content": "今晚 23:00 - 24:00 进行维护，\n期间可能短暂不可用。",
+        "type": "NOTICE",
+        "pinned": true,
+        "publishAt": "2025-06-01T10:00:00",
+        "expireAt": "2025-06-02T10:00:00",
+        "read": false
+      }
+    ]
+  }
+}
+```
+
+**说明**：只返回 `status=PUBLISHED` 且当前时间落在开始/结束窗口内的公告，按「置顶优先、开始时间倒序」排列，最多 20 条；正文为纯文本并保留换行。
+
+### 16.2 标记已读
+
+`POST /announcements/{id}/read` ｜ 需鉴权
+
+**响应**：`data: null`
+
+**说明**：按用户与公告逐条记录，重复调用幂等；公告不存在或当前未生效返回 `2034`。
+
+---
+
+## 17. 修订记录
 
 | 版本 | 修订内容 | 原因 |
 |---|---|---|
+| V1.11 监控与公告 | 新增 `/admin/monitor/**` 监控接口、`/admin/announcements/**` 公告管理与 `/announcements/**` 用户公告；新增错误码 `2034`；操作日志新增 `USER_KICK`、`CACHE_CLEAR` 与 `ANNOUNCEMENT_*` | 管理端可观测与用户通知（change: admin-monitoring / announcements） |
+| V1.10 用户操作日志 | `GET /admin/audit` 增加 `actorRole` 筛选与 `actorRole` 响应字段；旅行/行程/游记/消费/清单/资料/反馈等用户操作写入 `audit_log` | 管理员可查看用户操作（change: admin-log-management） |
+| V1.9 日志管理 | 新增 `GET /admin/login-logs`；登录接口记录成功/失败登录日志；后台「审计日志」升级为「日志管理」（操作日志 + 登录日志两个页签） | 账号安全追溯（change: admin-log-management） |
+| V1.8 汇率一键更新 | 新增 `GET /admin/exchange-rates/refresh-preview` 与 `POST /admin/exchange-rates/refresh`；新增错误码 `2033`；使用公开汇率源刷新已有币种 | 减少手工逐条维护汇率 |
+| V1.7 内容审核与举报 | 新增 `GET /admin/notes/{id}`、`POST /s/{token}/reports` 与后台举报列表/统计/详情/采纳/驳回 5 个接口；新增错误码 `2032` 与举报枚举；游记详情新增 `takedownReason` / `takedownAt`；标题纳入敏感词过滤 | 补齐内容治理闭环（change: note-moderation） |
+| V1.6 用户反馈 | 新增 `POST /feedback`、`GET /feedback/mine` 与后台反馈列表/统计/详情/更新 4 个接口；新增错误码 `2031` 与反馈枚举；注销时匿名化反馈内容 | 建立用户反馈闭环（change: user-feedback） |
+| V1.5 行程时间线（已撤回） | 时间线恢复为归档节点 `GET /trips/timeline` | 时间线按归档展示 |
 | V1.0 | 初版：68 个接口 + 错误码 + SSE 协议 + 枚举 + 速查表 | 设计文档第 10 章计划 |
 | V1.4 归档状态与时间线 | 新增 `trip.status`（PLANNED/COMPLETED）与 `PUT /trips/{id}/status`；新增 `GET /trips/timeline` | 手动确认归档状态并按时间展示（change-14） |
 | V1.3 自动归组 | 行程按“同国家 + 30 天间隔”自动归组；游记/消费按日期自动归类，移除手动选择；新增 `POST /admin/trips/recluster` | 归组不再需要用户理解与操作（change-11） |
