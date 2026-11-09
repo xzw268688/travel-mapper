@@ -56,7 +56,9 @@
 - **THEN** 系统返回 `2001`，引导使用增删天接口
 
 ### Requirement: Itinerary deletion
-删除行程 MUST 为软删除；MUST NOT 删除所属旅行；MUST 返回删除后该国的 `countryStatusAfter`（`GREEN`/`YELLOW`/`GRAY`）；删除后旅行日期区间 MUST 重算。
+删除行程 MUST 为软删除；MUST 返回删除后该国的 `countryStatusAfter`（`GREEN`/`YELLOW`/`GRAY`）；删除后旅行日期区间 MUST 重算。
+
+若删除后旅行没有任何未删除行程、游记或消费，系统 MUST 在同一事务内软删除该旅行，并在响应中返回 `tripDeleted=true`；否则返回 `tripDeleted=false`。
 
 #### Scenario: Last itinerary turns country gray
 - **WHEN** 用户删除某国最后一条行程且该国没有游记
@@ -64,7 +66,11 @@
 
 #### Scenario: Trip remains after last itinerary is deleted
 - **WHEN** 某旅行下的最后一条行程被删除
-- **THEN** 旅行仍存在，日期区间变为空
+- **THEN** 若旅行仍有游记或消费，则旅行保留且日期区间为空；若没有任何内容，则旅行被自动软删除
+
+#### Scenario: Trip with remaining notes stays
+- **WHEN** 用户删除一条行程，但旅行下仍有游记或消费
+- **THEN** 旅行保留，响应返回 `tripDeleted=false`
 
 ### Requirement: Regeneration with manual spot merge
 重新生成 MUST 更新原 `itineraryId` 与 `tripId`；`keepManualSpots=true` 时 MUST 在扣额度前预校验现有手动景点数，已超过 30 MUST 返回 `2006` 且不调 AI；合并 MUST 按同一 `dayIndex` 且同城市追加、同天异城市追加并提示、目标天不存在则放到第 1 天并提示；合并不增加 AI 额度消耗；地图状态不变。
@@ -148,3 +154,22 @@
 #### Scenario: Cross-user regeneration is hidden
 - **WHEN** 用户重新生成他人行程
 - **THEN** 系统返回 `2003`，不扣额度
+
+### Requirement: Guide links display
+规划页的生成草稿与已保存行程详情 MUST 在存在攻略链接时展示「参考攻略」区域，按接口返回顺序列出链接标题，并 MUST 支持在新标签页打开。链接缺失或为空数组时 MUST NOT 展示该区域。展示行为 MUST NOT 影响行程生成、保存、编辑、额度或地图状态。
+
+#### Scenario: Generated draft shows guide links
+- **WHEN** 生成响应中的 `guides` 包含至少一条链接
+- **THEN** 规划页展示「参考攻略」区域并列出这些链接
+
+#### Scenario: Saved itinerary shows guide links
+- **WHEN** 用户打开一条保存了攻略链接的行程
+- **THEN** 详情页展示「参考攻略」区域
+
+#### Scenario: Empty guides hide the section
+- **WHEN** 生成响应或行程详情的 `guides` 为空
+- **THEN** 页面不展示「参考攻略」区域
+
+#### Scenario: Opening a guide does not leave the app flow
+- **WHEN** 用户点击某条攻略链接
+- **THEN** 链接在新标签页打开，当前页面状态保持不变

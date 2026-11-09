@@ -7,7 +7,7 @@
 ## Requirements
 
 ### Requirement: Note creation
-创建游记 MUST 校验：标题 1–50 字；正文 HTML UTF-8 字节 ≤200KB；图片为 `objectKey` 数组且 ≤20 张；`coverImage` MUST 属于 `images`；国家与城市必填且城市已启用；`visibility` 默认 `PRIVATE`。入库前 MUST 做 XSS 与敏感词过滤，并生成纯文本摘要。
+创建游记 MUST 校验：标题 1–50 字；正文 HTML UTF-8 字节 ≤200KB；图片为 `objectKey` 数组且 ≤20 张；`coverImage` MUST 属于 `images`；国家与城市必填且城市已启用；`visibility` 默认 `PRIVATE`。入库前 MUST 对标题和正文执行敏感词过滤并将命中词替换为 `***`，对正文执行 XSS 清洗，并生成纯文本摘要；标题过滤后若超过 50 字 MUST 截断为 50 字。
 
 #### Scenario: Valid note is created and lights map green
 - **WHEN** 用户提交合法游记
@@ -28,6 +28,10 @@
 #### Scenario: Script tags are sanitized
 - **WHEN** 正文包含 `<script>` 或其他可执行标记
 - **THEN** 脚本被移除或转义，展示时不会执行
+
+#### Scenario: Title sensitive words are filtered
+- **WHEN** 标题包含配置的敏感词
+- **THEN** 入库标题中的敏感词被替换为 `***`，且标题长度不超过 50 字
 
 ### Requirement: Image upload presign
 系统 MUST 只为 `NOTE_IMAGE` 提供上传签名，仅接受 `image/jpeg`、`image/png`、`image/webp`，单图 ≤5MB；签名有效期 300 秒；对象 Key MUST 遵循存储规范。EXIF GPS 剥离由前端压缩阶段完成。
@@ -105,11 +109,15 @@
 - **THEN** `countryStatusAfter=YELLOW`；若无行程则为 `GRAY`
 
 ### Requirement: Takedown visibility for owner
-游记被下架后，本人 MUST 仍可查看详情，但 MUST 看到 `takedown=true`，且不可编辑、不可创建分享；他人访问分享页 MUST 得到失效结果。
+游记被下架后，本人 MUST 仍可查看详情，但 MUST 看到 `takedown=true`、下架原因与下架时间，并被告知可通过「意见反馈」申诉；本人 MUST NOT 能编辑或创建分享；他人访问分享页 MUST 得到失效结果。下架原因为空时 MUST 返回 NULL。
 
 #### Scenario: Owner sees takedown flag
 - **WHEN** 用户查看自己被下架的游记
 - **THEN** 详情可见且 `takedown=true`
+
+#### Scenario: Owner sees takedown reason
+- **WHEN** 管理员填写原因后下架游记，作者查看详情
+- **THEN** 返回下架原因与下架时间
 
 #### Scenario: Owner cannot re-share
 - **WHEN** 用户对被下架游记调用创建分享
@@ -171,3 +179,45 @@
 #### Scenario: Valid objects pass
 - **WHEN** 所有图片与视频均为本人上传且存在
 - **THEN** 游记正常保存，媒体字段按原顺序返回
+
+### Requirement: Note listing and search
+本人游记页 MUST 提供按创建时间倒序的分页列表，默认每页 10 条；MUST 支持关键字匹配标题或正文纯文本摘要、按创建日期区间（`from`/`to`，闭区间）筛选。列表项 MUST 返回游记 `id`、标题、摘要、封面签名 URL、国家与城市名称、可见性、下架状态与创建时间。列表 MUST 支持直接打开与删除本人游记。页面 MUST NOT 要求用户输入游记 ID 才能打开游记。
+
+#### Scenario: Recent notes are listed newest first
+- **WHEN** 用户打开游记页
+- **THEN** 按创建时间倒序展示本人未删除游记，并给出总数
+
+#### Scenario: Keyword matches title or summary
+- **WHEN** 用户输入关键字并查询
+- **THEN** 返回标题或正文摘要包含该关键字的游记
+
+#### Scenario: Date range filters by creation time
+- **WHEN** 用户选择开始与结束日期并查询
+- **THEN** 只返回创建时间落在区间内的游记
+
+#### Scenario: Open and delete from the list
+- **WHEN** 用户在列表中点击「打开」或「删除」
+- **THEN** 分别进入游记详情或确认后删除该游记，并刷新列表
+
+#### Scenario: No ID input is required
+- **WHEN** 用户想查看已有游记
+- **THEN** 直接从列表选择，页面不出现游记 ID 输入框
+
+#### Scenario: Missing cover degrades
+- **WHEN** 封面文件不存在或签名失败
+- **THEN** 列表显示「无封面」占位，不展示破图
+
+### Requirement: Editor toolbar guidance
+游记编辑器工具栏的每个操作按钮 MUST 提供悬停提示，说明其用途；有条件限制的操作 MUST 在提示中说明条件（例如「AI 润色」需先选中 1–5000 字文本，「撤销/重做」在无历史时不可用）。提示 MUST NOT 依赖点击后才展示，且 MUST NOT 遮挡正文编辑区域。
+
+#### Scenario: Hovering a format button explains its purpose
+- **WHEN** 用户将鼠标悬停在「加粗」或其他格式按钮上
+- **THEN** 显示该按钮用途的提示
+
+#### Scenario: Polish tooltip states the selection requirement
+- **WHEN** 用户将鼠标悬停在「AI 润色」上
+- **THEN** 提示说明需要先选中文本及字数范围
+
+#### Scenario: Tooltips do not block editing
+- **WHEN** 提示展示时
+- **THEN** 正文编辑区域仍可正常点击与输入

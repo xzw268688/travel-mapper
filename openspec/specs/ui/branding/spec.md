@@ -45,7 +45,7 @@
 
 ### Requirement: Admin navigation split
 
-后台入口 MUST 拆分为「管理」「配置」与「监控」三个菜单，且仅对 `ADMIN` 角色显示。「管理」MUST 包含用户、卡密、城市、官方链接、汇率、内容管理、举报、反馈、通知公告与日志管理；「配置」MUST 包含 AI 与搜索、邮件 SMTP 与对象存储；「监控」MUST 包含在线用户、服务监控、数据库监控、缓存监控、存储监控与接口文档。三个菜单 MUST 复用现有后台页面与设计令牌。日志管理页面 MUST 以「操作日志」与「登录日志」两个页签区分两类日志，并保留各自已有的筛选与分页能力；操作日志 MUST 提供操作人角色筛选并展示角色。
+后台入口 MUST 拆分为「管理」「配置」与「监控」三个菜单，且仅对 `ADMIN` 角色显示。「管理」MUST 包含用户、卡密、城市、内容管理、举报、反馈、汇率、通知公告与日志管理；「配置」MUST 包含 AI 与搜索、邮件 SMTP 与对象存储；「监控」MUST 包含在线用户、服务监控、数据库监控、缓存监控、存储监控与接口文档。「官方链接维护」入口 MUST NOT 出现在菜单中，但路由、接口与用户端回退逻辑 MUST 保留。三个菜单 MUST 复用现有后台页面与设计令牌。日志管理页面 MUST 以「操作日志」与「登录日志」两个页签区分两类日志，并保留各自已有的筛选与分页能力；操作日志 MUST 提供操作人角色筛选并展示角色。
 
 #### Scenario: Admin manages announcements
 - **WHEN** 管理员从「管理」选择通知公告
@@ -75,6 +75,33 @@
 - **WHEN** 已收藏 `/admin/audit` 的管理员访问该地址
 - **THEN** 页面重定向到日志管理的操作日志页签
 
+#### Scenario: Audit log is reachable from the menu
+- **WHEN** 管理员展开「管理」
+- **THEN** 可以看到「日志管理」并进入对应页面
+
+#### Scenario: Official links entry is hidden
+- **WHEN** 管理员展开「管理」
+- **THEN** 不显示「官方链接」入口，直接访问 `/admin/official-links` 仍可打开页面
+
 #### Scenario: Normal users see no admin menus
 - **WHEN** 普通用户登录
 - **THEN** 顶栏不显示「管理」「配置」或「监控」入口
+
+### Requirement: Global back navigation
+顶栏 MUST 提供「返回」按钮，用于返回浏览器历史中的上一页；按钮 MUST 在除首页、登录/注册页与公开分享页之外的路由显示。当没有可返回的历史记录时，点击 MUST 回到首页且 MUST NOT 报错或停留在当前页。返回操作 MUST NOT 改变任何业务数据。
+
+#### Scenario: Back button appears on subpages
+- **WHEN** 用户打开行程编辑、游记详情、海报或后台等子页面
+- **THEN** 顶栏显示「返回」按钮
+
+#### Scenario: Back returns to the previous page
+- **WHEN** 用户从地图进入国家抽屉并打开行程编辑页后点击「返回」
+- **THEN** 回到上一页（国家抽屉所在的地图页或来源页面）
+
+#### Scenario: No history falls back to home
+- **WHEN** 用户在无历史记录的新标签页直接打开子页面并点击「返回」
+- **THEN** 跳转到首页，不报错
+
+#### Scenario: Home and public pages hide the button
+- **WHEN** 用户处于首页、登录/注册页或公开分享页
+- **THEN** 顶栏不显示「返回」按钮
