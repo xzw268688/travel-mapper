@@ -8,7 +8,10 @@ import com.travelmapper.controller.admin.dto.AdminQuotaRequest;
 import com.travelmapper.controller.admin.dto.AdminQuotaResponse;
 import com.travelmapper.controller.admin.dto.AdminStatusRequest;
 import com.travelmapper.controller.admin.dto.AdminStatusResponse;
+import com.travelmapper.controller.admin.dto.AdminUserDetailView;
 import com.travelmapper.controller.admin.dto.AdminUserView;
+import com.travelmapper.controller.admin.dto.AdminVipRequest;
+import com.travelmapper.controller.admin.dto.AdminVipResponse;
 import com.travelmapper.service.admin.AdminUserService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -41,6 +44,17 @@ public class AdminUserController {
         request.setPage(page);
         request.setSize(size);
         return ApiResponse.ok(adminUserService.list(keyword, status, request));
+    }
+
+    @GetMapping("/{id}")
+    public ApiResponse<AdminUserDetailView> detail(@PathVariable Long id) {
+        return ApiResponse.ok(adminUserService.detail(id));
+    }
+
+    @PutMapping("/{id}/vip")
+    public ApiResponse<AdminVipResponse> setVip(
+            @PathVariable Long id, @RequestBody AdminVipRequest request) {
+        return ApiResponse.ok(adminUserService.setVip(CurrentUser.id(), id, request));
     }
 
     @PutMapping("/{id}/status")

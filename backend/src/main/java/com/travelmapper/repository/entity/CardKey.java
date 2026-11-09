@@ -7,6 +7,7 @@ import com.travelmapper.repository.enums.CardStatus;
 import com.travelmapper.repository.enums.CardType;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -19,6 +20,7 @@ public class CardKey {
     private String code;
     private CardType type;
     private Integer value;
+    private BigDecimal priceCny;
     private CardStatus status;
     private LocalDateTime expireAt;
     private Long usedBy;

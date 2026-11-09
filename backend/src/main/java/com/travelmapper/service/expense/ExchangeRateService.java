@@ -14,9 +14,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class ExchangeRateService {
@@ -24,12 +29,14 @@ public class ExchangeRateService {
     private final ExchangeRateMapper mapper;
     private final JdbcTemplate jdbcTemplate;
     private final AuditLogService auditLogService;
+    private final ExchangeRateProvider provider;
 
     public ExchangeRateService(ExchangeRateMapper mapper, JdbcTemplate jdbcTemplate,
-                               AuditLogService auditLogService) {
+                               AuditLogService auditLogService, ExchangeRateProvider provider) {
         this.mapper = mapper;
         this.jdbcTemplate = jdbcTemplate;
         this.auditLogService = auditLogService;
+        this.provider = provider;
     }
 
     public List<ExchangeRateDtos.RateView> list() {
@@ -41,6 +48,65 @@ public class ExchangeRateService {
                         rate.getRateToCny().setScale(6, RoundingMode.HALF_UP).toPlainString(),
                         rate.getUpdatedAt()))
                 .toList();
+    }
+
+    @Transactional
+    public ExchangeRateDtos.RefreshResponse refresh(boolean apply) {
+        List<ExchangeRate> existing = mapper.selectList(new LambdaQueryWrapper<ExchangeRate>()
+                .orderByAsc(ExchangeRate::getCurrency));
+        if (existing.isEmpty()) {
+            return new ExchangeRateDtos.RefreshResponse(provider.source(), LocalDateTime.now(),
+                    apply, 0, 0, 0, List.of());
+        }
+        Set<String> currencies = existing.stream()
+                .map(ExchangeRate::getCurrency)
+                .collect(Collectors.toSet());
+        Map<String, BigDecimal> latest;
+        try {
+            latest = provider.latestToCny(currencies);
+        } catch (RuntimeException ex) {
+            throw new BusinessException(ErrorCode.RATE_FEED_UNAVAILABLE);
+        }
+
+        List<ExchangeRateDtos.RefreshItem> items = new ArrayList<>();
+        Map<String, Map<String, String>> changes = new LinkedHashMap<>();
+        int updated = 0;
+        int unchanged = 0;
+        int unsupported = 0;
+        for (ExchangeRate rate : existing) {
+            String currency = rate.getCurrency();
+            String oldText = rate.getRateToCny().setScale(6, RoundingMode.HALF_UP).toPlainString();
+            BigDecimal market = latest.get(currency);
+            if (market == null) {
+                items.add(new ExchangeRateDtos.RefreshItem(currency, oldText, null, "UNSUPPORTED"));
+                unsupported++;
+                continue;
+            }
+            BigDecimal newRate = market.setScale(6, RoundingMode.HALF_UP);
+            String newText = newRate.toPlainString();
+            if (newRate.compareTo(rate.getRateToCny()) == 0) {
+                items.add(new ExchangeRateDtos.RefreshItem(currency, oldText, newText, "UNCHANGED"));
+                unchanged++;
+                continue;
+            }
+            items.add(new ExchangeRateDtos.RefreshItem(currency, oldText, newText, "CHANGED"));
+            updated++;
+            if (apply) {
+                rate.setRateToCny(newRate);
+                rate.setUpdatedBy(CurrentUser.id());
+                mapper.updateById(rate);
+                changes.put(currency, Map.of("old", oldText, "new", newText));
+            }
+        }
+        if (apply && updated > 0) {
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("source", provider.source());
+            detail.put("updated", updated);
+            detail.put("changes", changes);
+            auditLogService.record(CurrentUser.id(), "RATE_REFRESH", "RATE", null, detail, null);
+        }
+        return new ExchangeRateDtos.RefreshResponse(provider.source(), LocalDateTime.now(),
+                apply, updated, unchanged, unsupported, items);
     }
 
     @Transactional

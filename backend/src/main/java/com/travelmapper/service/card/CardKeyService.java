@@ -8,7 +8,9 @@ import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.api.PageRequest;
 import com.travelmapper.common.api.PageResult;
 import com.travelmapper.common.redis.DistributedLock;
+import com.travelmapper.controller.admin.dto.CardBatchStatsView;
 import com.travelmapper.controller.admin.dto.CardKeyView;
+import com.travelmapper.controller.admin.dto.CardRedemptionView;
 import com.travelmapper.controller.admin.dto.GenerateCardsRequest;
 import com.travelmapper.controller.admin.dto.GenerateCardsResponse;
 import com.travelmapper.controller.admin.dto.VoidCardResponse;
@@ -24,10 +26,13 @@ import com.travelmapper.service.audit.AuditLogService;
 import com.travelmapper.service.quota.QuotaService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -53,12 +58,13 @@ public class CardKeyService {
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
     private final AuditLogService auditLogService;
+    private final JdbcTemplate jdbcTemplate;
     private final SecureRandom random = new SecureRandom();
 
     public CardKeyService(CardKeyMapper cardKeyMapper, UserMapper userMapper, QuotaService quotaService,
                           CardCodeGenerator codeGenerator, DistributedLock distributedLock,
                           StringRedisTemplate redis, ObjectMapper objectMapper,
-                          AuditLogService auditLogService) {
+                          AuditLogService auditLogService, JdbcTemplate jdbcTemplate) {
         this.cardKeyMapper = cardKeyMapper;
         this.userMapper = userMapper;
         this.quotaService = quotaService;
@@ -67,6 +73,7 @@ public class CardKeyService {
         this.redis = redis;
         this.objectMapper = objectMapper;
         this.auditLogService = auditLogService;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional
@@ -92,16 +99,33 @@ public class CardKeyService {
         if (request.getExpireAt() != null && request.getExpireAt().isBefore(LocalDateTime.now())) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "卡密有效期不能早于当前时间");
         }
+        BigDecimal priceCny = request.getPriceCny();
+        if (priceCny != null) {
+            if (priceCny.signum() < 0) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "售价不能为负数");
+            }
+            if (priceCny.scale() > 2) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "售价最多保留两位小数");
+            }
+            priceCny = priceCny.setScale(2, RoundingMode.HALF_UP);
+        }
         String prefix = codeGenerator.normalizePrefix(request.getPrefix());
         String batchId = "B" + LocalDateTime.now().format(BATCH_FORMAT)
                 + String.format("%04d", random.nextInt(10_000));
 
         List<String> codes = new ArrayList<>(quantity);
         for (int i = 0; i < quantity; i++) {
-            insertWithUniqueCode(batchId, prefix, type, value, request.getExpireAt(), adminId, codes);
+            insertWithUniqueCode(batchId, prefix, type, value, priceCny, request.getExpireAt(), adminId, codes);
         }
-        auditLogService.record(adminId, "CARD_GENERATE", "CARD", null,
-                Map.of("batchId", batchId, "type", type.name(), "value", value, "quantity", quantity), null);
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("batchId", batchId);
+        detail.put("type", type.name());
+        detail.put("value", value);
+        detail.put("quantity", quantity);
+        if (priceCny != null) {
+            detail.put("priceCny", priceCny.toPlainString());
+        }
+        auditLogService.record(adminId, "CARD_GENERATE", "CARD", null, detail, null);
         return new GenerateCardsResponse(batchId, quantity, codes);
     }
 
@@ -116,6 +140,71 @@ public class CardKeyService {
         return PageResult.of(page.getTotal(), request, list);
     }
 
+    /** 批次统计：数量口径按状态聚合，收入为「已用 × 售价」的估算值。 */
+    public List<CardBatchStatsView> batchStats() {
+        return jdbcTemplate.query(
+                "SELECT batch_id, ANY_VALUE(type) AS type, ANY_VALUE(value) AS value, "
+                        + "ANY_VALUE(price_cny) AS price_cny, MIN(created_at) AS created_at, "
+                        + "COUNT(*) AS total, "
+                        + "SUM(status = 'USED') AS used, SUM(status = 'UNUSED') AS unused, "
+                        + "SUM(status = 'VOID') AS void_count, SUM(status = 'EXPIRED') AS expired "
+                        + "FROM card_key GROUP BY batch_id ORDER BY MIN(id) DESC",
+                (rs, rowNum) -> {
+                    long used = rs.getLong("used");
+                    BigDecimal price = rs.getBigDecimal("price_cny");
+                    BigDecimal revenue = price == null ? null
+                            : price.multiply(BigDecimal.valueOf(used)).setScale(2, RoundingMode.HALF_UP);
+                    java.sql.Timestamp created = rs.getTimestamp("created_at");
+                    return new CardBatchStatsView(
+                            rs.getString("batch_id"),
+                            rs.getString("type"),
+                            rs.getInt("value"),
+                            price,
+                            created == null ? null : created.toLocalDateTime(),
+                            rs.getLong("total"),
+                            used,
+                            rs.getLong("unused"),
+                            rs.getLong("void_count"),
+                            rs.getLong("expired"),
+                            revenue);
+                });
+    }
+
+    /** 兑换记录：仅已使用卡密；可按用户筛选。 */
+    public PageResult<CardRedemptionView> redemptions(Long userId, PageRequest request) {
+        request.validate();
+        String where = " FROM card_key k LEFT JOIN `user` u ON u.id = k.used_by "
+                + "WHERE k.status = 'USED'" + (userId == null ? "" : " AND k.used_by = ?");
+        List<Object> params = new ArrayList<>();
+        if (userId != null) {
+            params.add(userId);
+        }
+        Long total = jdbcTemplate.queryForObject("SELECT COUNT(*)" + where, Long.class,
+                params.toArray());
+        List<Object> pageParams = new ArrayList<>(params);
+        pageParams.add(request.getSize());
+        pageParams.add(request.offset());
+        List<CardRedemptionView> rows = jdbcTemplate.query(
+                "SELECT k.id, k.code, k.batch_id, k.type, k.value, k.price_cny, "
+                        + "k.used_by, u.username, k.used_at" + where
+                        + " ORDER BY k.used_at DESC, k.id DESC LIMIT ? OFFSET ?",
+                (rs, rowNum) -> {
+                    java.sql.Timestamp usedAt = rs.getTimestamp("used_at");
+                    return new CardRedemptionView(
+                            rs.getLong("id"),
+                            rs.getString("code"),
+                            rs.getString("batch_id"),
+                            rs.getString("type"),
+                            rs.getInt("value"),
+                            rs.getBigDecimal("price_cny"),
+                            rs.getObject("used_by") == null ? null : rs.getLong("used_by"),
+                            rs.getString("username"),
+                            usedAt == null ? null : usedAt.toLocalDateTime());
+                },
+                pageParams.toArray());
+        return PageResult.of(total == null ? 0 : total, request, rows);
+    }
+
     public byte[] exportCsv(String batchId) {
         if (batchId == null || batchId.isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "batchId 必填");
@@ -124,14 +213,15 @@ public class CardKeyService {
                 .eq(CardKey::getBatchId, batchId)
                 .orderByAsc(CardKey::getId));
         StringBuilder csv = new StringBuilder("﻿");
-        csv.append("code,type,value,expireAt,status,createdAt\n");
+        csv.append("code,type,value,expireAt,status,createdAt,priceCny\n");
         for (CardKey card : cards) {
             csv.append(csv(card.getCode())).append(',')
                     .append(card.getType().name()).append(',')
                     .append(card.getValue()).append(',')
                     .append(card.getExpireAt() == null ? "" : card.getExpireAt().format(CSV_TIME)).append(',')
                     .append(card.getStatus().name()).append(',')
-                    .append(card.getCreatedAt() == null ? "" : card.getCreatedAt().format(CSV_TIME))
+                    .append(card.getCreatedAt() == null ? "" : card.getCreatedAt().format(CSV_TIME)).append(',')
+                    .append(card.getPriceCny() == null ? "" : card.getPriceCny().toPlainString())
                     .append('\n');
         }
         return csv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -222,13 +312,15 @@ public class CardKeyService {
     }
 
     private void insertWithUniqueCode(String batchId, String prefix, CardType type, int value,
-                                      LocalDateTime expireAt, Long adminId, List<String> codes) {
+                                      BigDecimal priceCny, LocalDateTime expireAt,
+                                      Long adminId, List<String> codes) {
         for (int attempt = 0; attempt < 5; attempt++) {
             CardKey card = new CardKey();
             card.setBatchId(batchId);
             card.setCode(codeGenerator.generate(prefix));
             card.setType(type);
             card.setValue(value);
+            card.setPriceCny(priceCny);
             card.setStatus(CardStatus.UNUSED);
             card.setExpireAt(expireAt);
             card.setCreatedBy(adminId);
@@ -246,7 +338,7 @@ public class CardKeyService {
     private CardKeyView toView(CardKey card) {
         return new CardKeyView(
                 card.getId(), card.getBatchId(), card.getCode(), card.getType().name(),
-                card.getValue(), card.getStatus().name(), card.getExpireAt(),
+                card.getValue(), card.getPriceCny(), card.getStatus().name(), card.getExpireAt(),
                 card.getUsedBy(), card.getUsedAt(), card.getCreatedAt());
     }
 

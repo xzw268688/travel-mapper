@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public final class ExchangeRateDtos {
 
@@ -27,5 +28,22 @@ public final class ExchangeRateDtos {
             String previousRate,
             boolean created,
             int affectedUnconfiguredRecords) {
+    }
+
+    public record RefreshItem(
+            String currency,
+            String oldRate,
+            String newRate,
+            String status) {
+    }
+
+    public record RefreshResponse(
+            String source,
+            LocalDateTime fetchedAt,
+            boolean applied,
+            int updatedCount,
+            int unchangedCount,
+            int unsupportedCount,
+            List<RefreshItem> items) {
     }
 }

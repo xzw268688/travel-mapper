@@ -10,7 +10,7 @@ import lombok.Data;
 public class CreateCityRequest {
 
     @NotBlank
-    @Pattern(regexp = "[A-Z]{2}", message = "国家代码必须为 2 位大写字母")
+    @Pattern(regexp = "[A-Za-z0-9]{2}", message = "国家代码必须为 2 位字母或数字")
     private String countryCode;
 
     @NotBlank

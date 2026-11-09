@@ -4,7 +4,9 @@ import com.travelmapper.common.api.ApiResponse;
 import com.travelmapper.common.api.PageRequest;
 import com.travelmapper.common.api.PageResult;
 import com.travelmapper.common.security.CurrentUser;
+import com.travelmapper.controller.admin.dto.CardBatchStatsView;
 import com.travelmapper.controller.admin.dto.CardKeyView;
+import com.travelmapper.controller.admin.dto.CardRedemptionView;
 import com.travelmapper.controller.admin.dto.GenerateCardsRequest;
 import com.travelmapper.controller.admin.dto.GenerateCardsResponse;
 import com.travelmapper.controller.admin.dto.VoidCardResponse;
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 @Tag(name = "Admin Cards")
 @RestController
@@ -54,6 +57,22 @@ public class AdminCardController {
         request.setPage(page);
         request.setSize(size);
         return ApiResponse.ok(cardKeyService.list(batchId, status, request));
+    }
+
+    @GetMapping("/stats")
+    public ApiResponse<List<CardBatchStatsView>> stats() {
+        return ApiResponse.ok(cardKeyService.batchStats());
+    }
+
+    @GetMapping("/redemptions")
+    public ApiResponse<PageResult<CardRedemptionView>> redemptions(
+            @RequestParam(required = false) Long userId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageRequest request = new PageRequest();
+        request.setPage(page);
+        request.setSize(size);
+        return ApiResponse.ok(cardKeyService.redemptions(userId, request));
     }
 
     @GetMapping("/export")

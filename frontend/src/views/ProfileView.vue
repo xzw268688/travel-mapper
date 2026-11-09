@@ -10,6 +10,14 @@ import {
   type CardRedeemResponse,
   type ProfileResponse
 } from '../api/user'
+import {
+  feedbackStatusLabel,
+  feedbackStatusTagType,
+  feedbackTypeLabel,
+  listMyFeedback,
+  type FeedbackHistoryItem
+} from '../api/feedback'
+import FeedbackDialog from '../components/FeedbackDialog.vue'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -24,6 +32,15 @@ const cardCode = ref('')
 const redeeming = ref(false)
 const redeemResult = ref<CardRedeemResponse | null>(null)
 const deleteDialog = reactive({ visible: false, password: '', confirmText: '', deleting: false })
+
+const feedbackDialogVisible = ref(false)
+const feedbackLoading = ref(false)
+const feedbackPage = ref(1)
+const feedbackSize = ref(5)
+const feedbackTotal = ref(0)
+const feedbackList = ref<FeedbackHistoryItem[]>([])
+const feedbackDetailVisible = ref(false)
+const selectedFeedback = ref<FeedbackHistoryItem | null>(null)
 
 const AVATARS = [
   { value: 'preset_01', color: '#5c7cfa' },
@@ -43,7 +60,10 @@ const AVATARS = [
 const quota = computed(() => profile.value?.quota)
 const isAdmin = computed(() => profile.value?.role === 'ADMIN')
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadFeedback()
+})
 
 async function load(): Promise<void> {
   loading.value = true
@@ -134,6 +154,32 @@ async function submitDelete(): Promise<void> {
   } finally {
     deleteDialog.deleting = false
   }
+}
+
+async function loadFeedback(): Promise<void> {
+  feedbackLoading.value = true
+  try {
+    const result = await listMyFeedback({
+      page: feedbackPage.value,
+      size: feedbackSize.value
+    })
+    feedbackList.value = result.list
+    feedbackTotal.value = result.total
+  } catch (error) {
+    ElMessage.error((error as Error).message || '加载反馈记录失败')
+  } finally {
+    feedbackLoading.value = false
+  }
+}
+
+function onFeedbackSubmitted(): void {
+  feedbackPage.value = 1
+  void loadFeedback()
+}
+
+function openFeedbackDetail(item: FeedbackHistoryItem): void {
+  selectedFeedback.value = item
+  feedbackDetailVisible.value = true
 }
 
 function formatTime(value: string | null | undefined): string {
@@ -242,6 +288,53 @@ function planLabel(plan: string | undefined): string {
     </el-card>
 
     <el-card style="margin-top: 16px">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <div class="trip-title">我的反馈</div>
+          <el-button type="primary" size="small" @click="feedbackDialogVisible = true">
+            提交反馈
+          </el-button>
+        </div>
+      </template>
+      <el-empty
+        v-if="!feedbackLoading && feedbackList.length === 0"
+        description="还没有提交过反馈"
+      />
+      <el-table
+        v-else
+        v-loading="feedbackLoading"
+        :data="feedbackList"
+        stripe
+        @row-click="openFeedbackDetail"
+      >
+        <el-table-column label="分类" width="110">
+          <template #default="{ row }">{{ feedbackTypeLabel(row.type) }}</template>
+        </el-table-column>
+        <el-table-column prop="title" label="标题" min-width="220" show-overflow-tooltip />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="feedbackStatusTagType(row.status)" size="small">
+              {{ feedbackStatusLabel(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="提交时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+        </el-table-column>
+      </el-table>
+      <el-pagination
+        v-model:current-page="feedbackPage"
+        v-model:page-size="feedbackSize"
+        :total="feedbackTotal"
+        :page-sizes="[5, 10, 20]"
+        layout="total, sizes, prev, pager, next"
+        style="margin-top: 12px; justify-content: flex-end"
+        @current-change="loadFeedback"
+        @size-change="loadFeedback"
+      />
+    </el-card>
+
+    <el-card style="margin-top: 16px">
       <template #header><div class="trip-title">危险操作</div></template>
       <el-alert
         v-if="isAdmin"
@@ -279,6 +372,34 @@ function planLabel(plan: string | undefined): string {
         </el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="feedbackDetailVisible" title="反馈详情" size="480px">
+      <el-descriptions v-if="selectedFeedback" :column="1" border>
+        <el-descriptions-item label="分类">
+          {{ feedbackTypeLabel(selectedFeedback.type) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="标题">{{ selectedFeedback.title }}</el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag :type="feedbackStatusTagType(selectedFeedback.status)" size="small">
+            {{ feedbackStatusLabel(selectedFeedback.status) }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="正文">
+          <div style="white-space: pre-wrap">{{ selectedFeedback.content }}</div>
+        </el-descriptions-item>
+        <el-descriptions-item label="联系方式">
+          {{ selectedFeedback.contact || '—' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="提交时间">
+          {{ formatTime(selectedFeedback.createdAt) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="更新时间">
+          {{ formatTime(selectedFeedback.updatedAt) }}
+        </el-descriptions-item>
+      </el-descriptions>
+    </el-drawer>
+
+    <FeedbackDialog v-model="feedbackDialogVisible" @submitted="onFeedbackSubmitted" />
   </div>
 </template>
 

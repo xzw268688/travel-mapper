@@ -9,6 +9,7 @@ import {
   updateOfficialLink,
   type AdminLinkView
 } from '../api/admin'
+import AdminPageIntro from '../components/AdminPageIntro.vue'
 import type { Country } from '../api/types'
 
 const countries = ref<Country[]>([])
@@ -116,6 +117,9 @@ async function remove(link: AdminLinkView): Promise<void> {
   <div class="plan-page">
     <el-card>
       <template #header><div class="trip-title">官方链接维护</div></template>
+      <AdminPageIntro title="这个页面是干什么的？">
+        按国家维护最多 3 条官方链接（如签证、入境、旅游局），行程的行前准备页会展示这些链接；未配置时提供搜索入口作为兜底。
+      </AdminPageIntro>
       <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
         <el-select v-model="countryCode" filterable style="width: 200px" @change="load">
           <el-option v-for="item in countries" :key="item.code" :label="item.nameZh" :value="item.code" />

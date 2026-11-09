@@ -9,7 +9,11 @@ import com.travelmapper.controller.admin.dto.AdminQuotaRequest;
 import com.travelmapper.controller.admin.dto.AdminQuotaResponse;
 import com.travelmapper.controller.admin.dto.AdminStatusRequest;
 import com.travelmapper.controller.admin.dto.AdminStatusResponse;
+import com.travelmapper.controller.admin.dto.AdminUserDetailView;
 import com.travelmapper.controller.admin.dto.AdminUserView;
+import com.travelmapper.controller.admin.dto.AdminVipRequest;
+import com.travelmapper.controller.admin.dto.AdminVipResponse;
+import com.travelmapper.service.card.CardKeyService;
 import com.travelmapper.repository.entity.User;
 import com.travelmapper.repository.enums.QuotaType;
 import com.travelmapper.repository.enums.UserStatus;
@@ -34,15 +38,17 @@ public class AdminUserService {
     private final UserStatusCache userStatusCache;
     private final QuotaService quotaService;
     private final AuditLogService auditLogService;
+    private final CardKeyService cardKeyService;
 
     public AdminUserService(JdbcTemplate jdbcTemplate, UserMapper userMapper,
                             UserStatusCache userStatusCache, QuotaService quotaService,
-                            AuditLogService auditLogService) {
+                            AuditLogService auditLogService, CardKeyService cardKeyService) {
         this.jdbcTemplate = jdbcTemplate;
         this.userMapper = userMapper;
         this.userStatusCache = userStatusCache;
         this.quotaService = quotaService;
         this.auditLogService = auditLogService;
+        this.cardKeyService = cardKeyService;
     }
 
     public PageResult<AdminUserView> list(String keyword, String status, PageRequest request) {
@@ -130,5 +136,56 @@ public class AdminUserService {
         return new AdminQuotaResponse(userId, type.name(),
                 quotaService.packBalance(userId),
                 refreshed == null ? null : refreshed.getVipExpireAt());
+    }
+
+    public AdminUserDetailView detail(Long userId) {
+        User user = userMapper.selectByIdIncludingDeleted(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "用户不存在");
+        }
+        if (user.getStatus() == UserStatus.DELETED) {
+            return new AdminUserDetailView(
+                    user.getId(), user.getUsername(), user.getNickname(), user.getEmail(),
+                    user.getRole() == null ? null : user.getRole().name(),
+                    UserStatus.DELETED.name(), null, 0, 0, 0, 0, 0,
+                    user.getCreatedAt(), List.of());
+        }
+        PageRequest recent = new PageRequest();
+        recent.setPage(1);
+        recent.setSize(10);
+        return new AdminUserDetailView(
+                user.getId(), user.getUsername(), user.getNickname(), user.getEmail(),
+                user.getRole() == null ? null : user.getRole().name(),
+                user.getStatus().name(),
+                user.getVipExpireAt(),
+                quotaService.freeUsedToday(userId),
+                quotaService.packBalance(userId),
+                countOwned("travel_note", userId),
+                countOwned("itinerary", userId),
+                countOwned("trip", userId),
+                user.getCreatedAt(),
+                cardKeyService.redemptions(userId, recent).list());
+    }
+
+    @Transactional
+    public AdminVipResponse setVip(Long adminId, Long userId, AdminVipRequest request) {
+        User user = userMapper.selectByIdIncludingDeleted(userId);
+        if (user == null || user.getStatus() == UserStatus.DELETED) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "用户不存在或已注销");
+        }
+        LocalDateTime expireAt = request.getExpireAt();
+        user.setVipExpireAt(expireAt);
+        userMapper.updateById(user);
+        Map<String, Object> detail = new java.util.HashMap<>();
+        detail.put("expireAt", expireAt == null ? null : expireAt.toString());
+        auditLogService.record(adminId, "USER_VIP_SET", "USER", userId, detail, null);
+        return new AdminVipResponse(userId, expireAt);
+    }
+
+    private long countOwned(String table, Long userId) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM " + table + " WHERE user_id = ? AND deleted = 0",
+                Long.class, userId);
+        return count == null ? 0 : count;
     }
 }

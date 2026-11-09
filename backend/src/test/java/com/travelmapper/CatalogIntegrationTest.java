@@ -62,6 +62,67 @@ class CatalogIntegrationTest extends AuthTestSupport {
     }
 
     @Test
+    void worldMapCountriesAreListedAndOpenEmptyDrawer() throws Exception {
+        User user = createVerifiedUser("worldmap");
+
+        mockMvc.perform(withToken(get("/api/countries"), user))
+                .andExpect(status().isOk())
+                // 现有国家的排序保持在前
+                .andExpect(jsonPath("$.data[0].code").value("CN"))
+                .andExpect(jsonPath("$.data[1].code").value("JP"))
+                // 新增国家覆盖底图区域
+                .andExpect(jsonPath("$.data[?(@.code == 'DE')].nameZh",
+                        org.hamcrest.Matchers.hasItem("德国")))
+                .andExpect(jsonPath("$.data[?(@.code == 'GL')].nameEn",
+                        org.hamcrest.Matchers.hasItem("Greenland")))
+                .andExpect(jsonPath("$.data[?(@.code == 'X1')].nameEn",
+                        org.hamcrest.Matchers.hasItem("Siachen Glacier")))
+                .andExpect(jsonPath("$.data[?(@.code == 'X2')].nameEn",
+                        org.hamcrest.Matchers.hasItem("N. Cyprus")));
+
+        mockMvc.perform(withToken(get("/api/map/country/DE"), user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.countryCode").value("DE"))
+                .andExpect(jsonPath("$.data.countryName").value("德国"))
+                .andExpect(jsonPath("$.data.status").value("GRAY"))
+                .andExpect(jsonPath("$.data.summary.itineraryCount").value(0))
+                .andExpect(jsonPath("$.data.summary.noteCount").value(0))
+                .andExpect(jsonPath("$.data.summary.totalExpenseCny").value("0.00"))
+                .andExpect(jsonPath("$.data.trips").isEmpty())
+                .andExpect(jsonPath("$.data.ungrouped.itineraries").isEmpty());
+    }
+
+    @Test
+    void polarRegionsAreListedAndOpenEmptyDrawer() throws Exception {
+        User user = createVerifiedUser("polar");
+
+        mockMvc.perform(withToken(get("/api/countries"), user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.code == 'AQ')].nameZh",
+                        org.hamcrest.Matchers.hasItem("南极洲")))
+                .andExpect(jsonPath("$.data[?(@.code == 'AQ')].nameEn",
+                        org.hamcrest.Matchers.hasItem("Antarctica")))
+                .andExpect(jsonPath("$.data[?(@.code == 'X3')].nameZh",
+                        org.hamcrest.Matchers.hasItem("北极地区")))
+                .andExpect(jsonPath("$.data[?(@.code == 'X3')].nameEn",
+                        org.hamcrest.Matchers.hasItem("Arctic")));
+
+        mockMvc.perform(withToken(get("/api/map/country/AQ"), user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.countryCode").value("AQ"))
+                .andExpect(jsonPath("$.data.countryName").value("南极洲"))
+                .andExpect(jsonPath("$.data.status").value("GRAY"))
+                .andExpect(jsonPath("$.data.summary.itineraryCount").value(0))
+                .andExpect(jsonPath("$.data.trips").isEmpty())
+                .andExpect(jsonPath("$.data.ungrouped.itineraries").isEmpty());
+
+        mockMvc.perform(withToken(get("/api/cities"), user)
+                        .param("countryCode", "AQ"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isEmpty());
+    }
+
+    @Test
     void cityValidationRejectsDisabledWrongCountryAndUnknownCities() {
         createTestCountry();
         try {

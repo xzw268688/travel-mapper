@@ -196,7 +196,8 @@ class PersistenceIntegrationTest extends AbstractIntegrationTest {
             assertThat(tableExists(url, "exchange_rate_history")).isFalse();
 
             Flyway.configure().dataSource(url, TestInfrastructure.mysqlAdminUsername(), TestInfrastructure.mysqlAdminPassword())
-                    .locations("classpath:db/migration", "classpath:db/optional").load().migrate();
+                    .locations("classpath:db/migration", "classpath:db/optional")
+                    .outOfOrder(true).load().migrate();
             assertThat(tableExists(url, "exchange_rate_history")).isTrue();
         } finally {
             try (Connection root = DriverManager.getConnection(

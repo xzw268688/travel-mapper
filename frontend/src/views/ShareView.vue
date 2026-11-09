@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { fetchSharePage, type SharePage } from '../api/notes'
+import { submitReport, type ReportReason } from '../api/reports'
 
 const route = useRoute()
 const page = ref<SharePage | null>(null)
 const error = ref('')
 const loading = ref(true)
+const reportDialog = reactive({
+  visible: false,
+  submitting: false,
+  reason: 'ABUSE' as ReportReason,
+  description: ''
+})
 
 onMounted(async () => {
   const token = String(route.params.token || '')
@@ -18,6 +26,37 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+function openReport(): void {
+  reportDialog.reason = 'ABUSE'
+  reportDialog.description = ''
+  reportDialog.visible = true
+}
+
+async function submit(): Promise<void> {
+  const description = reportDialog.description.trim()
+  if (reportDialog.reason === 'OTHER' && !description) {
+    ElMessage.warning('选择「其他」时请填写说明')
+    return
+  }
+  if (description.length > 200) {
+    ElMessage.warning('补充说明不能超过 200 字')
+    return
+  }
+  reportDialog.submitting = true
+  try {
+    const result = await submitReport(String(route.params.token || ''), {
+      reason: reportDialog.reason,
+      description: description || null
+    })
+    reportDialog.visible = false
+    ElMessage.success(result.duplicate ? '已收到举报，请勿重复提交' : '已收到举报，感谢你的反馈')
+  } catch (err) {
+    ElMessage.error((err as Error).message || '举报提交失败')
+  } finally {
+    reportDialog.submitting = false
+  }
+}
 </script>
 
 <template>
@@ -52,6 +91,43 @@ onMounted(async () => {
           style="width: 140px; height: 100px; border-radius: 6px"
         />
       </div>
+      <div style="margin-top: 16px; text-align: right">
+        <el-button text type="danger" size="small" @click="openReport">举报该游记</el-button>
+      </div>
     </el-card>
+
+    <el-dialog v-model="reportDialog.visible" title="举报游记" width="480px">
+      <el-form label-width="90px">
+        <el-form-item label="举报原因" required>
+          <el-select v-model="reportDialog.reason" style="width: 100%">
+            <el-option label="垃圾广告" value="SPAM" />
+            <el-option label="辱骂攻击" value="ABUSE" />
+            <el-option label="色情低俗" value="PORN" />
+            <el-option label="违法信息" value="ILLEGAL" />
+            <el-option label="侵犯隐私" value="PRIVACY" />
+            <el-option label="其他" value="OTHER" />
+          </el-select>
+        </el-form-item>
+        <el-form-item
+          label="补充说明"
+          :required="reportDialog.reason === 'OTHER'"
+        >
+          <el-input
+            v-model="reportDialog.description"
+            type="textarea"
+            :rows="4"
+            maxlength="200"
+            show-word-limit
+            placeholder="可补充具体问题，最多 200 字"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="reportDialog.visible = false">取消</el-button>
+        <el-button type="danger" :loading="reportDialog.submitting" @click="submit">
+          提交举报
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>

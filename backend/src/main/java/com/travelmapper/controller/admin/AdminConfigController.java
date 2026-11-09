@@ -9,6 +9,7 @@ import com.travelmapper.common.crypto.AesCryptoService;
 import com.travelmapper.common.security.RequestContext;
 import com.travelmapper.controller.admin.dto.LlmConfigDto;
 import com.travelmapper.controller.admin.dto.MailConfigDto;
+import com.travelmapper.controller.admin.dto.QuotaConfigDto;
 import com.travelmapper.controller.admin.dto.SearchConfigDto;
 import com.travelmapper.controller.admin.dto.StorageConfigDto;
 import com.travelmapper.service.config.ConfigEntry;
@@ -81,6 +82,26 @@ public class AdminConfigController {
         putNumber(updates, ConfigKeys.LLM_MAX_RETRY, dto.getMaxRetry(), "JSON 解析失败重试次数");
         apply(updates);
         return getLlm();
+    }
+
+    @GetMapping("/quota")
+    public ApiResponse<QuotaConfigDto> getQuota() {
+        QuotaConfigDto dto = new QuotaConfigDto();
+        dto.setFreeLimit(configService.getInt(ConfigKeys.QUOTA_FREE_LIMIT, 3));
+        return ApiResponse.ok(dto);
+    }
+
+    @PutMapping("/quota")
+    @Auditable(action = "CONFIG_UPDATE", targetType = "CONFIG")
+    public ApiResponse<QuotaConfigDto> updateQuota(@RequestBody QuotaConfigDto dto) {
+        if (dto.getFreeLimit() == null
+                || dto.getFreeLimit() < 0 || dto.getFreeLimit() > 100) {
+            throw invalid("quota.free-limit 必须在 0 到 100 之间");
+        }
+        Map<String, ConfigEntry> updates = new LinkedHashMap<>();
+        putNumber(updates, ConfigKeys.QUOTA_FREE_LIMIT, dto.getFreeLimit(), "每日免费 AI 次数");
+        apply(updates);
+        return getQuota();
     }
 
     @GetMapping("/oss")

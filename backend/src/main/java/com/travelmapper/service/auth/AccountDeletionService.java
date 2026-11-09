@@ -78,6 +78,13 @@ public class AccountDeletionService {
                 + "WHERE n.user_id = ?", userId);
         jdbcTemplate.update("UPDATE expense SET deleted = 1, remark = '' WHERE user_id = ?", userId);
         jdbcTemplate.update("UPDATE trip_checklist SET deleted = 1 WHERE user_id = ?", userId);
+        // 反馈保留类型、状态与时间骨架，清空用户内容与管理员内部备注。
+        jdbcTemplate.update("UPDATE feedback SET title = '', content = '', contact = NULL, "
+                + "admin_note = NULL WHERE user_id = ?", userId);
+        // 举报保留原因、状态与时间；匿名化举报人并清空该用户游记相关的快照文本。
+        jdbcTemplate.update("UPDATE note_report SET reporter_user_id = NULL WHERE reporter_user_id = ?", userId);
+        jdbcTemplate.update("UPDATE note_report r JOIN travel_note n ON n.id = r.note_id "
+                + "SET r.note_title = '', r.note_content_text = NULL WHERE n.user_id = ?", userId);
         jdbcTemplate.update("DELETE FROM quota_pack WHERE user_id = ?", userId);
         jdbcTemplate.update("UPDATE audit_log SET detail = JSON_OBJECT('redacted', TRUE) WHERE user_id = ?",
                 userId);

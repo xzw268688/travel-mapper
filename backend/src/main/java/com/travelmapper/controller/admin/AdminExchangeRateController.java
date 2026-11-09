@@ -6,6 +6,7 @@ import com.travelmapper.service.expense.ExchangeRateService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,6 +28,16 @@ public class AdminExchangeRateController {
     @GetMapping
     public ApiResponse<List<ExchangeRateDtos.RateView>> list() {
         return ApiResponse.ok(exchangeRateService.list());
+    }
+
+    @GetMapping("/refresh-preview")
+    public ApiResponse<ExchangeRateDtos.RefreshResponse> refreshPreview() {
+        return ApiResponse.ok(exchangeRateService.refresh(false));
+    }
+
+    @PostMapping("/refresh")
+    public ApiResponse<ExchangeRateDtos.RefreshResponse> refresh() {
+        return ApiResponse.ok(exchangeRateService.refresh(true));
     }
 
     @PutMapping

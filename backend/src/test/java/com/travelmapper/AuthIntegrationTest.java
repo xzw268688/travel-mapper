@@ -290,6 +290,9 @@ class AuthIntegrationTest extends AuthTestSupport {
                 + "'PRIVATE', 0, 0)", userId);
         Long noteId = jdbcTemplate.queryForObject(
                 "SELECT MAX(id) FROM travel_note WHERE user_id = ?", Long.class, userId);
+        jdbcTemplate.update("INSERT INTO note_report (note_id, reporter_user_id, reason, description, "
+                + "note_title, note_content_text, note_updated_at, status) "
+                + "VALUES (?, ?, 'ABUSE', 'test', '东京散步', 'x', NOW(), 'PENDING')", noteId, userId);
         String shareToken = "s_del_" + UUID.randomUUID().toString().replace("-", "");
         jdbcTemplate.update("INSERT INTO note_share (note_id, token, revoked) VALUES (?, ?, 0)", noteId, shareToken);
         jdbcTemplate.update("INSERT INTO expense (user_id, country_code, currency, amount, category, "
@@ -302,6 +305,9 @@ class AuthIntegrationTest extends AuthTestSupport {
         jdbcTemplate.update("INSERT INTO email_token (user_id, email, token, type, expire_at, used) "
                 + "VALUES (?, ?, ?, 'VERIFY', DATE_ADD(NOW(), INTERVAL 30 MINUTE), 0)",
                 userId, user.getEmail(), UUID.randomUUID().toString().replace("-", ""));
+        jdbcTemplate.update("INSERT INTO feedback (user_id, type, title, content, contact, status, admin_note) "
+                        + "VALUES (?, 'BUG', '提交按钮无响应', '点击提交后页面没有反应，请排查。', "
+                        + "'me@example.com', 'NEW', '内部备注')", userId);
 
         mockMvc.perform(post("/api/user/logout-account")
                         .header("Authorization", token)
@@ -343,6 +349,26 @@ class AuthIntegrationTest extends AuthTestSupport {
                 "SELECT remark FROM expense WHERE user_id = ?", String.class, userId)).isEmpty();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT deleted FROM trip_checklist WHERE user_id = ?", Integer.class, userId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT title FROM feedback WHERE user_id = ?", String.class, userId)).isEmpty();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT content FROM feedback WHERE user_id = ?", String.class, userId)).isEmpty();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT contact FROM feedback WHERE user_id = ?", String.class, userId)).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT admin_note FROM feedback WHERE user_id = ?", String.class, userId)).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT type FROM feedback WHERE user_id = ?", String.class, userId)).isEqualTo("BUG");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM feedback WHERE user_id = ?", String.class, userId)).isEqualTo("NEW");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT reporter_user_id FROM note_report WHERE note_id = ?", Long.class, noteId)).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT note_title FROM note_report WHERE note_id = ?", String.class, noteId)).isEmpty();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT note_content_text FROM note_report WHERE note_id = ?", String.class, noteId)).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM note_report WHERE note_id = ?", String.class, noteId)).isEqualTo("PENDING");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM quota_pack WHERE user_id = ?", Integer.class, userId)).isZero();
         assertThat(jdbcTemplate.queryForObject(

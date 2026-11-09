@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { getCountries } from '../api/catalog'
 import {
   createAdminCity,
-  deleteAdminCity,
   listAdminCities,
   updateAdminCity,
   type AdminCityView
 } from '../api/admin'
+import AdminPageIntro from '../components/AdminPageIntro.vue'
 import type { Country } from '../api/types'
 
 const countries = ref<Country[]>([])
@@ -129,30 +129,17 @@ async function submitEdit(): Promise<void> {
   }
 }
 
-async function remove(city: AdminCityView): Promise<void> {
-  try {
-    await ElMessageBox.confirm(
-      `删除城市 ${city.name}（${city.cityCode}）？被引用时无法删除，可改为停用。`,
-      '删除城市',
-      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
-    )
-  } catch {
-    return
-  }
-  try {
-    await deleteAdminCity(city.id)
-    await load()
-    ElMessage.success('城市已删除')
-  } catch (error) {
-    ElMessage.error((error as Error).message || '删除失败')
-  }
-}
 </script>
 
 <template>
   <div class="plan-page">
     <el-card>
       <template #header><div class="trip-title">城市维护</div></template>
+      <AdminPageIntro title="这个页面是干什么的？">
+        这里维护规划行程、游记、记账和地图抽屉共用的城市字典。种子数据未覆盖的城市可在此新增；
+        改名会同步展示到所有引用处；停用后不再出现在新建内容的选择器中，但已有数据仍可正常查看。
+        表格中的「被引用」表示该城市已被行程、游记或消费使用，此类城市不能删除，只能停用。
+      </AdminPageIntro>
       <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
         <el-select v-model="countryCode" placeholder="全部国家" clearable filterable style="width: 180px">
           <el-option v-for="item in countries" :key="item.code" :label="item.nameZh" :value="item.code" />
@@ -182,10 +169,9 @@ async function remove(city: AdminCityView): Promise<void> {
         <el-table-column label="被引用" width="100">
           <template #default="{ row }">{{ row.referenced ? '是' : '否' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <el-button text size="small" type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button text size="small" type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

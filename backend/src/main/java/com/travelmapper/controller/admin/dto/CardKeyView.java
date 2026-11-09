@@ -1,5 +1,6 @@
 package com.travelmapper.controller.admin.dto;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 public record CardKeyView(
@@ -8,6 +9,7 @@ public record CardKeyView(
         String code,
         String type,
         Integer value,
+        BigDecimal priceCny,
         String status,
         LocalDateTime expireAt,
         Long usedBy,

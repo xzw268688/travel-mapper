@@ -46,6 +46,21 @@ public final class NoteDtos {
     public record ImageView(String objectKey, String url) {
     }
 
+    public record ListItem(
+            Long id,
+            String title,
+            String summary,
+            String coverImageUrl,
+            String countryCode,
+            String countryName,
+            String cityCode,
+            String cityName,
+            String visibility,
+            boolean takenDown,
+            LocalDateTime createdAt,
+            LocalDateTime updatedAt) {
+    }
+
     public record VideoView(String objectKey, String url) {
     }
 
@@ -70,6 +85,8 @@ public final class NoteDtos {
             String visibility,
             ShareState share,
             boolean takedown,
+            String takedownReason,
+            LocalDateTime takedownAt,
             LocalDateTime createdAt,
             LocalDateTime updatedAt) {
     }
@@ -84,7 +101,8 @@ public final class NoteDtos {
     public record DeleteResponse(
             Long noteId,
             String countryStatusAfter,
-            int sharesRevoked) {
+            int sharesRevoked,
+            boolean tripDeleted) {
     }
 
     @Data

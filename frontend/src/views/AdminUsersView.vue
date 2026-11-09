@@ -3,10 +3,14 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   adjustUserQuota,
+  getUserDetail,
   listAdminUsers,
+  setUserVip,
   updateUserStatus,
+  type AdminUserDetailView,
   type AdminUserView
 } from '../api/admin'
+import AdminPageIntro from '../components/AdminPageIntro.vue'
 
 const keyword = ref('')
 const status = ref('')
@@ -33,6 +37,12 @@ const quotaDialog = reactive({
   reason: '',
   saving: false
 })
+
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const detail = ref<AdminUserDetailView | null>(null)
+const vipDate = ref('')
+const vipSaving = ref(false)
 
 onMounted(load)
 
@@ -126,6 +136,36 @@ async function submitQuota(): Promise<void> {
   }
 }
 
+async function openDetail(user: AdminUserView): Promise<void> {
+  detailVisible.value = true
+  detail.value = null
+  detailLoading.value = true
+  try {
+    detail.value = await getUserDetail(user.id)
+    vipDate.value = detail.value.vipExpireAt ? detail.value.vipExpireAt.slice(0, 19) : ''
+  } catch (error) {
+    ElMessage.error((error as Error).message || '加载用户详情失败')
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+async function submitVip(expireAt: string | null): Promise<void> {
+  if (!detail.value) return
+  vipSaving.value = true
+  try {
+    const result = await setUserVip(detail.value.id, expireAt)
+    detail.value.vipExpireAt = result.vipExpireAt
+    vipDate.value = result.vipExpireAt ? result.vipExpireAt.slice(0, 19) : ''
+    await load()
+    ElMessage.success(expireAt ? 'VIP 到期日已更新' : 'VIP 已清除')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '更新 VIP 失败')
+  } finally {
+    vipSaving.value = false
+  }
+}
+
 function formatTime(value: string | null): string {
   return value ? value.replace('T', ' ').slice(0, 16) : '—'
 }
@@ -135,6 +175,9 @@ function formatTime(value: string | null): string {
   <div class="plan-page">
     <el-card>
       <template #header><div class="trip-title">用户管理</div></template>
+      <AdminPageIntro title="这个页面是干什么的？">
+        检索用户、查看额度与最近卡密兑换，并执行封禁/解封、调整 AI 次数或 VIP 到期日。封禁会让该用户现有登录立即失效；额度与 VIP 调整会写入额度流水和审计日志。
+      </AdminPageIntro>
       <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
         <el-input v-model="keyword" placeholder="用户名 / 邮箱 / 昵称" style="width: 260px" @keyup.enter="search" />
         <el-select v-model="status" placeholder="全部状态" clearable style="width: 150px">
@@ -165,8 +208,9 @@ function formatTime(value: string | null): string {
         <el-table-column label="VIP 到期" width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ formatTime(row.vipExpireAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
+            <el-button text size="small" @click="openDetail(row)">详情</el-button>
             <el-button
               text
               size="small"
@@ -233,5 +277,74 @@ function formatTime(value: string | null): string {
         <el-button type="primary" :loading="quotaDialog.saving" @click="submitQuota">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="detailVisible" title="用户详情" size="560px" :direction="'rtl'">
+      <div v-loading="detailLoading">
+        <template v-if="detail">
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item label="ID">{{ detail.id }}</el-descriptions-item>
+            <el-descriptions-item label="用户名">{{ detail.username }}</el-descriptions-item>
+            <el-descriptions-item label="昵称">{{ detail.nickname || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="邮箱">{{ detail.email }}</el-descriptions-item>
+            <el-descriptions-item label="角色">{{ detail.role }}</el-descriptions-item>
+            <el-descriptions-item label="状态">{{ detail.status }}</el-descriptions-item>
+            <el-descriptions-item label="今日免费">{{ detail.freeUsedToday }}</el-descriptions-item>
+            <el-descriptions-item label="次数包">{{ detail.packBalance }}</el-descriptions-item>
+            <el-descriptions-item label="游记">{{ detail.noteCount }}</el-descriptions-item>
+            <el-descriptions-item label="行程">{{ detail.itineraryCount }}</el-descriptions-item>
+            <el-descriptions-item label="旅行">{{ detail.tripCount }}</el-descriptions-item>
+            <el-descriptions-item label="注册时间">{{ formatTime(detail.createdAt) }}</el-descriptions-item>
+          </el-descriptions>
+
+          <div class="detail-section">
+            <div class="trip-title" style="font-size: 14px">VIP</div>
+            <div class="meta">当前到期：{{ formatTime(detail.vipExpireAt) }}</div>
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap">
+              <el-date-picker
+                v-model="vipDate"
+                type="datetime"
+                value-format="YYYY-MM-DDTHH:mm:ss"
+                placeholder="设置到期时间"
+              />
+              <el-button
+                type="primary"
+                :loading="vipSaving"
+                :disabled="!vipDate"
+                @click="submitVip(vipDate)"
+              >
+                保存到期日
+              </el-button>
+              <el-button :loading="vipSaving" @click="submitVip(null)">清除 VIP</el-button>
+            </div>
+            <div class="meta" style="margin-top: 6px">
+              设为过去时间即立即收回；按天数调整请使用列表中的「调整额度」。
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="trip-title" style="font-size: 14px">最近兑换</div>
+            <el-empty
+              v-if="detail.recentRedemptions.length === 0"
+              description="暂无兑换记录"
+              :image-size="60"
+            />
+            <el-table v-else :data="detail.recentRedemptions" size="small" stripe>
+              <el-table-column prop="code" label="卡密" min-width="200" />
+              <el-table-column prop="type" label="类型" width="110" />
+              <el-table-column prop="value" label="面额" width="80" />
+              <el-table-column label="时间" width="150">
+                <template #default="{ row }">{{ formatTime(row.usedAt) }}</template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </template>
+      </div>
+    </el-drawer>
   </div>
 </template>
+
+<style scoped>
+.detail-section {
+  margin-top: 20px;
+}
+</style>

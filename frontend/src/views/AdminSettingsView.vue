@@ -5,17 +5,21 @@ import { ElMessage } from 'element-plus'
 import {
   getLlmConfig,
   getMailConfig,
+  getQuotaConfig,
   getSearchConfig,
   getStorageConfig,
   updateLlmConfig,
   updateMailConfig,
+  updateQuotaConfig,
   updateSearchConfig,
   updateStorageConfig,
   type LlmConfig,
   type MailConfig,
+  type QuotaConfig,
   type SearchConfig,
   type StorageConfig
 } from '../api/admin'
+import AdminPageIntro from '../components/AdminPageIntro.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,6 +53,8 @@ const llm = reactive<LlmConfig>({
   timeoutSeconds: 30,
   maxRetry: 1
 })
+const quota = reactive<QuotaConfig>({ freeLimit: 3 })
+const quotaSaving = ref(false)
 const search = reactive<SearchConfig>({
   provider: 'tavily',
   apiKey: '',
@@ -94,13 +100,15 @@ onMounted(load)
 async function load(): Promise<void> {
   loading.value = true
   try {
-    const [llmConfig, searchConfig, storageConfig, mailConfig] = await Promise.all([
+    const [llmConfig, quotaConfig, searchConfig, storageConfig, mailConfig] = await Promise.all([
       getLlmConfig(),
+      getQuotaConfig(),
       getSearchConfig(),
       getStorageConfig(),
       getMailConfig()
     ])
     applyLlm(llmConfig)
+    quota.freeLimit = quotaConfig.freeLimit
     applySearch(searchConfig)
     applyStorage(storageConfig)
     applyMail(mailConfig)
@@ -179,6 +187,19 @@ async function saveLlm(): Promise<void> {
     ElMessage.error((error as Error).message || '保存 LLM 配置失败')
   } finally {
     llmSaving.value = false
+  }
+}
+
+async function saveQuota(): Promise<void> {
+  quotaSaving.value = true
+  try {
+    const result = await updateQuotaConfig({ freeLimit: quota.freeLimit })
+    quota.freeLimit = result.freeLimit
+    ElMessage.success('每日免费额度已保存')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '保存免费额度失败')
+  } finally {
+    quotaSaving.value = false
   }
 }
 
@@ -276,24 +297,19 @@ async function saveMail(): Promise<void> {
           <el-button @click="load">刷新</el-button>
         </div>
       </template>
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="以下配置保存后立即热加载，无需重启；敏感字段留空表示保留原值。"
-        style="margin-bottom: 12px"
-      />
+      <AdminPageIntro title="这个页面是干什么的？">
+        维护 AI 模型、攻略搜索、对象存储和邮件 SMTP 等运行参数。保存后立即热加载，无需重启；
+        敏感字段留空表示保留原值；所有变更都会写入审计日志。
+      </AdminPageIntro>
       <el-tabs v-model="activeTab" @tab-change="onTabChange">
         <el-tab-pane label="AI 模型" name="llm">
           <div class="config-pane">
             <div class="trip-title">AI 行程模型（LLM）</div>
-            <div class="meta" style="margin-bottom: 12px">
-              OpenAI 兼容接口。通义千问：https://dashscope.aliyuncs.com/compatible-mode/v1；Kimi/OpenAI 请填写各自 Base URL。
-            </div>
             <el-form label-width="120px" style="max-width: 720px">
               <el-form-item label="供应商" required>
                 <el-select v-model="llm.provider" filterable allow-create default-first-option style="width: 100%">
                   <el-option label="qwen（通义千问）" value="qwen" />
+                  <el-option label="volcengine（火山方舟）" value="volcengine" />
                   <el-option label="kimi" value="kimi" />
                   <el-option label="openai" value="openai" />
                   <el-option label="deepseek" value="deepseek" />
@@ -318,19 +334,77 @@ async function saveMail(): Promise<void> {
                 <span class="meta" style="margin-left: 8px">解析失败重试</span>
                 <el-input-number v-model="llm.maxRetry" :min="0" :max="5" style="margin-left: 8px" />
               </el-form-item>
+              <el-form-item label="每日免费额度">
+                <el-input-number v-model="quota.freeLimit" :min="0" :max="100" />
+                <span class="meta" style="margin-left: 8px">
+                  生成与润色共用；0 表示不提供免费次数
+                </span>
+                <el-button
+                  type="primary"
+                  plain
+                  :loading="quotaSaving"
+                  style="margin-left: 12px"
+                  @click="saveQuota"
+                >
+                  保存额度
+                </el-button>
+              </el-form-item>
               <el-form-item>
                 <el-button type="primary" :loading="llmSaving" @click="saveLlm">保存 LLM 配置</el-button>
               </el-form-item>
             </el-form>
+
+            <div class="llm-guide">
+              <div class="llm-guide-head">
+                <span class="llm-guide-title">配置说明</span>
+                <el-tag size="small" effect="plain" type="info">保存后立即生效</el-tag>
+              </div>
+              <div class="llm-guide-grid">
+                <div class="llm-guide-item">
+                  <span class="llm-guide-label">接口协议</span>
+                  <span>OpenAI 兼容</span>
+                </div>
+                <div class="llm-guide-item">
+                  <span class="llm-guide-label">推荐模型</span>
+                  <span class="llm-inline">
+                    <code>qwen-turbo</code><code>doubao-*-turbo</code><code>deepseek-chat</code>
+                  </span>
+                </div>
+                <div class="llm-guide-item">
+                  <span class="llm-guide-label">超时</span>
+                  <span>单次最长等待，建议 ≥ 60 秒；超时不重试，立即失败并退回额度</span>
+                </div>
+                <div class="llm-guide-item">
+                  <span class="llm-guide-label">解析失败重试</span>
+                  <span>仅在模型返回格式不合法时生效，受整体时间预算约束</span>
+                </div>
+                <div class="llm-guide-item llm-guide-wide">
+                  <span class="llm-guide-label">深度思考</span>
+                  <span>火山方舟 <code>doubao</code> 模型自动关闭（thinking=disabled）；推理模型（R1、thinking 系列）单次可能需要 60 秒以上，更容易超时</span>
+                </div>
+              </div>
+              <div class="llm-guide-section">
+                <span class="llm-guide-label">Base URL 示例</span>
+                <div class="llm-endpoint-row">
+                  <span class="llm-endpoint-name">通义千问</span>
+                  <code>https://dashscope.aliyuncs.com/compatible-mode/v1</code>
+                </div>
+                <div class="llm-endpoint-row">
+                  <span class="llm-endpoint-name">DeepSeek</span>
+                  <code>https://api.deepseek.com/v1</code>
+                </div>
+                <div class="llm-endpoint-row">
+                  <span class="llm-endpoint-name">火山方舟</span>
+                  <code>https://ark.cn-beijing.volces.com/api/v3</code>
+                </div>
+              </div>
+            </div>
           </div>
         </el-tab-pane>
 
         <el-tab-pane label="攻略搜索" name="search">
           <div class="config-pane">
             <div class="trip-title">攻略搜索（可选）</div>
-            <div class="meta" style="margin-bottom: 12px">
-              搜索失败不会阻塞行程生成，只影响参考攻略。支持 tavily / bocha；API Key 留空表示保留原值。
-            </div>
             <el-form label-width="120px" style="max-width: 720px">
               <el-form-item label="供应商">
                 <el-select v-model="search.provider" style="width: 100%">
@@ -361,6 +435,35 @@ async function saveMail(): Promise<void> {
                 <el-button type="primary" :loading="searchSaving" @click="saveSearch">保存搜索配置</el-button>
               </el-form-item>
             </el-form>
+
+            <div class="llm-guide">
+              <div class="llm-guide-head">
+                <span class="llm-guide-title">这个配置用来做什么</span>
+                <el-tag size="small" effect="plain" type="info">可选</el-tag>
+              </div>
+              <div class="llm-guide-grid">
+                <div class="llm-guide-item llm-guide-wide">
+                  <span class="llm-guide-label">作用</span>
+                  <span>生成行程时并行搜索「城市 + 天数 + 偏好」，在行程页展示最多 3 条攻略参考链接；不参与 AI 写行程内容。</span>
+                </div>
+                <div class="llm-guide-item">
+                  <span class="llm-guide-label">每日上限</span>
+                  <span>每用户每天最多搜索次数，超出时只返回空链接，不报错</span>
+                </div>
+                <div class="llm-guide-item">
+                  <span class="llm-guide-label">超时</span>
+                  <span>搜索独立超时，失败不影响行程生成</span>
+                </div>
+                <div class="llm-guide-item">
+                  <span class="llm-guide-label">缓存</span>
+                  <span>相同国家、城市、天数与偏好的攻略缓存时长</span>
+                </div>
+                <div class="llm-guide-item">
+                  <span class="llm-guide-label">不配置</span>
+                  <span>行程照常生成，只是没有参考攻略链接</span>
+                </div>
+              </div>
+            </div>
           </div>
         </el-tab-pane>
 
@@ -469,5 +572,104 @@ async function saveMail(): Promise<void> {
 
 .config-pane .trip-title {
   margin-bottom: 4px;
+}
+
+.llm-guide {
+  max-width: 720px;
+  margin-top: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius-sm, 8px);
+  background: var(--tm-brand-soft, #f5f7ff);
+}
+
+.llm-guide-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.llm-guide-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tm-text, #1f2937);
+}
+
+.llm-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 24px;
+}
+
+.llm-guide-item {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--tm-text-secondary, #4b5563);
+}
+
+.llm-guide-wide {
+  grid-column: 1 / -1;
+}
+
+.llm-guide-label {
+  flex: none;
+  min-width: 84px;
+  color: var(--tm-text-muted, #6b7280);
+}
+
+.llm-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.llm-guide code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(59, 91, 219, 0.08);
+  color: var(--tm-brand, #3b5bdb);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.llm-guide-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--tm-border);
+  font-size: 13px;
+  color: var(--tm-text-secondary, #4b5563);
+}
+
+.llm-endpoint-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.llm-endpoint-name {
+  flex: none;
+  min-width: 84px;
+  color: var(--tm-text-muted, #6b7280);
+}
+
+@media (max-width: 768px) {
+  .llm-guide-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .llm-guide-item,
+  .llm-endpoint-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .llm-guide-label,
+  .llm-endpoint-name {
+    min-width: 0;
+  }
 }
 </style>

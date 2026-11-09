@@ -155,8 +155,8 @@ async function removeNote(): Promise<void> {
   }
   deleting.value = true
   try {
-    await deleteNote(note.value.id)
-    ElMessage.success('游记已删除')
+    const result = await deleteNote(note.value.id)
+    ElMessage.success(result?.tripDeleted ? '游记已删除，旅行已无内容并自动清理' : '游记已删除')
     await router.push('/notes')
   } catch (err) {
     ElMessage.error((err as Error).message || '删除失败')
@@ -236,9 +236,16 @@ function formatDate(value: string | null): string {
         type="error"
         :closable="false"
         show-icon
-        title="该游记已被下架：可查看但不可编辑或分享，请联系管理员处理。"
+        :title="`该游记已被下架：${note.takedownReason || '未提供原因'}`"
         style="margin-bottom: 16px"
-      />
+      >
+        <div>
+          下架时间：{{ note.takedownAt ? formatDate(note.takedownAt) : '—' }}。
+          如对处理结果有异议，可通过
+          <router-link to="/profile">个人中心的「意见反馈」</router-link>
+          提交申诉。
+        </div>
+      </el-alert>
       <el-alert
         v-if="note.cityDisabled"
         type="warning"
