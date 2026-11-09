@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import QRCode from 'qrcode'
@@ -31,8 +31,52 @@ const error = ref('')
 const openId = ref('')
 const expireDays = ref(7)
 const posterRef = ref<HTMLElement | null>(null)
+const stageRef = ref<HTMLElement | null>(null)
 const routeCanvas = ref<HTMLCanvasElement | null>(null)
 const qrCanvas = ref<HTMLCanvasElement | null>(null)
+
+const POSTER_WIDTH = 720
+const posterScale = ref(1)
+const posterHeight = ref(0)
+let stageObserver: ResizeObserver | null = null
+let posterObserver: ResizeObserver | null = null
+
+function updatePosterLayout(): void {
+  const available = stageRef.value?.clientWidth ?? 0
+  if (available > 0) {
+    posterScale.value = Math.min(1, available / POSTER_WIDTH)
+  }
+  if (posterRef.value) {
+    posterHeight.value = posterRef.value.offsetHeight
+  }
+}
+
+onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined' && stageRef.value) {
+    stageObserver = new ResizeObserver(updatePosterLayout)
+    stageObserver.observe(stageRef.value)
+  }
+  window.addEventListener('resize', updatePosterLayout)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updatePosterLayout)
+  stageObserver?.disconnect()
+  posterObserver?.disconnect()
+})
+
+watch(posterRef, (element) => {
+  posterObserver?.disconnect()
+  if (element && typeof ResizeObserver !== 'undefined') {
+    posterObserver = new ResizeObserver(updatePosterLayout)
+    posterObserver.observe(element)
+  }
+  void nextTick(updatePosterLayout)
+}, { flush: 'post' })
+
+watch(share, () => {
+  void nextTick(updatePosterLayout)
+})
 
 const visited = computed<CountryStat[]>(() =>
   (stats.value?.countries ?? []).filter(
@@ -221,12 +265,20 @@ async function download(): Promise<void> {
   try {
     // 按需加载，避免首屏携带 html2canvas
     const { default: html2canvas } = await import('html2canvas')
-    const canvas = await html2canvas(posterRef.value, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false
-    })
+    // 预览在手机上会等比缩小；导出时临时去掉 transform，保证输出完整尺寸。
+    const previousTransform = posterRef.value.style.transform
+    posterRef.value.style.transform = 'none'
+    let canvas: HTMLCanvasElement
+    try {
+      canvas = await html2canvas(posterRef.value, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false
+      })
+    } finally {
+      posterRef.value.style.transform = previousTransform
+    }
     const link = document.createElement('a')
     link.download = `travelmapper-note-${note.value.id}.png`
     link.href = canvas.toDataURL('image/png')
@@ -281,8 +333,19 @@ function formatDate(value: string | null): string {
       :title="error"
     />
 
-    <div v-if="share" class="poster-stage">
-      <div ref="posterRef" class="poster">
+    <div v-if="share" ref="stageRef" class="poster-stage">
+      <div
+        class="poster-fit"
+        :style="{
+          width: `${POSTER_WIDTH * posterScale}px`,
+          height: `${posterHeight * posterScale}px`
+        }"
+      >
+        <div
+          ref="posterRef"
+          class="poster"
+          :style="{ transform: `scale(${posterScale})` }"
+        >
         <div class="poster-head">
           <span class="poster-brand">旅迹地图</span>
           <span class="poster-slogan">把走过的路，留在地图上</span>
@@ -327,6 +390,7 @@ function formatDate(value: string | null): string {
             <div class="poster-foot-nick">{{ share.nicknameMasked }}</div>
           </div>
         </div>
+        </div>
       </div>
     </div>
   </div>
@@ -339,9 +403,15 @@ function formatDate(value: string | null): string {
   padding-bottom: 16px;
 }
 
+.poster-fit {
+  position: relative;
+  margin: 0 auto;
+  overflow: hidden;
+}
+
 .poster {
   width: 720px;
-  margin: 0 auto;
+  transform-origin: top left;
   padding: 40px;
   background: linear-gradient(160deg, #f7f9ff 0%, #ffffff 45%, #eef4ff 100%);
   border: 1px solid #e4e7ed;
