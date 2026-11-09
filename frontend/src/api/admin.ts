@@ -107,7 +107,8 @@ export interface StorageTestResult {
 }
 
 export function testStorageConfig(body: Partial<StorageConfig>): Promise<StorageTestResult> {
-  return apiPost<StorageTestResult>('/admin/config/oss/test', body)
+  // 连接外部对象存储可能需要更长时间，单独放宽到 60 秒。
+  return apiPost<StorageTestResult>('/admin/config/oss/test', body, 60000)
 }
 
 export function getMailConfig(): Promise<MailConfig> {

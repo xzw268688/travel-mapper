@@ -301,7 +301,12 @@ async function testStorage(): Promise<void> {
       ElMessage.error(result.message || '存储连接失败')
     }
   } catch (error) {
-    ElMessage.error((error as Error).message || '存储连接测试失败')
+    const message = (error as Error).message
+    if (message === 'Failed to fetch' || message.includes('Network Error')) {
+      ElMessage.error('无法连接后端：请确认后端已启动，刷新页面后重试')
+    } else {
+      ElMessage.error(message || '存储连接测试失败')
+    }
   } finally {
     storageTesting.value = false
   }
