@@ -63,6 +63,18 @@
 - **WHEN** 管理员从「配置」选择邮件 SMTP
 - **THEN** 打开配置中心并定位到邮件页签
 
+#### Scenario: Admin opens log management
+- **WHEN** 管理员从「管理」选择「日志管理」
+- **THEN** 打开日志页面并默认展示操作日志，可切换到登录日志
+
+#### Scenario: Admin filters user operations
+- **WHEN** 管理员在操作日志选择角色「用户」并查询
+- **THEN** 页面只展示用户角色的操作记录，并显示每条记录的角色
+
+#### Scenario: Old audit route still works
+- **WHEN** 已收藏 `/admin/audit` 的管理员访问该地址
+- **THEN** 页面重定向到日志管理的操作日志页签
+
 #### Scenario: Normal users see no admin menus
 - **WHEN** 普通用户登录
 - **THEN** 顶栏不显示「管理」「配置」或「监控」入口
