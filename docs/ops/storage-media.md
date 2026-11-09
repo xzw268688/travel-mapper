@@ -80,7 +80,7 @@ note/{userId}/{yyyy}/{MM}/{uuid}.{ext}
 | 配置 | 示例 | 说明 |
 |---|---|---|
 | Provider | `oss` | 仅用于展示，不参与路由 |
-| Endpoint | `https://oss-cn-hangzhou.aliyuncs.com` | 按 Bucket 地域替换；同地域内网可用 `-internal` 端点 |
+| Endpoint | `https://s3.oss-cn-hangzhou.aliyuncs.com` | 按 Bucket 地域替换；同地域内网可用 `-internal` 端点 |
 | Region | `cn-hangzhou` | 必须与 Endpoint 地域一致 |
 | Bucket | `your-bucket` | 私有读写 |
 | Access Key / Secret Key | RAM 用户 AK/SK | 遵循最小权限，不要使用主账号密钥 |

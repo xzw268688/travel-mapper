@@ -555,7 +555,7 @@ async function saveMail(): Promise<void> {
             <div class="trip-title">对象存储（S3 兼容）</div>
             <div class="meta" style="margin-bottom: 12px">
               支持 MinIO / 云 OSS。Access Key 与 Secret Key 留空表示保留原值。
-              阿里云 OSS：Endpoint 形如 <code>https://oss-cn-hangzhou.aliyuncs.com</code>，
+              阿里云 OSS：Endpoint 形如 <code>https://s3.oss-cn-hangzhou.aliyuncs.com</code>，
               Region 填 <code>cn-hangzhou</code>，Path Style 关闭；测试连接不会保存配置。
             </div>
             <el-form label-width="120px" style="max-width: 720px">
