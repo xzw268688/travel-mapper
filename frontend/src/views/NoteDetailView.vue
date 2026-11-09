@@ -11,7 +11,7 @@ import {
   updateNote,
   type NoteResponse
 } from '../api/notes'
-import { contentToPreview, hasContent } from '../utils/noteContent'
+import { contentToPreview, hasContent, imageKeyFromSrc } from '../utils/noteContent'
 import { sharePageUrl } from '../utils/share'
 
 const route = useRoute()
@@ -56,6 +56,30 @@ const mediaUrlByKey = computed<Record<string, string>>(() => {
 
 const renderedContent = computed(() =>
   note.value ? contentToPreview(note.value.content, mediaUrlByKey.value) : ''
+)
+
+// 正文已经嵌入的媒体不再在下方图集/视频列表中重复展示。
+const embeddedMediaKeys = computed(() => {
+  const keys = new Set<string>()
+  if (!note.value) {
+    return keys
+  }
+  const doc = new DOMParser().parseFromString(note.value.content, 'text/html')
+  doc.querySelectorAll('img, video').forEach((media) => {
+    const key = imageKeyFromSrc(media.getAttribute('src') || '')
+    if (key) {
+      keys.add(key)
+    }
+  })
+  return keys
+})
+
+const galleryImages = computed(() =>
+  (note.value?.images ?? []).filter((image) => !embeddedMediaKeys.value.has(image.objectKey))
+)
+
+const galleryVideos = computed(() =>
+  (note.value?.videos ?? []).filter((video) => !embeddedMediaKeys.value.has(video.objectKey))
 )
 
 const shareUrl = computed(() => {
@@ -327,9 +351,9 @@ function formatDate(value: string | null): string {
 
         <template v-else>
           <article class="note-content" v-html="renderedContent" />
-          <div v-if="note.videos.length" class="note-videos">
+          <div v-if="galleryVideos.length" class="note-videos">
             <video
-              v-for="video in note.videos"
+              v-for="video in galleryVideos"
               :key="video.objectKey"
               :src="video.url || ''"
               controls
@@ -338,12 +362,12 @@ function formatDate(value: string | null): string {
               class="note-video"
             />
           </div>
-          <div v-if="note.images.length" class="cover-list" style="margin-top: 16px">
+          <div v-if="galleryImages.length" class="cover-list" style="margin-top: 16px">
             <el-image
-              v-for="image in note.images"
+              v-for="image in galleryImages"
               :key="image.objectKey"
               :src="image.url || ''"
-              :preview-src-list="note.images.map((item) => item.url || '').filter(Boolean)"
+              :preview-src-list="galleryImages.map((item) => item.url || '').filter(Boolean)"
               fit="cover"
               style="width: 140px; height: 100px; border-radius: 6px"
             />
