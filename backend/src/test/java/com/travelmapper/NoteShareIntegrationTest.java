@@ -120,7 +120,7 @@ class NoteShareIntegrationTest extends AuthTestSupport {
 
         mockMvc.perform(withToken(post("/api/upload/presign"), user)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"bizType\":\"NOTE_VIDEO\",\"contentType\":\"video/quicktime\",\"size\":100}"))
+                        .content("{\"bizType\":\"NOTE_VIDEO\",\"contentType\":\"video/x-msvideo\",\"size\":100}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(2030));
         mockMvc.perform(withToken(post("/api/upload/presign"), user)
