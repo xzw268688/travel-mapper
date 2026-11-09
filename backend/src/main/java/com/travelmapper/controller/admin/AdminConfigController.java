@@ -21,6 +21,10 @@ import com.travelmapper.service.config.ConfigKeys;
 import com.travelmapper.service.config.ConfigReloadService;
 import com.travelmapper.service.config.ConfigService;
 import com.travelmapper.service.search.SearchProviderHolder;
+import com.travelmapper.service.storage.StorageConfig;
+import com.travelmapper.service.storage.StorageConnectionTestService;
+import com.travelmapper.service.storage.StorageProviderHolder;
+import com.travelmapper.service.storage.StorageTestResult;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -49,17 +53,23 @@ public class AdminConfigController {
     private final AppProperties properties;
     private final AlertConfigService alertConfigService;
     private final AlertNotifier alertNotifier;
+    private final StorageProviderHolder storageProviderHolder;
+    private final StorageConnectionTestService storageConnectionTestService;
 
     public AdminConfigController(ConfigService configService, ConfigReloadService reloadService,
                                  SearchProviderHolder searchProviderHolder,
                                  AppProperties properties, AlertConfigService alertConfigService,
-                                 AlertNotifier alertNotifier) {
+                                 AlertNotifier alertNotifier,
+                                 StorageProviderHolder storageProviderHolder,
+                                 StorageConnectionTestService storageConnectionTestService) {
         this.configService = configService;
         this.reloadService = reloadService;
         this.searchProviderHolder = searchProviderHolder;
         this.properties = properties;
         this.alertConfigService = alertConfigService;
         this.alertNotifier = alertNotifier;
+        this.storageProviderHolder = storageProviderHolder;
+        this.storageConnectionTestService = storageConnectionTestService;
     }
 
     @GetMapping("/llm")
@@ -242,6 +252,22 @@ public class AdminConfigController {
                 String.valueOf(Boolean.TRUE.equals(dto.getStarttls())), "STARTTLS");
         apply(updates);
         return getMail();
+    }
+
+    @PostMapping("/oss/test")
+    public ApiResponse<StorageTestResult> testStorage(@RequestBody StorageConfigDto dto) {
+        StorageConfig saved = storageProviderHolder.loadConfig();
+        StorageConfig config = new StorageConfig(
+                hasText(dto.getProvider()) ? dto.getProvider().trim() : saved.provider(),
+                hasText(dto.getEndpoint()) ? dto.getEndpoint().trim() : saved.endpoint(),
+                hasText(dto.getRegion()) ? dto.getRegion().trim() : saved.region(),
+                hasText(dto.getBucket()) ? dto.getBucket().trim() : saved.bucket(),
+                hasText(dto.getAccessKey()) ? dto.getAccessKey().trim() : saved.accessKey(),
+                hasText(dto.getSecretKey()) ? dto.getSecretKey().trim() : saved.secretKey(),
+                dto.getPathStyle() != null ? dto.getPathStyle() : saved.pathStyle(),
+                hasText(dto.getPublicDomain())
+                        ? dto.getPublicDomain().trim() : saved.publicDomain());
+        return ApiResponse.ok(storageConnectionTestService.test(config));
     }
 
     @GetMapping("/alert")

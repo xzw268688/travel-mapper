@@ -10,6 +10,7 @@ import {
   getSearchConfig,
   getStorageConfig,
   testAlert as testAlertApi,
+  testStorageConfig,
   updateAlertConfig,
   updateLlmConfig,
   updateMailConfig,
@@ -103,6 +104,7 @@ const loading = ref(false)
 const llmSaving = ref(false)
 const searchSaving = ref(false)
 const storageSaving = ref(false)
+const storageTesting = ref(false)
 const mailSaving = ref(false)
 const alertSaving = ref(false)
 const alertTesting = ref(false)
@@ -277,6 +279,31 @@ async function saveSearch(): Promise<void> {
     ElMessage.error((error as Error).message || '保存搜索配置失败')
   } finally {
     searchSaving.value = false
+  }
+}
+
+async function testStorage(): Promise<void> {
+  storageTesting.value = true
+  try {
+    const result = await testStorageConfig({
+      provider: storage.provider,
+      endpoint: storage.endpoint,
+      region: storage.region,
+      bucket: storage.bucket,
+      accessKey: storage.accessKey,
+      secretKey: storage.secretKey,
+      pathStyle: storage.pathStyle,
+      publicDomain: storage.publicDomain
+    })
+    if (result.ok) {
+      ElMessage.success(`${result.message}（${result.latencyMs} ms）`)
+    } else {
+      ElMessage.error(result.message || '存储连接失败')
+    }
+  } catch (error) {
+    ElMessage.error((error as Error).message || '存储连接测试失败')
+  } finally {
+    storageTesting.value = false
   }
 }
 
@@ -523,6 +550,8 @@ async function saveMail(): Promise<void> {
             <div class="trip-title">对象存储（S3 兼容）</div>
             <div class="meta" style="margin-bottom: 12px">
               支持 MinIO / 云 OSS。Access Key 与 Secret Key 留空表示保留原值。
+              阿里云 OSS：Endpoint 形如 <code>https://oss-cn-hangzhou.aliyuncs.com</code>，
+              Region 填 <code>cn-hangzhou</code>，Path Style 关闭；测试连接不会保存配置。
             </div>
             <el-form label-width="120px" style="max-width: 720px">
               <el-form-item label="供应商" required>
@@ -565,6 +594,7 @@ async function saveMail(): Promise<void> {
               </el-form-item>
               <el-form-item>
                 <el-button type="primary" :loading="storageSaving" @click="saveStorage">保存对象存储配置</el-button>
+                <el-button :loading="storageTesting" @click="testStorage">测试连接</el-button>
               </el-form-item>
             </el-form>
           </div>

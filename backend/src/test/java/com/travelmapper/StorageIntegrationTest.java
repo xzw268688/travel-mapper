@@ -164,6 +164,22 @@ class StorageIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void connectionTestUploadsAndCleansTempObject() throws Exception {
+        mockMvc.perform(asAdmin(post("/api/admin/config/oss/test"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"provider\":\"minio\",\"endpoint\":\""
+                                + TestInfrastructure.objectStorageEndpoint()
+                                + "\",\"region\":\"\",\"bucket\":\"travelmapper\",\"accessKey\":\""
+                                + TestInfrastructure.objectStorageAccessKey() + "\",\"secretKey\":\""
+                                + TestInfrastructure.objectStorageSecretKey()
+                                + "\",\"pathStyle\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ok").value(true));
+
+        assertThat(storageHolder.get().list("healthcheck/")).isEmpty();
+    }
+
+    @Test
     void presignAcceptsQuickTimeVideoAndRejectsUnknownVideo() throws Exception {
         MvcResult quickTime = mockMvc.perform(asUser(post("/api/upload/presign"))
                         .contentType(MediaType.APPLICATION_JSON)

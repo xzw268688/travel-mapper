@@ -71,3 +71,66 @@ note/{userId}/{yyyy}/{MM}/{uuid}.{ext}
 - **清理顺序**：先发布扩展了引用来源的新代码，再让清理任务运行；缩小引用范围前，先确认没有旧版本仍写旧字段。
 - **新增媒体类型**：同步更新 `ObjectKeyGenerator`、`UploadController` 白名单、`StorageProvider` 扩展名、`NoteMediaValidator`、正文清洗白名单、清理引用与本文档。
 - **Key 布局变更**：必须提升前缀版本（例如 `note-v2/`）并保留旧前缀清理逻辑，避免误删历史对象。
+## 阿里云 OSS 配置与测试
+
+项目使用 AWS SDK 的 S3 兼容接口访问 OSS。阿里云 OSS 的 S3 兼容 API 仅支持**虚拟托管风格**，因此必须关闭 Path Style。
+
+### 配置项
+
+| 配置 | 示例 | 说明 |
+|---|---|---|
+| Provider | `oss` | 仅用于展示，不参与路由 |
+| Endpoint | `https://oss-cn-hangzhou.aliyuncs.com` | 按 Bucket 地域替换；同地域内网可用 `-internal` 端点 |
+| Region | `cn-hangzhou` | 必须与 Endpoint 地域一致 |
+| Bucket | `your-bucket` | 私有读写 |
+| Access Key / Secret Key | RAM 用户 AK/SK | 遵循最小权限，不要使用主账号密钥 |
+| Path Style | **关闭** | OSS 仅支持虚拟托管风格 |
+| 公开域名 | 可留空 | 用于 CDN/自定义域名时填写 |
+
+### 测试连接（不切换存储）
+
+进入后台「配置 → 对象存储」：
+
+1. 填写 Endpoint、Region、Bucket、AccessKey、SecretKey，关闭 Path Style；
+2. 点击「**测试连接**」；
+3. 测试会临时创建存储客户端，执行 `HeadBucket`，并在 `healthcheck/` 前缀上传、确认、删除一个小对象；
+4. 测试**不会保存配置**，也不会切换当前存储；现有 SeaweedFS/MinIO 媒体不受影响。
+
+测试失败时页面会显示可读错误，例如签名不匹配、Bucket 不存在、权限不足或 Endpoint/Region 不一致。
+
+### Bucket CORS（真实上传需要）
+
+浏览器直传使用预签名 PUT，必须在 OSS Bucket 配置跨域规则：
+
+- 来源：`http://localhost:5173`、`http://192.168.1.199:5173` 以及生产前端域名；
+- 允许方法：`GET`、`PUT`、`POST`、`HEAD`；
+- 允许 Headers：`*`；
+- 暴露 Headers：`ETag`；
+- 缓存时间：600 秒。
+
+### RAM 最小权限
+
+测试与日常使用至少需要：
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "oss:GetBucketInfo",
+    "oss:ListObjects",
+    "oss:PutObject",
+    "oss:GetObject",
+    "oss:DeleteObject"
+  ],
+  "Resource": [
+    "acs:oss:*:*:your-bucket",
+    "acs:oss:*:*:your-bucket/*"
+  ]
+}
+```
+
+### 切换前注意
+
+- **不要只保存 OSS 配置就切换**：已有图片/视频的 objectKey 仍在原存储，切换后旧媒体会 404。
+- 测试通过后，先把原 Bucket 的 `note/` 对象迁移到 OSS，再保存并切换；或在新环境使用全新 Bucket。
+- 阿里云 OSS 与 S3 存在少量兼容差异；若测试返回签名/接口错误，先核对 Endpoint、Region 与 Path Style，再考虑使用阿里云 OSS 专用 SDK。

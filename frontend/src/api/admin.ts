@@ -100,6 +100,16 @@ export function updateStorageConfig(body: Partial<StorageConfig>): Promise<Stora
   return apiPut<StorageConfig>('/admin/config/oss', body)
 }
 
+export interface StorageTestResult {
+  ok: boolean
+  latencyMs: number
+  message: string
+}
+
+export function testStorageConfig(body: Partial<StorageConfig>): Promise<StorageTestResult> {
+  return apiPost<StorageTestResult>('/admin/config/oss/test', body)
+}
+
 export function getMailConfig(): Promise<MailConfig> {
   return apiGet<MailConfig>('/admin/config/mail')
 }
