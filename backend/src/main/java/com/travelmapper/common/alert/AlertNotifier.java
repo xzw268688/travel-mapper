@@ -1,9 +1,10 @@
 package com.travelmapper.common.alert;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.travelmapper.service.config.AlertConfig;
+import com.travelmapper.service.config.AlertConfigService;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -30,21 +31,14 @@ public class AlertNotifier {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final ObjectMapper objectMapper;
-    private final boolean enabled;
-    private final String webhookUrl;
-    private final long minIntervalMillis;
+    private final AlertConfigService configService;
     private final HttpClient httpClient;
     private final ExecutorService executor;
     private final Map<String, Long> lastSent = new ConcurrentHashMap<>();
 
-    public AlertNotifier(ObjectMapper objectMapper,
-                         @Value("${app.alert.enabled:true}") boolean enabled,
-                         @Value("${app.alert.webhook-url:}") String webhookUrl,
-                         @Value("${app.alert.min-interval-seconds:300}") long minIntervalSeconds) {
+    public AlertNotifier(ObjectMapper objectMapper, AlertConfigService configService) {
         this.objectMapper = objectMapper;
-        this.enabled = enabled;
-        this.webhookUrl = webhookUrl == null ? "" : webhookUrl.trim();
-        this.minIntervalMillis = Math.max(1, minIntervalSeconds) * 1000;
+        this.configService = configService;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(3))
                 .build();
@@ -56,10 +50,12 @@ public class AlertNotifier {
     }
 
     public void notify(String key, String title, String message) {
-        if (!enabled) {
+        AlertConfig config = configService.resolve();
+        if (!config.enabled()) {
             return;
         }
         long now = System.currentTimeMillis();
+        long minIntervalMillis = Math.max(1, config.minIntervalSeconds()) * 1000L;
         Long previous = lastSent.get(key);
         if (previous != null && now - previous < minIntervalMillis) {
             return;
@@ -67,14 +63,26 @@ public class AlertNotifier {
         lastSent.put(key, now);
 
         String text = buildText(title, message);
-        if (webhookUrl.isBlank()) {
+        if (config.webhookUrl().isBlank()) {
             log.info("[alert] {}", text.replace('\n', ' '));
             return;
         }
-        executor.submit(() -> send(text));
+        executor.submit(() -> sendNow(text, config.webhookUrl()));
     }
 
-    private void send(String text) {
+    /**
+     * 使用已保存的配置同步发送测试消息；绕过去重，便于连续验证。
+     */
+    public boolean sendTest() {
+        AlertConfig config = configService.resolve();
+        if (!config.enabled() || config.webhookUrl().isBlank()) {
+            return false;
+        }
+        return sendNow(buildText("告警通道测试", "这是一条测试消息，收到说明配置成功。"),
+                config.webhookUrl());
+    }
+
+    private boolean sendNow(String text, String webhookUrl) {
         try {
             String body = objectMapper.writeValueAsString(Map.of(
                     "msg_type", "text",
@@ -88,9 +96,12 @@ public class AlertNotifier {
                     request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 log.warn("alert webhook returned status {}", response.statusCode());
+                return false;
             }
+            return true;
         } catch (Exception ex) {
             log.warn("alert webhook send failed", ex);
+            return false;
         }
     }
 

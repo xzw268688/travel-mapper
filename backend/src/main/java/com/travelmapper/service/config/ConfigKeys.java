@@ -34,6 +34,10 @@ public final class ConfigKeys {
     public static final String MAIL_SMTP_AUTH = "mail.smtp-auth";
     public static final String MAIL_SMTP_STARTTLS = "mail.smtp-starttls";
 
+    public static final String ALERT_ENABLED = "alert.enabled";
+    public static final String ALERT_WEBHOOK_URL = "alert.webhook-url";
+    public static final String ALERT_MIN_INTERVAL_SECONDS = "alert.min-interval-seconds";
+
     public static final String QUOTA_FREE_LIMIT = "quota.free-limit";
     public static final String QUOTA_VIP_DAILY = "quota.vip-daily";
     public static final String QUOTA_PACK_VALID_DAYS = "quota.pack-valid-days";

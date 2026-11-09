@@ -6,12 +6,16 @@ import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.audit.Auditable;
 import com.travelmapper.common.config.AppProperties;
 import com.travelmapper.common.crypto.AesCryptoService;
+import com.travelmapper.common.alert.AlertNotifier;
 import com.travelmapper.common.security.RequestContext;
+import com.travelmapper.controller.admin.dto.AlertConfigDto;
 import com.travelmapper.controller.admin.dto.LlmConfigDto;
 import com.travelmapper.controller.admin.dto.MailConfigDto;
 import com.travelmapper.controller.admin.dto.QuotaConfigDto;
 import com.travelmapper.controller.admin.dto.SearchConfigDto;
 import com.travelmapper.controller.admin.dto.StorageConfigDto;
+import com.travelmapper.service.config.AlertConfig;
+import com.travelmapper.service.config.AlertConfigService;
 import com.travelmapper.service.config.ConfigEntry;
 import com.travelmapper.service.config.ConfigKeys;
 import com.travelmapper.service.config.ConfigReloadService;
@@ -19,6 +23,7 @@ import com.travelmapper.service.config.ConfigService;
 import com.travelmapper.service.search.SearchProviderHolder;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -34,18 +39,27 @@ import java.util.Set;
 @RequestMapping("/api/admin/config")
 public class AdminConfigController {
 
+    private static final Set<String> FEISHU_HOSTS = Set.of(
+            "open.feishu.cn", "open.larksuite.com");
+    private static final String FEISHU_HOOK_PREFIX = "/open-apis/bot/v2/hook/";
+
     private final ConfigService configService;
     private final ConfigReloadService reloadService;
     private final SearchProviderHolder searchProviderHolder;
     private final AppProperties properties;
+    private final AlertConfigService alertConfigService;
+    private final AlertNotifier alertNotifier;
 
     public AdminConfigController(ConfigService configService, ConfigReloadService reloadService,
                                  SearchProviderHolder searchProviderHolder,
-                                 AppProperties properties) {
+                                 AppProperties properties, AlertConfigService alertConfigService,
+                                 AlertNotifier alertNotifier) {
         this.configService = configService;
         this.reloadService = reloadService;
         this.searchProviderHolder = searchProviderHolder;
         this.properties = properties;
+        this.alertConfigService = alertConfigService;
+        this.alertNotifier = alertNotifier;
     }
 
     @GetMapping("/llm")
@@ -230,6 +244,54 @@ public class AdminConfigController {
         return getMail();
     }
 
+    @GetMapping("/alert")
+    public ApiResponse<AlertConfigDto> getAlert() {
+        AlertConfig config = alertConfigService.resolve();
+        AlertConfigDto dto = new AlertConfigDto();
+        dto.setEnabled(config.enabled());
+        dto.setWebhookUrl(AesCryptoService.mask(config.webhookUrl()));
+        dto.setMinIntervalSeconds(config.minIntervalSeconds());
+        return ApiResponse.ok(dto);
+    }
+
+    @PutMapping("/alert")
+    @Auditable(action = "CONFIG_UPDATE", targetType = "CONFIG")
+    public ApiResponse<AlertConfigDto> updateAlert(@RequestBody AlertConfigDto dto) {
+        if (dto.getMinIntervalSeconds() != null
+                && (dto.getMinIntervalSeconds() < 1 || dto.getMinIntervalSeconds() > 3600)) {
+            throw invalid("alert.min-interval-seconds 必须在 1 到 3600 之间");
+        }
+        if (hasText(dto.getWebhookUrl())) {
+            requireFeishuWebhookUrl(dto.getWebhookUrl());
+        }
+        Map<String, ConfigEntry> updates = new LinkedHashMap<>();
+        if (dto.getEnabled() != null) {
+            updates.put(ConfigKeys.ALERT_ENABLED,
+                    ConfigEntry.plain(String.valueOf(dto.getEnabled()), "故障提醒开关"));
+        }
+        putSecret(updates, ConfigKeys.ALERT_WEBHOOK_URL, dto.getWebhookUrl(),
+                "飞书机器人 Webhook（AES）");
+        putNumber(updates, ConfigKeys.ALERT_MIN_INTERVAL_SECONDS, dto.getMinIntervalSeconds(),
+                "同类提醒最小间隔秒");
+        apply(updates);
+        return getAlert();
+    }
+
+    @PostMapping("/alert/test")
+    public ApiResponse<Map<String, Object>> testAlert() {
+        AlertConfig config = alertConfigService.resolve();
+        if (!config.enabled()) {
+            throw invalid("请先启用故障提醒");
+        }
+        if (config.webhookUrl().isBlank()) {
+            throw invalid("请先保存飞书机器人地址");
+        }
+        if (!alertNotifier.sendTest()) {
+            throw invalid("测试消息发送失败，请检查机器人地址或飞书机器人设置");
+        }
+        return ApiResponse.ok(Map.of("sent", true));
+    }
+
     private void apply(Map<String, ConfigEntry> updates) {
         if (updates.isEmpty()) {
             return;
@@ -277,6 +339,22 @@ public class AdminConfigController {
             }
         } catch (IllegalArgumentException ex) {
             throw invalid(field + " 必须是合法 URL");
+        }
+    }
+
+    private void requireFeishuWebhookUrl(String value) {
+        try {
+            URI uri = URI.create(value.trim());
+            String path = uri.getPath();
+            if (!"https".equalsIgnoreCase(uri.getScheme())
+                    || uri.getHost() == null
+                    || !FEISHU_HOSTS.contains(uri.getHost())
+                    || path == null
+                    || !path.startsWith(FEISHU_HOOK_PREFIX)) {
+                throw invalid("Webhook 必须是飞书机器人 HTTPS 地址");
+            }
+        } catch (IllegalArgumentException ex) {
+            throw invalid("Webhook 必须是合法 URL");
         }
     }
 

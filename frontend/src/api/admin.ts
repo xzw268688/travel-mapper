@@ -799,3 +799,27 @@ export function getStorageStats(): Promise<StorageStats> {
 export function getApiDocs(): Promise<Record<string, unknown>> {
   return apiGet<Record<string, unknown>>('/admin/monitor/api-docs')
 }
+
+// ---------- 故障提醒配置 ----------
+
+export interface AlertConfig {
+  enabled: boolean
+  webhookUrl: string
+  minIntervalSeconds: number
+}
+
+export function getAlertConfig(): Promise<AlertConfig> {
+  return apiGet<AlertConfig>('/admin/config/alert')
+}
+
+export function updateAlertConfig(body: {
+  enabled: boolean
+  webhookUrl: string
+  minIntervalSeconds: number
+}): Promise<AlertConfig> {
+  return apiPut<AlertConfig>('/admin/config/alert', body)
+}
+
+export function testAlert(): Promise<{ sent: boolean }> {
+  return apiPost<{ sent: boolean }>('/admin/config/alert/test')
+}

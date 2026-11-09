@@ -3,16 +3,20 @@ import { onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
+  getAlertConfig,
   getLlmConfig,
   getMailConfig,
   getQuotaConfig,
   getSearchConfig,
   getStorageConfig,
+  testAlert as testAlertApi,
+  updateAlertConfig,
   updateLlmConfig,
   updateMailConfig,
   updateQuotaConfig,
   updateSearchConfig,
   updateStorageConfig,
+  type AlertConfig,
   type LlmConfig,
   type MailConfig,
   type QuotaConfig,
@@ -24,7 +28,7 @@ import AdminPageIntro from '../components/AdminPageIntro.vue'
 const route = useRoute()
 const router = useRouter()
 
-const TABS = ['llm', 'search', 'storage', 'mail'] as const
+const TABS = ['llm', 'search', 'storage', 'mail', 'alert'] as const
 type TabName = (typeof TABS)[number]
 
 const activeTab = ref<TabName>(normalizeTab(route.query.tab))
@@ -83,35 +87,46 @@ const mail = reactive<MailConfig>({
   smtpAuth: true,
   starttls: true
 })
+const alert = reactive<AlertConfig>({
+  enabled: true,
+  webhookUrl: '',
+  minIntervalSeconds: 300
+})
 
 const llmMasked = ref('')
 const searchMasked = ref('')
 const storageAccessMasked = ref('')
 const storageSecretMasked = ref('')
 const mailPasswordMasked = ref('')
+const alertMasked = ref('')
 const loading = ref(false)
 const llmSaving = ref(false)
 const searchSaving = ref(false)
 const storageSaving = ref(false)
 const mailSaving = ref(false)
+const alertSaving = ref(false)
+const alertTesting = ref(false)
 
 onMounted(load)
 
 async function load(): Promise<void> {
   loading.value = true
   try {
-    const [llmConfig, quotaConfig, searchConfig, storageConfig, mailConfig] = await Promise.all([
-      getLlmConfig(),
-      getQuotaConfig(),
-      getSearchConfig(),
-      getStorageConfig(),
-      getMailConfig()
-    ])
+    const [llmConfig, quotaConfig, searchConfig, storageConfig, mailConfig, alertConfig] =
+      await Promise.all([
+        getLlmConfig(),
+        getQuotaConfig(),
+        getSearchConfig(),
+        getStorageConfig(),
+        getMailConfig(),
+        getAlertConfig()
+      ])
     applyLlm(llmConfig)
     quota.freeLimit = quotaConfig.freeLimit
     applySearch(searchConfig)
     applyStorage(storageConfig)
     applyMail(mailConfig)
+    applyAlert(alertConfig)
   } catch (error) {
     ElMessage.error((error as Error).message || '加载配置失败')
   } finally {
@@ -162,6 +177,42 @@ function applyMail(config: MailConfig): void {
   mail.starttls = config.starttls
   mail.password = ''
   mailPasswordMasked.value = config.password
+}
+
+function applyAlert(config: AlertConfig): void {
+  alert.enabled = config.enabled
+  alert.minIntervalSeconds = config.minIntervalSeconds
+  alert.webhookUrl = ''
+  alertMasked.value = config.webhookUrl
+}
+
+async function saveAlert(): Promise<void> {
+  alertSaving.value = true
+  try {
+    const body = {
+      enabled: alert.enabled,
+      webhookUrl: alert.webhookUrl.trim(),
+      minIntervalSeconds: alert.minIntervalSeconds
+    }
+    applyAlert(await updateAlertConfig(body))
+    ElMessage.success('故障提醒配置已保存并生效')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '保存故障提醒配置失败')
+  } finally {
+    alertSaving.value = false
+  }
+}
+
+async function testAlert(): Promise<void> {
+  alertTesting.value = true
+  try {
+    await testAlertApi()
+    ElMessage.success('测试消息已发送，请到飞书群确认')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '测试消息发送失败')
+  } finally {
+    alertTesting.value = false
+  }
 }
 
 async function saveLlm(): Promise<void> {
@@ -556,6 +607,37 @@ async function saveMail(): Promise<void> {
               </el-form-item>
               <el-form-item>
                 <el-button type="primary" :loading="mailSaving" @click="saveMail">保存邮件配置</el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="故障提醒" name="alert">
+          <div class="config-pane">
+            <div class="trip-title">故障提醒（飞书机器人）</div>
+            <div class="meta" style="margin-bottom: 12px">
+              接口 5xx、数据库/Redis/对象存储异常时发送飞书提醒。Webhook 留空表示保留原值；仅支持飞书 HTTPS 机器人地址。测试按钮使用已保存的配置，修改后请先保存。
+            </div>
+            <el-form label-width="150px" style="max-width: 720px">
+              <el-form-item label="启用故障提醒">
+                <el-switch v-model="alert.enabled" />
+              </el-form-item>
+              <el-form-item label="机器人 Webhook">
+                <el-input
+                  v-model="alert.webhookUrl"
+                  :placeholder="alertMasked
+                    ? `当前：${alertMasked}，留空不修改`
+                    : 'https://open.feishu.cn/open-apis/bot/v2/hook/...'"
+                />
+              </el-form-item>
+              <el-form-item label="最小间隔（秒）">
+                <el-input-number v-model="alert.minIntervalSeconds" :min="1" :max="3600" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="alertSaving" @click="saveAlert">
+                  保存故障提醒
+                </el-button>
+                <el-button :loading="alertTesting" @click="testAlert">发送测试消息</el-button>
               </el-form-item>
             </el-form>
           </div>

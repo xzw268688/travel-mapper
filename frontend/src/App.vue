@@ -99,6 +99,7 @@ function onUserCommand(command: string): void {
               <el-dropdown-item command="/admin/settings?tab=search">攻略搜索</el-dropdown-item>
               <el-dropdown-item command="/admin/settings?tab=storage">对象存储</el-dropdown-item>
               <el-dropdown-item command="/admin/settings?tab=mail">邮件 SMTP</el-dropdown-item>
+              <el-dropdown-item command="/admin/settings?tab=alert">故障提醒</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>

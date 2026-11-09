@@ -15,16 +15,23 @@
    https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx
    ```
 
-4. 写入服务器上的 `.env`（不要提交到 Git）：
+**推荐：在后台「配置 → 故障提醒」中填写**，保存后立即生效，无需重启：
 
-   ```bash
-   ALERT_ENABLED=true
-   ALERT_WEBHOOK_URL="https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx"
-   ALERT_MIN_INTERVAL_SECONDS=300
-   ALERT_HEALTH_CRON="0 */5 * * * *"
-   ```
+- 机器人 Webhook 使用 AES 加密存储，页面只显示掩码；留空保存表示保留原值。
+- 地址只接受 `https://open.feishu.cn/open-apis/bot/v2/hook/...` 或 `https://open.larksuite.com/open-apis/bot/v2/hook/...`。
+- 「发送测试消息」使用已保存的配置发送一条测试消息。
+- 健康检查 Cron 仍通过 `ALERT_HEALTH_CRON` 配置，修改后需重启。
 
-5. 重启后端。
+也可以继续使用环境变量作为兜底（数据库没有配置时生效，适合首次部署或数据库故障场景）：
+
+```bash
+ALERT_ENABLED=true
+ALERT_WEBHOOK_URL="https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx"
+ALERT_MIN_INTERVAL_SECONDS=300
+ALERT_HEALTH_CRON="0 */5 * * * *"
+```
+
+优先级：数据库配置 > 环境变量。数据库不可用时自动回退到环境变量。
 
 ## 行为说明
 
