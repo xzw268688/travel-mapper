@@ -25,6 +25,11 @@ class ObjectKeyGeneratorTest {
     }
 
     @Test
+    void mapsQuickTimeToMov() {
+        assertThat(generator.generate(1L, "video/quicktime")).endsWith(".mov");
+    }
+
+    @Test
     void rejectsUnsupportedType() {
         assertThatThrownBy(() -> generator.generate(1L, "image/svg+xml"))
                 .isInstanceOf(BusinessException.class)

@@ -234,7 +234,7 @@ async function save(): Promise<void> {
         @error="(message: string) => ElMessage.error(message)"
       />
       <div class="meta" style="margin-top: 8px">
-        图片 {{ images.length }}/20 张（单图 ≤5MB，自动压缩并移除 EXIF）；视频 {{ videos.length }}/3 个（mp4/webm，单个 ≤100MB）。
+        图片 {{ images.length }}/20 张（单图 ≤5MB，自动压缩并移除 EXIF）；视频 {{ videos.length }}/3 个（mp4/webm/mov，单个 ≤100MB；MOV 在部分安卓/Chrome 设备可能无法播放，建议导出 MP4 后分享）。
       </div>
       <el-radio-group v-if="images.length" v-model="cover" class="cover-list">
         <div v-for="(key, index) in images" :key="key" class="cover-item">

@@ -17,6 +17,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.net.URI;
 import java.net.URLDecoder;
@@ -31,6 +33,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class StorageIntegrationTest extends AbstractIntegrationTest {
 
@@ -156,6 +161,22 @@ class StorageIntegrationTest extends AbstractIntegrationTest {
         configureBucket("travelmapper");
         assertThat(storageUrlService.presignUpload(key, "image/jpeg").uploadUrl())
                 .contains("travelmapper");
+    }
+
+    @Test
+    void presignAcceptsQuickTimeVideoAndRejectsUnknownVideo() throws Exception {
+        MvcResult quickTime = mockMvc.perform(asUser(post("/api/upload/presign"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bizType\":\"NOTE_VIDEO\",\"contentType\":\"video/quicktime\",\"size\":1024}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertThat(quickTime.getResponse().getContentAsString()).contains(".mov");
+
+        mockMvc.perform(asUser(post("/api/upload/presign"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bizType\":\"NOTE_VIDEO\",\"contentType\":\"video/x-msvideo\",\"size\":1024}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(2030));
     }
 
     private void configureBucket(String bucket) {

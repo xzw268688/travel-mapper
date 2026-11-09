@@ -206,8 +206,9 @@ function videoCount(): number {
 }
 
 async function insertVideoFile(file: File): Promise<void> {
-  if (!['video/mp4', 'video/webm'].includes(file.type)) {
-    emit('error', '仅支持 mp4 或 webm 视频')
+  const isMov = file.type === 'video/quicktime' || file.name.toLowerCase().endsWith('.mov')
+  if (!isMov && !['video/mp4', 'video/webm'].includes(file.type)) {
+    emit('error', '仅支持 mp4、webm 或 mov 视频')
     return
   }
   if (file.size > 100 * 1024 * 1024) {
@@ -509,7 +510,7 @@ function redo(): void {
       <el-tooltip content="上传图片并插入到光标位置（单张 ≤5MB）" placement="top" :show-after="300">
         <el-button size="small" :loading="uploading" @click="pickImage">插入图片</el-button>
       </el-tooltip>
-      <el-tooltip content="上传视频并插入到光标位置（单个 ≤100MB）" placement="top" :show-after="300">
+      <el-tooltip content="上传视频并插入到光标位置（mp4/webm/mov，单个 ≤100MB；MOV 在部分安卓/Chrome 设备可能无法播放）" placement="top" :show-after="300">
         <el-button size="small" :loading="uploading" @click="pickVideo">插入视频</el-button>
       </el-tooltip>
       <el-tooltip content="撤销上一步编辑，没有可撤销内容时不可用" placement="top" :show-after="300">
@@ -532,7 +533,7 @@ function redo(): void {
       <input
         ref="videoInput"
         type="file"
-        accept="video/mp4,video/webm"
+        accept="video/mp4,video/webm,video/quicktime,.mov"
         style="display: none"
         @change="onVideoFileChange"
       />

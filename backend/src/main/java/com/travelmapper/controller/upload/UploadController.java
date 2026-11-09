@@ -26,7 +26,7 @@ public class UploadController {
     private static final Set<String> IMAGE_TYPES = Set.of(
             "image/jpeg", "image/png", "image/webp");
     private static final Set<String> VIDEO_TYPES = Set.of(
-            "video/mp4", "video/webm");
+            "video/mp4", "video/webm", "video/quicktime");
     private static final long MAX_IMAGE_SIZE = 5L * 1024 * 1024;
     private static final long MAX_VIDEO_SIZE = 100L * 1024 * 1024;
     private static final long IMAGE_TTL_SECONDS = 300;

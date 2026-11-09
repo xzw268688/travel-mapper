@@ -17,7 +17,8 @@ public class ObjectKeyGenerator {
             "image/png", "png",
             "image/webp", "webp",
             "video/mp4", "mp4",
-            "video/webm", "webm");
+            "video/webm", "webm",
+            "video/quicktime", "mov");
 
     public String generate(Long userId, String contentType) {
         String extension = CONTENT_TYPE_EXTENSIONS.get(contentType == null

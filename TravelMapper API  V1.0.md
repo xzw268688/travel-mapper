@@ -1885,7 +1885,7 @@ Idempotency-Key: <uuid>
 | 字段 | 必填 | 校验 |
 |---|---|---|
 | `bizType` | 是 | `NOTE_IMAGE` 或 `NOTE_VIDEO` |
-| `contentType` | 是 | 图片：`image/jpeg`、`image/png`、`image/webp`（**禁止 SVG**）；视频：`video/mp4`、`video/webm` |
+| `contentType` | 是 | 图片：`image/jpeg`、`image/png`、`image/webp`（**禁止 SVG**）；视频：`video/mp4`、`video/webm`、`video/quicktime`（MOV 在部分安卓/Chrome 可能无法播放） |
 | `size` | 是 | 图片 ≤ 5 MB（5242880 字节）；视频 ≤ 100 MB（104857600 字节） |
 
 **响应**

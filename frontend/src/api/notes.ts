@@ -82,9 +82,11 @@ export function presignUpload(
 async function uploadFile(
   file: File,
   bizType: 'NOTE_IMAGE' | 'NOTE_VIDEO',
-  label: string
+  label: string,
+  contentTypeOverride?: string
 ): Promise<string> {
-  const presigned = await presignUpload(bizType, file.type, file.size)
+  const contentType = contentTypeOverride || file.type
+  const presigned = await presignUpload(bizType, contentType, file.size)
   const response = await fetch(presigned.uploadUrl, {
     method: presigned.method || 'PUT',
     headers: presigned.headers,
@@ -101,7 +103,10 @@ export function uploadImage(file: File): Promise<string> {
 }
 
 export function uploadVideo(file: File): Promise<string> {
-  return uploadFile(file, 'NOTE_VIDEO', '视频')
+  // 部分 iOS 文件选择器对 .mov 返回空 MIME，按扩展名补成 video/quicktime。
+  const contentType = file.type
+    || (file.name.toLowerCase().endsWith('.mov') ? 'video/quicktime' : '')
+  return uploadFile(file, 'NOTE_VIDEO', '视频', contentType)
 }
 
 export interface NoteListItem {
