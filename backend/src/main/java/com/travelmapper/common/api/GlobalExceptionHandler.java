@@ -1,5 +1,8 @@
 package com.travelmapper.common.api;
 
+import com.travelmapper.common.alert.AlertNotifier;
+import com.travelmapper.common.security.RequestContext;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -15,16 +18,26 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private final AlertNotifier alertNotifier;
+
+    public GlobalExceptionHandler(AlertNotifier alertNotifier) {
+        this.alertNotifier = alertNotifier;
+    }
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException ex) {
         ErrorCode code = ex.getErrorCode();
         if (code.getHttpStatus() >= 500) {
             log.error("business failure code={} message={}", code.getCode(), ex.getUserMessage(), ex);
+            alert("接口异常", "错误码 " + code.getCode() + "：" + ex.getUserMessage(),
+                    "error:business:" + code.getCode());
         } else {
             log.warn("business failure code={} message={}", code.getCode(), ex.getUserMessage());
         }
@@ -75,6 +88,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicateKeyException.class)
     public ResponseEntity<ApiResponse<Void>> handleDuplicateKey(DuplicateKeyException ex) {
         log.warn("duplicate key", ex);
+        alert("数据库异常", "唯一键冲突", "error:database");
         return ResponseEntity.status(ErrorCode.DATABASE_ERROR.getHttpStatus())
                 .body(ApiResponse.error(ErrorCode.DATABASE_ERROR, "数据已存在"));
     }
@@ -82,6 +96,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException ex) {
         log.warn("data integrity violation", ex);
+        alert("数据库异常", "数据完整性校验失败", "error:database");
         return ResponseEntity.status(ErrorCode.DATABASE_ERROR.getHttpStatus())
                 .body(ApiResponse.error(ErrorCode.DATABASE_ERROR));
     }
@@ -89,7 +104,28 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception ex) {
         log.error("unexpected failure", ex);
+        alert("未捕获异常", ex.getClass().getSimpleName(), "error:unexpected");
         return ResponseEntity.status(ErrorCode.INTERNAL_ERROR.getHttpStatus())
                 .body(ApiResponse.error(ErrorCode.INTERNAL_ERROR));
+    }
+
+    private void alert(String title, String message, String key) {
+        String path = "";
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            HttpServletRequest request = attributes.getRequest();
+            path = request.getRequestURI();
+            if (path.startsWith("/actuator")) {
+                return;
+            }
+        }
+        StringBuilder detail = new StringBuilder(message);
+        if (!path.isBlank()) {
+            detail.append("\n接口：").append(path);
+        }
+        String traceId = RequestContext.traceId();
+        if (traceId != null && !traceId.isBlank()) {
+            detail.append("\ntraceId：").append(traceId);
+        }
+        alertNotifier.notify(key, title, detail.toString());
     }
 }

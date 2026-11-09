@@ -110,3 +110,8 @@ app:
     api-url: ${EXCHANGE_RATE_API_URL:https://api.exchangerate-api.com/v4/latest/CNY}
     connect-timeout-seconds: 3
     read-timeout-seconds: 5
+  alert:
+    enabled: ${ALERT_ENABLED:true}
+    webhook-url: ${ALERT_WEBHOOK_URL:}
+    min-interval-seconds: ${ALERT_MIN_INTERVAL_SECONDS:300}
+    health-cron: "${ALERT_HEALTH_CRON:0 */5 * * * *}"
