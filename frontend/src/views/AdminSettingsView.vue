@@ -349,7 +349,7 @@ async function saveMail(): Promise<void> {
         </div>
       </template>
       <AdminPageIntro title="这个页面是干什么的？">
-        维护 AI 模型、攻略搜索、对象存储和邮件 SMTP 等运行参数。保存后立即热加载，无需重启；
+        维护 AI 模型、攻略搜索、对象存储、邮件 SMTP 与故障提醒等运行参数。保存后立即热加载，无需重启；
         敏感字段留空表示保留原值；所有变更都会写入审计日志。
       </AdminPageIntro>
       <el-tabs v-model="activeTab" @tab-change="onTabChange">
