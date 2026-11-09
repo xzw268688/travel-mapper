@@ -4,6 +4,7 @@ import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.config.AppProperties;
 import com.travelmapper.common.ratelimit.RedisRateLimiter;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -21,6 +22,11 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 邮箱验证码：只存 HMAC 摘要，10 分钟有效，5 次试错，重发覆盖。
@@ -60,6 +66,11 @@ public class EmailCodeService {
     private final AppProperties properties;
     private final SecureRandom random = new SecureRandom();
     private final byte[] hmacKey;
+    private final ExecutorService mailExecutor = Executors.newFixedThreadPool(2, task -> {
+        Thread thread = new Thread(task, "mail-sender");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     @Value("${app.mail.log-verification-codes:false}")
     private boolean logVerificationCodes;
@@ -100,8 +111,17 @@ public class EmailCodeService {
         redis.expire(key, java.time.Duration.ofSeconds(CODE_TTL_SECONDS));
 
         boolean sent = true;
+        Future<?> future = null;
         try {
-            emailSender.send(email, subject(scene), body(scene, code));
+            future = mailExecutor.submit(
+                    () -> emailSender.send(email, subject(scene), body(scene, code)));
+            future.get(10, TimeUnit.SECONDS);
+        } catch (TimeoutException ex) {
+            if (future != null) {
+                future.cancel(true);
+            }
+            log.error("verification email send timed out scene={}", scene);
+            sent = false;
         } catch (Exception ex) {
             log.error("verification email send failed scene={}", scene, ex);
             sent = false;
@@ -112,6 +132,11 @@ public class EmailCodeService {
                     scene, email, code, CODE_TTL_SECONDS);
         }
         return sent;
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        mailExecutor.shutdownNow();
     }
 
     /** 校验并消费验证码；失败或过期统一返回 1004。 */

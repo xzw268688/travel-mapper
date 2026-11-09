@@ -45,7 +45,11 @@ async function requestCode(): Promise<void> {
   }
   sending.value = true
   try {
-    await sendCode(email.value.trim(), 'RESET')
+    const result = await sendCode(email.value.trim(), 'RESET')
+    if (!result.emailSent) {
+      formError.value = '验证码发送失败，请检查邮件配置或稍后重试'
+      return
+    }
     hint.value = '如果该邮箱已注册，验证码将发送到邮箱；开发环境请查看后端服务日志。'
     startCooldown()
   } catch (error) {

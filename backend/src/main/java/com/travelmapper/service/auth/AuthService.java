@@ -124,10 +124,11 @@ public class AuthService {
         } else {
             eligible = user != null && user.getStatus() == UserStatus.NORMAL;
         }
+        boolean sent = true;
         if (eligible) {
-            emailCodeService.issue(email, scene);
+            sent = emailCodeService.issue(email, scene);
         }
-        return new EmailSentResponse(true);
+        return new EmailSentResponse(sent);
     }
 
     public LoginResponse login(LoginRequest request, String clientIp, String userAgent) {

@@ -71,6 +71,13 @@ public class MailSenderHolder implements EmailSender, ReloadableProvider {
         Properties mailProperties = sender.getJavaMailProperties();
         mailProperties.put("mail.smtp.auth", String.valueOf(auth));
         mailProperties.put("mail.smtp.starttls.enable", String.valueOf(starttls));
+        mailProperties.put("mail.smtp.starttls.required", String.valueOf(starttls));
+        // 防止 SMTP 不可达时请求无限等待；10 秒内必须完成连接/读取/写入。
+        mailProperties.put("mail.smtp.connectiontimeout", "10000");
+        mailProperties.put("mail.smtp.timeout", "10000");
+        mailProperties.put("mail.smtp.writetimeout", "10000");
+        // QQ/部分服务商与 JavaMail 默认 TLS 协商不兼容时，固定使用 TLSv1.2。
+        mailProperties.put("mail.smtp.ssl.protocols", "TLSv1.2");
         current = new SmtpEmailSender(sender, from);
         smtpEnabled = true;
         log.info("mail sender reloaded host={} port={} auth={} starttls={}",
