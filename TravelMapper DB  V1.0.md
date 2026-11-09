@@ -1194,7 +1194,7 @@ WHERE s.token = ?;
 | 每日 02:00 | 数据库备份 | 见第 9 章 |
 | 每周日 | 一致性巡检 | 执行 7.6 的 SQL，异常告警 |
 
-> 用 Spring `@Scheduled` 或系统 crontab 均可；单机部署下二者等价。
+> 实现：`RetentionCleanupService`。Cron 可通过 `app.retention.email-token-cron`、`card-expire-cron`、`quota-pack-cron`、`audit-log-cron`、`login-log-cron`、`share-token-cron` 覆盖，默认值与上表一致。每个任务独立调度并捕获异常，单个任务失败不影响其他任务；数据库备份与一致性巡检仍由运维脚本承担，不在应用内实现。
 
 ---
 
