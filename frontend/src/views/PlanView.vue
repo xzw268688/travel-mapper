@@ -11,12 +11,15 @@ import {
   type SpotPlan
 } from '../api/itinerary'
 import {
-  getChecklist,
+  DEFAULT_PREP_ITEMS,
+  batchSaveChecklist,
+  getChecklistTemplate,
   getOfficialLinks,
-  updateChecklist,
   type ChecklistItem,
   type OfficialLinkResponse
 } from '../api/prep'
+import PrepChecklist from '../components/PrepChecklist.vue'
+import SpotEditDrawer, { type SpotForm } from '../components/SpotEditDrawer.vue'
 import type { City, Country } from '../api/types'
 import { useMapStore } from '../stores/map'
 import { newRequestId } from '../utils/uuid'
@@ -33,6 +36,8 @@ const days = ref(3)
 const startDate = ref(new Date(Date.now() + 86_400_000).toISOString().slice(0, 10))
 const preference = ref('')
 const generating = ref(false)
+const generatingSeconds = ref(0)
+let generatingTimer: ReturnType<typeof setInterval> | null = null
 const saving = ref(false)
 const mode = ref<'AI' | 'MANUAL'>('AI')
 const draftMode = ref<'AI' | 'MANUAL'>('AI')
@@ -40,16 +45,23 @@ const draft = ref<GenerateResponse | null>(null)
 const draftTitle = ref('')
 const savedId = ref<number | null>(null)
 const savedStatus = ref('')
-const checklist = ref<ChecklistItem[]>([])
 const officialLinks = ref<OfficialLinkResponse | null>(null)
-const openItineraryId = ref('')
+const prepItems = ref<ChecklistItem[]>([...DEFAULT_PREP_ITEMS])
 
-const spotDialog = reactive({
+const spotDialog = reactive<SpotForm & { visible: boolean; mode: 'add' | 'edit' }>({
   visible: false,
-  mode: 'add' as 'add' | 'edit',
+  mode: 'add',
   name: '',
   description: '',
-  suggestedDuration: ''
+  suggestedDuration: '',
+  category: '',
+  ticketPrice: '',
+  highlights: '',
+  bestTime: '',
+  nearestStation: '',
+  reservationRequired: false,
+  area: '',
+  warningNotes: ''
 })
 const spotTarget = ref<{ day: DayPlan; index: number } | null>(null)
 const moveDialog = reactive({ visible: false, targetIndex: 0 })
@@ -80,10 +92,26 @@ onMounted(async () => {
       country.value = countries.value[0]?.code || ''
     }
     await loadCities()
+    await loadPrepTemplate()
   } catch (error) {
     ElMessage.error((error as Error).message || '加载国家失败')
   }
 })
+
+async function loadPrepTemplate(): Promise<void> {
+  try {
+    const result = await getChecklistTemplate()
+    prepItems.value = result.items
+  } catch {
+    prepItems.value = [...DEFAULT_PREP_ITEMS]
+  }
+}
+
+function resetPrepForNewPlan(): void {
+  if (savedId.value !== null) {
+    prepItems.value = [...DEFAULT_PREP_ITEMS]
+  }
+}
 
 watch(country, async () => {
   cityCodes.value = []
@@ -125,6 +153,7 @@ async function loadDraftCities(countryCode: string): Promise<void> {
 }
 
 async function generate(): Promise<void> {
+  resetPrepForNewPlan()
   if (!country.value || cityCodes.value.length === 0) {
     ElMessage.warning('请选择国家和至少一个城市')
     return
@@ -134,6 +163,10 @@ async function generate(): Promise<void> {
     return
   }
   generating.value = true
+  generatingSeconds.value = 0
+  generatingTimer = setInterval(() => {
+    generatingSeconds.value += 1
+  }, 1000)
   try {
     draftMode.value = 'AI'
     draft.value = await generateItinerary({
@@ -147,7 +180,6 @@ async function generate(): Promise<void> {
     draftTitle.value = `${draft.value.days[0]?.cityName || countryName.value} ${draft.value.days.length} 日`
     await loadDraftCities(draft.value.countryCode)
     savedId.value = null
-    checklist.value = []
     officialLinks.value = null
     savedStatus.value = ''
     ElMessage.success(draft.value.deduplicated ? '已返回 60 秒内相同请求的结果' : '行程已生成')
@@ -155,10 +187,15 @@ async function generate(): Promise<void> {
     ElMessage.error((error as Error).message || '生成失败')
   } finally {
     generating.value = false
+    if (generatingTimer) {
+      clearInterval(generatingTimer)
+      generatingTimer = null
+    }
   }
 }
 
 function createManualDraft(): void {
+  resetPrepForNewPlan()
   if (!country.value) {
     ElMessage.warning('请选择国家')
     return
@@ -201,7 +238,6 @@ function createManualDraft(): void {
   draftTitle.value = `${primaryCityName} ${days.value} 日`
   savedId.value = null
   savedStatus.value = ''
-  checklist.value = []
   officialLinks.value = null
   void loadDraftCities(country.value)
   ElMessage.success('已创建手动行程草稿，请逐天添加景点')
@@ -223,7 +259,6 @@ async function switchMode(next: 'AI' | 'MANUAL'): Promise<void> {
   mode.value = next
   draft.value = null
   draftTitle.value = ''
-  checklist.value = []
   officialLinks.value = null
 }
 
@@ -259,8 +294,13 @@ async function save(): Promise<void> {
     savedId.value = result.itineraryId
     savedStatus.value = result.countryStatusAfter
     mapStore.requestRefresh()
+    try {
+      await batchSaveChecklist(result.itineraryId, prepItems.value)
+    } catch {
+      ElMessage.warning('行程已保存，但行前清单未能保存')
+    }
     ElMessage.success('行程已保存，地图状态已更新')
-    await loadPrep(result.itineraryId, draft.value.countryCode)
+    await loadPrep(draft.value.countryCode)
   } catch (error) {
     ElMessage.error((error as Error).message || '保存失败')
   } finally {
@@ -268,26 +308,11 @@ async function save(): Promise<void> {
   }
 }
 
-async function loadPrep(itineraryId: number, countryCode: string): Promise<void> {
+async function loadPrep(countryCode: string): Promise<void> {
   try {
-    const [checklistResult, links] = await Promise.all([
-      getChecklist(itineraryId),
-      getOfficialLinks(countryCode)
-    ])
-    checklist.value = checklistResult.items
-    officialLinks.value = links
+    officialLinks.value = await getOfficialLinks(countryCode)
   } catch (error) {
-    ElMessage.error((error as Error).message || '加载行前准备失败')
-  }
-}
-
-async function toggleChecklist(item: ChecklistItem): Promise<void> {
-  if (!savedId.value) return
-  try {
-    await updateChecklist(savedId.value, item.itemKey, item.checked)
-  } catch (error) {
-    item.checked = !item.checked
-    ElMessage.error((error as Error).message || '保存清单失败')
+    ElMessage.error((error as Error).message || '加载官方信息失败')
   }
 }
 
@@ -398,9 +423,7 @@ function openAddSpot(day: DayPlan): void {
   }
   spotTarget.value = { day, index: -1 }
   spotDialog.mode = 'add'
-  spotDialog.name = ''
-  spotDialog.description = ''
-  spotDialog.suggestedDuration = ''
+  fillSpotForm()
   spotDialog.visible = true
 }
 
@@ -409,23 +432,43 @@ function openEditSpot(day: DayPlan, index: number): void {
   if (!spot) return
   spotTarget.value = { day, index }
   spotDialog.mode = 'edit'
-  spotDialog.name = spot.name
-  spotDialog.description = spot.description
-  spotDialog.suggestedDuration = spot.suggestedDuration
+  fillSpotForm(spot)
   spotDialog.visible = true
 }
 
-function submitSpot(): void {
+function fillSpotForm(spot?: SpotPlan): void {
+  spotDialog.name = spot?.name ?? ''
+  spotDialog.description = spot?.description ?? ''
+  spotDialog.suggestedDuration = spot?.suggestedDuration ?? ''
+  spotDialog.category = spot?.category ?? ''
+  spotDialog.ticketPrice = spot?.ticketPrice ?? ''
+  spotDialog.highlights = spot?.highlights ?? ''
+  spotDialog.bestTime = spot?.bestTime ?? ''
+  spotDialog.nearestStation = spot?.nearestStation ?? ''
+  spotDialog.reservationRequired = spot?.reservationRequired ?? false
+  spotDialog.area = spot?.area ?? ''
+  spotDialog.warningNotes = spot?.warningNotes ?? ''
+}
+
+function submitSpot(form: SpotForm): void {
   const target = spotTarget.value
   if (!target) return
-  if (!spotDialog.name.trim()) {
+  if (!form.name.trim()) {
     ElMessage.warning('请输入景点名称')
     return
   }
   const payload: SpotPlan = {
-    name: spotDialog.name.trim().slice(0, 50),
-    description: spotDialog.description.trim().slice(0, 200),
-    suggestedDuration: spotDialog.suggestedDuration.trim().slice(0, 20),
+    name: form.name.trim().slice(0, 50),
+    description: form.description.trim().slice(0, 200),
+    suggestedDuration: form.suggestedDuration.trim().slice(0, 20),
+    category: form.category.trim().slice(0, 32),
+    ticketPrice: form.ticketPrice.trim().slice(0, 64),
+    highlights: form.highlights.trim().slice(0, 255),
+    bestTime: form.bestTime.trim().slice(0, 64),
+    nearestStation: form.nearestStation.trim().slice(0, 128),
+    reservationRequired: form.reservationRequired,
+    area: form.area.trim().slice(0, 128),
+    warningNotes: form.warningNotes.trim().slice(0, 255),
     source: spotDialog.mode === 'add' ? 'MANUAL' : target.day.spots[target.index].source
   }
   if (spotDialog.mode === 'add') {
@@ -434,6 +477,12 @@ function submitSpot(): void {
     Object.assign(target.day.spots[target.index], payload)
   }
   spotDialog.visible = false
+}
+
+function spotMeta(spot: SpotPlan): string {
+  const parts = [spot.suggestedDuration, spot.ticketPrice, spot.bestTime, spot.nearestStation]
+    .filter((item) => item && item.trim())
+  return parts.join(' · ')
 }
 
 function removeSpot(day: DayPlan, index: number): void {
@@ -502,15 +551,6 @@ function confirmMoveSpot(): void {
   moveDialog.visible = false
 }
 
-function openSavedItinerary(): void {
-  const id = Number(openItineraryId.value)
-  if (!Number.isInteger(id) || id <= 0) {
-    ElMessage.warning('请输入正确的行程 ID')
-    return
-  }
-  void router.push(`/itineraries/${id}`)
-}
-
 function statusText(status: string): string {
   return status === 'GREEN' ? '已完成（绿色）' : status === 'YELLOW' ? '计划中（黄色）' : '未点亮（灰色）'
 }
@@ -546,6 +586,7 @@ function openSearch(): void {
           :multiple-limit="5"
           placeholder="选择 1-5 个城市"
           filterable
+          no-data-text="该国家暂未配置城市，请联系管理员补充"
           style="min-width: 260px"
         >
           <el-option
@@ -578,19 +619,13 @@ function openSearch(): void {
           生成行程
         </el-button>
         <el-button v-else type="primary" @click="createManualDraft">创建手动行程</el-button>
-        <span v-if="mode === 'AI'" class="meta">
+        <span v-if="mode === 'AI' && generating" class="meta">
+          正在生成，已等待 {{ generatingSeconds }} 秒（通常需要 30–90 秒，请勿关闭页面）
+        </span>
+        <span v-else-if="mode === 'AI'" class="meta">
           生成与润色共享每日免费额度；额度不足会返回 2011。
         </span>
         <span v-else class="meta">手动规划不调用 AI、不消耗额度；创建草稿后逐天添加景点。</span>
-      </div>
-      <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center">
-        <el-input
-          v-model="openItineraryId"
-          placeholder="已有行程 ID"
-          style="width: 180px"
-          @keyup.enter="openSavedItinerary"
-        />
-        <el-button @click="openSavedItinerary">编辑已保存行程</el-button>
       </div>
     </el-card>
 
@@ -621,6 +656,13 @@ function openSearch(): void {
       <div class="meta" style="margin-bottom: 8px">
         草稿微调只在本地生效，点击“保存行程”后统一提交。手动景点上限 30 个，每天最多 10 个。
       </div>
+
+      <PrepChecklist
+        v-model:items="prepItems"
+        :country-name="countryName"
+        style="margin-top: 12px"
+      />
+
       <div v-for="(day, dayIndex) in draft.days" :key="day.dayIndex" class="city-block">
         <div class="city-head" style="flex-wrap: wrap">
           <strong>第 {{ day.dayIndex }} 天</strong>
@@ -634,6 +676,7 @@ function openSearch(): void {
           <el-select
             :model-value="day.cityCode"
             filterable
+            no-data-text="该国家暂未配置城市，请联系管理员补充"
             style="width: 180px"
             @update:model-value="(value: string) => onDayCityChange(day, value)"
           >
@@ -670,9 +713,17 @@ function openSearch(): void {
           <el-tag :type="spot.source === 'MANUAL' ? 'warning' : 'info'" size="small">
             {{ spot.source === 'MANUAL' ? '手动' : 'AI' }}
           </el-tag>
-          <div style="flex: 1">
-            <div>{{ spot.name }}</div>
-            <div class="meta">{{ spot.suggestedDuration }} {{ spot.description }}</div>
+          <div class="spot-row-main">
+            <div class="spot-title-row">
+              <strong>{{ spot.name }}</strong>
+              <el-tag v-if="spot.category" size="small" effect="plain">{{ spot.category }}</el-tag>
+              <el-tag v-if="spot.area" size="small" effect="plain" type="info">{{ spot.area }}</el-tag>
+              <el-tag v-if="spot.reservationRequired" size="small" type="warning">需预约</el-tag>
+            </div>
+            <div v-if="spotMeta(spot)" class="meta">{{ spotMeta(spot) }}</div>
+            <div v-if="spot.description" class="meta">{{ spot.description }}</div>
+            <div v-if="spot.highlights" class="meta">亮点：{{ spot.highlights }}</div>
+            <div v-if="spot.warningNotes" class="meta spot-warning">避雷：{{ spot.warningNotes }}</div>
           </div>
           <el-button text size="small" :disabled="index === 0" @click="moveSpotWithinDay(day, index, -1)">↑</el-button>
           <el-button
@@ -707,7 +758,7 @@ function openSearch(): void {
     </el-alert>
 
     <el-card v-if="draft && hasPreparations" style="margin-top: 16px">
-      <template #header><div class="trip-title">行前准备</div></template>
+      <template #header><div class="trip-title">AI 行前提示</div></template>
       <div class="meta">仅供参考，请以官方最新政策为准。</div>
       <div style="margin-top: 8px">
         <p><strong>签证</strong>：{{ draft.preparations.visa }}</p>
@@ -718,17 +769,19 @@ function openSearch(): void {
       </div>
     </el-card>
 
-    <el-card v-if="checklist.length > 0" style="margin-top: 16px">
-      <template #header><div class="trip-title">行前清单</div></template>
-      <el-checkbox
-        v-for="item in checklist"
-        :key="item.itemKey"
-        v-model="item.checked"
-        style="display: block"
-        @change="toggleChecklist(item)"
+    <el-card v-if="draft && draft.guides?.length" style="margin-top: 16px">
+      <template #header><div class="trip-title">参考攻略</div></template>
+      <div class="meta" style="margin-bottom: 8px">来自攻略搜索，仅供参考。</div>
+      <el-link
+        v-for="link in draft.guides"
+        :key="link.url"
+        :href="link.url"
+        target="_blank"
+        rel="noopener"
+        style="display: block; margin-top: 6px"
       >
-        {{ item.label }}
-      </el-checkbox>
+        {{ link.title }}
+      </el-link>
     </el-card>
 
     <el-card v-if="officialLinks" style="margin-top: 16px">
@@ -753,23 +806,13 @@ function openSearch(): void {
       </template>
     </el-card>
 
-    <el-dialog v-model="spotDialog.visible" :title="spotDialog.mode === 'add' ? '添加手动景点' : '编辑景点'" width="480px">
-      <el-form label-width="80px">
-        <el-form-item label="名称" required>
-          <el-input v-model="spotDialog.name" maxlength="50" show-word-limit />
-        </el-form-item>
-        <el-form-item label="建议时长">
-          <el-input v-model="spotDialog.suggestedDuration" maxlength="20" placeholder="如 2 小时" />
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="spotDialog.description" type="textarea" :rows="3" maxlength="200" show-word-limit />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="spotDialog.visible = false">取消</el-button>
-        <el-button type="primary" @click="submitSpot">确定</el-button>
-      </template>
-    </el-dialog>
+    <SpotEditDrawer
+      :visible="spotDialog.visible"
+      :title="spotDialog.mode === 'add' ? '添加手动景点' : '编辑景点'"
+      :initial="spotDialog"
+      @update:visible="spotDialog.visible = $event"
+      @submit="submitSpot"
+    />
 
     <el-dialog v-model="moveDialog.visible" title="移动景点到某天" width="420px">
 
@@ -790,6 +833,17 @@ function openSearch(): void {
 </template>
 
 <style scoped>
+.spot-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.spot-warning {
+  color: #b45309;
+}
+
 .draggable-row {
   cursor: grab;
 }

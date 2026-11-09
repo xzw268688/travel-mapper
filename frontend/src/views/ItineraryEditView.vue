@@ -19,7 +19,14 @@ import {
   type ItineraryDetail,
   type SpotView
 } from '../api/itinerary'
+import {
+  batchSaveChecklist,
+  getChecklist,
+  type ChecklistItem
+} from '../api/prep'
 import type { City } from '../api/types'
+import PrepChecklist from '../components/PrepChecklist.vue'
+import SpotEditDrawer, { type SpotForm } from '../components/SpotEditDrawer.vue'
 import { useMapStore } from '../stores/map'
 import { newRequestId } from '../utils/uuid'
 
@@ -41,15 +48,30 @@ const title = ref('')
 const startDate = ref('')
 const endDate = ref('')
 const messages = ref<string[]>([])
+const prepItems = ref<ChecklistItem[]>([])
+const prepLoading = ref(false)
 
-const spotDialog = reactive({
+const spotDialog = reactive<SpotForm & {
+  visible: boolean
+  mode: 'add' | 'edit'
+  dayId: number
+  spotId: number
+}>({
   visible: false,
-  mode: 'add' as 'add' | 'edit',
+  mode: 'add',
   dayId: 0,
   spotId: 0,
   name: '',
   description: '',
-  suggestedDuration: ''
+  suggestedDuration: '',
+  category: '',
+  ticketPrice: '',
+  highlights: '',
+  bestTime: '',
+  nearestStation: '',
+  reservationRequired: false,
+  area: '',
+  warningNotes: ''
 })
 
 const moveDialog = reactive({ visible: false, spotId: 0, targetDayId: 0 })
@@ -68,6 +90,31 @@ const regen = reactive({ keepManualSpots: true, preference: '', running: false }
 
 watch(itineraryId, () => void load(), { immediate: true })
 
+async function loadPrep(): Promise<void> {
+  if (!itineraryId.value) return
+  prepLoading.value = true
+  try {
+    const result = await getChecklist(itineraryId.value)
+    prepItems.value = result.items
+  } catch {
+    prepItems.value = []
+  } finally {
+    prepLoading.value = false
+  }
+}
+
+async function persistPrep(items: ChecklistItem[]): Promise<void> {
+  prepItems.value = items
+  if (!itineraryId.value) return
+  try {
+    const result = await batchSaveChecklist(itineraryId.value, items)
+    prepItems.value = result.items
+  } catch (err) {
+    ElMessage.error((err as Error).message || '保存行前清单失败')
+    await loadPrep()
+  }
+}
+
 async function load(): Promise<void> {
   if (!itineraryId.value) return
   loading.value = true
@@ -75,6 +122,7 @@ async function load(): Promise<void> {
   try {
     const data = await getItinerary(itineraryId.value)
     applyDetail(data)
+    await loadPrep()
     try {
       cities.value = await getCities(data.countryCode)
     } catch {
@@ -138,9 +186,7 @@ function openAddSpot(day: DayView): void {
   spotDialog.mode = 'add'
   spotDialog.dayId = day.dayId
   spotDialog.spotId = 0
-  spotDialog.name = ''
-  spotDialog.description = ''
-  spotDialog.suggestedDuration = ''
+  fillSpotForm()
   spotDialog.visible = true
 }
 
@@ -148,15 +194,40 @@ function openEditSpot(spot: SpotView): void {
   spotDialog.mode = 'edit'
   spotDialog.spotId = spot.spotId
   spotDialog.dayId = 0
-  spotDialog.name = spot.name
-  spotDialog.description = spot.description
-  spotDialog.suggestedDuration = spot.suggestedDuration
+  fillSpotForm(spot)
   spotDialog.visible = true
 }
 
-async function submitSpot(): Promise<void> {
+function fillSpotForm(spot?: SpotView): void {
+  spotDialog.name = spot?.name ?? ''
+  spotDialog.description = spot?.description ?? ''
+  spotDialog.suggestedDuration = spot?.suggestedDuration ?? ''
+  spotDialog.category = spot?.category ?? ''
+  spotDialog.ticketPrice = spot?.ticketPrice ?? ''
+  spotDialog.highlights = spot?.highlights ?? ''
+  spotDialog.bestTime = spot?.bestTime ?? ''
+  spotDialog.nearestStation = spot?.nearestStation ?? ''
+  spotDialog.reservationRequired = spot?.reservationRequired ?? false
+  spotDialog.area = spot?.area ?? ''
+  spotDialog.warningNotes = spot?.warningNotes ?? ''
+}
+
+function spotExtendedPayload(form: SpotForm) {
+  return {
+    category: form.category.trim().slice(0, 32),
+    ticketPrice: form.ticketPrice.trim().slice(0, 64),
+    highlights: form.highlights.trim().slice(0, 255),
+    bestTime: form.bestTime.trim().slice(0, 64),
+    nearestStation: form.nearestStation.trim().slice(0, 128),
+    reservationRequired: form.reservationRequired,
+    area: form.area.trim().slice(0, 128),
+    warningNotes: form.warningNotes.trim().slice(0, 255)
+  }
+}
+
+async function submitSpot(form: SpotForm): Promise<void> {
   if (!itineraryId.value) return
-  if (!spotDialog.name.trim()) {
+  if (!form.name.trim()) {
     ElMessage.warning('请输入景点名称')
     return
   }
@@ -164,15 +235,17 @@ async function submitSpot(): Promise<void> {
   try {
     if (spotDialog.mode === 'add') {
       await addSpot(itineraryId.value, spotDialog.dayId, {
-        name: spotDialog.name.trim(),
-        description: spotDialog.description.trim(),
-        suggestedDuration: spotDialog.suggestedDuration.trim()
+        name: form.name.trim(),
+        description: form.description.trim(),
+        suggestedDuration: form.suggestedDuration.trim(),
+        ...spotExtendedPayload(form)
       })
     } else {
       await updateSpot(spotDialog.spotId, {
-        name: spotDialog.name.trim(),
-        description: spotDialog.description.trim(),
-        suggestedDuration: spotDialog.suggestedDuration.trim()
+        name: form.name.trim(),
+        description: form.description.trim(),
+        suggestedDuration: form.suggestedDuration.trim(),
+        ...spotExtendedPayload(form)
       })
     }
     spotDialog.visible = false
@@ -183,6 +256,12 @@ async function submitSpot(): Promise<void> {
   } finally {
     busy.value = false
   }
+}
+
+function spotMeta(spot: SpotView): string {
+  const parts = [spot.suggestedDuration, spot.ticketPrice, spot.bestTime, spot.nearestStation]
+    .filter((item) => item && item.trim())
+  return parts.join(' · ')
 }
 
 async function removeSpot(spot: SpotView): Promise<void> {
@@ -398,7 +477,11 @@ async function removeItinerary(): Promise<void> {
   try {
     const result = await deleteItinerary(itineraryId.value)
     mapStore.requestRefresh()
-    ElMessage.success(`行程已删除，地图状态 ${result.countryStatusAfter}`)
+    ElMessage.success(
+      result.tripDeleted
+        ? '行程已删除，旅行已无内容并自动清理'
+        : `行程已删除，地图状态 ${result.countryStatusAfter}`
+    )
     await router.push('/')
   } catch (err) {
     ElMessage.error((err as Error).message || '删除失败')
@@ -443,6 +526,29 @@ function statusText(status: string): string {
         </div>
       </el-card>
 
+      <div v-loading="prepLoading" style="margin-top: 16px">
+        <PrepChecklist
+          v-model:items="prepItems"
+          :country-name="detail.countryName"
+          @change="persistPrep"
+        />
+      </div>
+
+      <el-card v-if="detail.guides?.length" style="margin-top: 16px">
+        <template #header><div class="trip-title">参考攻略</div></template>
+        <div class="meta" style="margin-bottom: 8px">来自攻略搜索，仅供参考。</div>
+        <el-link
+          v-for="link in detail.guides"
+          :key="link.url"
+          :href="link.url"
+          target="_blank"
+          rel="noopener"
+          style="display: block; margin-top: 6px"
+        >
+          {{ link.title }}
+        </el-link>
+      </el-card>
+
       <el-card style="margin-top: 16px">
         <template #header>
           <div style="display: flex; align-items: center; gap: 12px">
@@ -474,9 +580,17 @@ function statusText(status: string): string {
             <el-tag :type="spot.source === 'MANUAL' ? 'warning' : 'info'" size="small">
               {{ spot.source === 'MANUAL' ? '手动' : 'AI' }}
             </el-tag>
-            <div style="flex: 1">
-              <div>{{ spot.name }}</div>
-              <div class="meta">{{ spot.suggestedDuration }} {{ spot.description }}</div>
+            <div class="spot-row-main">
+              <div class="spot-title-row">
+                <strong>{{ spot.name }}</strong>
+                <el-tag v-if="spot.category" size="small" effect="plain">{{ spot.category }}</el-tag>
+                <el-tag v-if="spot.area" size="small" effect="plain" type="info">{{ spot.area }}</el-tag>
+                <el-tag v-if="spot.reservationRequired" size="small" type="warning">需预约</el-tag>
+              </div>
+              <div v-if="spotMeta(spot)" class="meta">{{ spotMeta(spot) }}</div>
+              <div v-if="spot.description" class="meta">{{ spot.description }}</div>
+              <div v-if="spot.highlights" class="meta">亮点：{{ spot.highlights }}</div>
+              <div v-if="spot.warningNotes" class="meta spot-warning">避雷：{{ spot.warningNotes }}</div>
             </div>
             <el-button text size="small" :disabled="index === 0" @click="moveWithinDay(day, index, -1)">↑</el-button>
             <el-button
@@ -520,27 +634,13 @@ function statusText(status: string): string {
       </el-card>
     </template>
 
-    <el-dialog
-      v-model="spotDialog.visible"
+    <SpotEditDrawer
+      :visible="spotDialog.visible"
       :title="spotDialog.mode === 'add' ? '添加景点' : '编辑景点'"
-      width="480px"
-    >
-      <el-form label-width="80px">
-        <el-form-item label="名称" required>
-          <el-input v-model="spotDialog.name" maxlength="50" show-word-limit />
-        </el-form-item>
-        <el-form-item label="建议时长">
-          <el-input v-model="spotDialog.suggestedDuration" maxlength="20" />
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="spotDialog.description" type="textarea" :rows="3" maxlength="200" show-word-limit />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="spotDialog.visible = false">取消</el-button>
-        <el-button type="primary" :loading="busy" @click="submitSpot">确定</el-button>
-      </template>
-    </el-dialog>
+      :initial="spotDialog"
+      @update:visible="spotDialog.visible = $event"
+      @submit="submitSpot"
+    />
 
     <el-dialog v-model="moveDialog.visible" title="移动景点到某天" width="420px">
       <el-select v-model="moveDialog.targetDayId" style="width: 100%">
@@ -586,6 +686,17 @@ function statusText(status: string): string {
 </template>
 
 <style scoped>
+.spot-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.spot-warning {
+  color: #b45309;
+}
+
 .draggable-row {
   cursor: grab;
 }

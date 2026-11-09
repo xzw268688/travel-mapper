@@ -20,6 +20,9 @@ class PromptBuilderTest {
                 "5", "2025-06-01", "喜欢美食", "dayIndex");
         assertThat(prompt).contains("不要 Markdown");
         assertThat(prompt).doesNotContain("\"preparations\"");
+        assertThat(prompt).contains("category", "ticketPrice", "highlights", "bestTime",
+                "nearestStation", "reservationRequired", "area", "warningNotes");
+        assertThat(prompt).contains("原币");
     }
 
     @Test

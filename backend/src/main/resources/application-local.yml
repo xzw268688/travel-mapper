@@ -1,6 +1,9 @@
 app:
   security:
     admin-stub-enabled: true
+    allow-insecure-dev-stub: true
+  mail:
+    log-verification-codes: true
 logging:
   level:
     com.travelmapper: DEBUG

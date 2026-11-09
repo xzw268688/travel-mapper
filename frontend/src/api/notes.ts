@@ -36,6 +36,8 @@ export interface NoteResponse {
   visibility: string
   share: { active: boolean; token: string | null; url: string | null; expireAt: string | null }
   takedown: boolean
+  takedownReason: string | null
+  takedownAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -102,6 +104,38 @@ export function uploadVideo(file: File): Promise<string> {
   return uploadFile(file, 'NOTE_VIDEO', '视频')
 }
 
+export interface NoteListItem {
+  id: number
+  title: string
+  summary: string
+  coverImageUrl: string | null
+  countryCode: string
+  countryName: string
+  cityCode: string
+  cityName: string
+  visibility: string
+  takenDown: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface NoteListResult {
+  total: number
+  page: number
+  size: number
+  list: NoteListItem[]
+}
+
+export function listNotes(params: {
+  keyword?: string
+  from?: string
+  to?: string
+  page?: number
+  size?: number
+}): Promise<NoteListResult> {
+  return apiGet<NoteListResult>('/notes', params)
+}
+
 export function createNote(body: NoteCreate): Promise<{ id: number; tripId: number | null; tripInherited: boolean; countryStatusAfter: string }> {
   return apiPost('/notes', body)
 }
@@ -114,7 +148,12 @@ export function updateNote(id: number, body: Record<string, unknown>): Promise<N
   return apiPut<NoteResponse>(`/notes/${id}`, body)
 }
 
-export function deleteNote(id: number): Promise<any> {
+export function deleteNote(id: number): Promise<{
+  noteId: number
+  countryStatusAfter: string
+  sharesRevoked: number
+  tripDeleted: boolean
+}> {
   return apiDelete(`/notes/${id}`)
 }
 

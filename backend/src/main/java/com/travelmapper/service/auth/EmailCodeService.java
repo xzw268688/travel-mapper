@@ -5,6 +5,7 @@ import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.config.AppProperties;
 import com.travelmapper.common.ratelimit.RedisRateLimiter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -60,6 +61,9 @@ public class EmailCodeService {
     private final SecureRandom random = new SecureRandom();
     private final byte[] hmacKey;
 
+    @Value("${app.mail.log-verification-codes:false}")
+    private boolean logVerificationCodes;
+
     public EmailCodeService(StringRedisTemplate redis, RedisRateLimiter rateLimiter,
                             EmailSender emailSender, MailSenderHolder mailSenderHolder,
                             AppProperties properties) {
@@ -102,8 +106,8 @@ public class EmailCodeService {
             log.error("verification email send failed scene={}", scene, ex);
             sent = false;
         }
-        if (!mailSenderHolder.isSmtpEnabled()) {
-            // 开发环境没有 SMTP：额外打印验证码便于本地调试；生产配置绝不打印。
+        if (!mailSenderHolder.isSmtpEnabled() && logVerificationCodes) {
+            // 仅本地开发显式开启；生产环境必须保持 false。
             log.info("[auth-dev] scene={} email={} code={} expiresIn={}s",
                     scene, email, code, CODE_TTL_SECONDS);
         }

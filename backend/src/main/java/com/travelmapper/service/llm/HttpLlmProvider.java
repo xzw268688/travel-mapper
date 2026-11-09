@@ -6,6 +6,7 @@ import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.service.config.ConfigKeys;
 import com.travelmapper.service.config.ConfigService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
@@ -26,6 +27,7 @@ import java.util.stream.Stream;
  * OpenAI-compatible chat-completions adapter. Kept behind LlmProvider so a
  * LangChain4j implementation can replace it without touching business code.
  */
+@Slf4j
 public class HttpLlmProvider implements LlmProvider {
 
     private final ConfigService configService;
@@ -53,6 +55,7 @@ public class HttpLlmProvider implements LlmProvider {
         if (apiKey == null || apiKey.isBlank()) {
             throw new BusinessException(ErrorCode.AI_UNAVAILABLE, "LLM API Key 未配置");
         }
+        long startedAt = System.currentTimeMillis();
         try {
             SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
             factory.setConnectTimeout(Duration.ofSeconds(3));
@@ -61,13 +64,19 @@ public class HttpLlmProvider implements LlmProvider {
                     .baseUrl(stripTrailingSlash(baseUrl))
                     .requestFactory(factory)
                     .build();
+            String prompt = promptBuilder.buildItineraryPrompt(request);
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("model", model);
-            body.put("messages", List.of(Map.of("role", "user",
-                    "content", promptBuilder.buildItineraryPrompt(request))));
+            body.put("messages", List.of(Map.of("role", "user", "content", prompt)));
             // 不显式设置 temperature：部分供应商（如火山方舟的 Kimi）只接受固定值，
             // 省略后由供应商使用各自默认值。
             body.put("response_format", Map.of("type", "json_object"));
+            // 火山方舟的深度思考模型默认可能开启思考，行程生成这种结构化输出
+            // 不需要长推理，关闭后延迟明显下降。其他供应商不发送该字段。
+            if ("volcengine".equalsIgnoreCase(configService.get(ConfigKeys.LLM_PROVIDER, ""))
+                    && model.toLowerCase().startsWith("doubao")) {
+                body.put("thinking", Map.of("type", "disabled"));
+            }
             String raw = client.post()
                     .uri("/chat/completions")
                     .header("Authorization", "Bearer " + apiKey)
@@ -80,12 +89,33 @@ public class HttpLlmProvider implements LlmProvider {
             if (content == null || content.isBlank()) {
                 throw new BusinessException(ErrorCode.AI_UNAVAILABLE);
             }
+            log.info("LLM itinerary call ok model={} elapsed={}ms promptChars={} responseChars={}",
+                    model, System.currentTimeMillis() - startedAt, prompt.length(), content.length());
             return content;
         } catch (BusinessException ex) {
+            log.warn("LLM itinerary call failed model={} elapsed={}ms: {}",
+                    model, System.currentTimeMillis() - startedAt, ex.getUserMessage());
             throw ex;
         } catch (Exception ex) {
+            if (isTimeout(ex)) {
+                log.warn("LLM itinerary call timed out model={} elapsed={}ms",
+                        model, System.currentTimeMillis() - startedAt);
+                throw new LlmTimeoutException();
+            }
+            log.warn("LLM itinerary call failed model={} elapsed={}ms: {}",
+                    model, System.currentTimeMillis() - startedAt, ex.toString());
             throw new BusinessException(ErrorCode.AI_UNAVAILABLE, "LLM 调用失败");
         }
+    }
+
+    private static boolean isTimeout(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.net.SocketTimeoutException
+                    || cause instanceof java.net.http.HttpTimeoutException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

@@ -7,6 +7,7 @@ import com.travelmapper.controller.trip.dto.TripDetailView;
 import com.travelmapper.controller.trip.dto.TripRenameRequest;
 import com.travelmapper.controller.trip.dto.TripRenameResponse;
 import com.travelmapper.controller.trip.dto.TripStatusRequest;
+import com.travelmapper.controller.trip.dto.TripStatusResponse;
 import com.travelmapper.controller.trip.dto.TripTimelineView;
 import com.travelmapper.controller.trip.dto.TripView;
 import com.travelmapper.service.trip.TripService;
@@ -45,9 +46,14 @@ public class TripController {
     }
 
     @PutMapping("/{id}/status")
-    public ApiResponse<TripRenameResponse> updateStatus(
+    public ApiResponse<TripStatusResponse> updateStatus(
             @PathVariable Long id, @Valid @RequestBody TripStatusRequest request) {
         return ApiResponse.ok(tripService.updateStatus(CurrentUser.id(), id, request.getStatus()));
+    }
+
+    @DeleteMapping("/{id}/status")
+    public ApiResponse<TripStatusResponse> resetStatus(@PathVariable Long id) {
+        return ApiResponse.ok(tripService.resetStatus(CurrentUser.id(), id));
     }
 
     @GetMapping("/{id}")

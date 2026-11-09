@@ -13,6 +13,7 @@ const emit = defineEmits<{
 const countries = ref<Country[]>([])
 const cities = ref<City[]>([])
 const loading = ref(false)
+let loadToken = 0
 
 onMounted(async () => {
   try {
@@ -25,16 +26,31 @@ onMounted(async () => {
 watch(
   () => props.country,
   async (code) => {
-    emit('update:city', '')
+    const token = ++loadToken
     cities.value = []
-    if (!code) return
+    if (!code) {
+      emit('update:city', '')
+      return
+    }
     loading.value = true
     try {
-      cities.value = await getCities(code)
+      const list = await getCities(code)
+      if (token !== loadToken) {
+        return
+      }
+      cities.value = list
+      // 仅当当前城市不属于新国家时才清空，避免编辑表单回填时误清城市。
+      if (props.city && !list.some((item) => item.cityCode === props.city)) {
+        emit('update:city', '')
+      }
     } catch (error) {
-      ElMessage.error((error as Error).message || '加载城市失败')
+      if (token === loadToken) {
+        ElMessage.error((error as Error).message || '加载城市失败')
+      }
     } finally {
-      loading.value = false
+      if (token === loadToken) {
+        loading.value = false
+      }
     }
   },
   { immediate: true }

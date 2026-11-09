@@ -69,7 +69,9 @@ export interface ExpenseDateGrouped {
 
 export interface ExpenseFilters {
   countryCode?: string
+  cityCode?: string
   tripId?: number
+  category?: string
   from?: string
   to?: string
 }
@@ -86,7 +88,7 @@ export function updateExpense(id: number, body: Record<string, unknown>): Promis
   return apiPut(`/expenses/${id}`, body)
 }
 
-export function deleteExpense(id: number): Promise<unknown> {
+export function deleteExpense(id: number): Promise<{ id: number; tripDeleted: boolean }> {
   return apiDelete(`/expenses/${id}`)
 }
 

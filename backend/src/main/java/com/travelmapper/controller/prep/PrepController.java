@@ -8,7 +8,10 @@ import com.travelmapper.service.prep.ChecklistService;
 import com.travelmapper.service.prep.OfficialLinkService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -28,6 +31,11 @@ public class PrepController {
         this.officialLinkService = officialLinkService;
     }
 
+    @GetMapping("/checklist/template")
+    public ApiResponse<ChecklistDtos.ChecklistResponse> template() {
+        return ApiResponse.ok(checklistService.template());
+    }
+
     @GetMapping("/checklist")
     public ApiResponse<ChecklistDtos.ChecklistResponse> checklist(@RequestParam Long itineraryId) {
         return ApiResponse.ok(checklistService.get(CurrentUser.id(), itineraryId));
@@ -37,6 +45,23 @@ public class PrepController {
     public ApiResponse<ChecklistDtos.UpdateResponse> updateChecklist(
             @Valid @RequestBody ChecklistDtos.UpdateRequest request) {
         return ApiResponse.ok(checklistService.upsert(CurrentUser.id(), request));
+    }
+
+    @PostMapping("/checklist/items")
+    public ApiResponse<ChecklistDtos.Item> addItem(
+            @Valid @RequestBody ChecklistDtos.AddItemRequest request) {
+        return ApiResponse.ok(checklistService.addCustom(CurrentUser.id(), request));
+    }
+
+    @DeleteMapping("/checklist/items/{itemId}")
+    public ApiResponse<ChecklistDtos.DeleteResponse> deleteItem(@PathVariable Long itemId) {
+        return ApiResponse.ok(checklistService.deleteCustom(CurrentUser.id(), itemId));
+    }
+
+    @PutMapping("/checklist/batch")
+    public ApiResponse<ChecklistDtos.ChecklistResponse> batch(
+            @Valid @RequestBody ChecklistDtos.BatchRequest request) {
+        return ApiResponse.ok(checklistService.batchSave(CurrentUser.id(), request));
     }
 
     @GetMapping("/official-links")

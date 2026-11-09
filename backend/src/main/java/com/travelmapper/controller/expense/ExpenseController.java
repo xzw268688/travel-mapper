@@ -73,11 +73,13 @@ public class ExpenseController {
     public ApiResponse<ExpenseDtos.SummaryResponse> summary(
             @RequestParam(required = false) String groupBy,
             @RequestParam(required = false) String countryCode,
+            @RequestParam(required = false) String cityCode,
             @RequestParam(required = false) Long tripId,
+            @RequestParam(required = false) String category,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return ApiResponse.ok(expenseService.summary(CurrentUser.id(), groupBy, countryCode,
-                tripId, from, to));
+                cityCode, tripId, category, from, to));
     }
 
     @PutMapping("/{id}")

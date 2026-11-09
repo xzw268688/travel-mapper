@@ -16,13 +16,15 @@ public class PromptBuilder {
                 偏好：%s
 
                 JSON Schema：
-                {"countryCode":"%s","days":[{"dayIndex":1,"cityCode":"%s","spots":[{"name":"景点名","description":"简述","suggestedDuration":"2小时"}]}]}
+                {"countryCode":"%s","days":[{"dayIndex":1,"cityCode":"%s","spots":[{"name":"景点名","description":"简述","suggestedDuration":"2小时","category":"类别","ticketPrice":"门票","highlights":"亮点","bestTime":"最佳时段","nearestStation":"最近车站","reservationRequired":false,"area":"区域","warningNotes":"避雷备注"}]}]}
 
                 要求：
                 1. days 数组长度必须等于 %d，dayIndex 从 1 连续递增。
                 2. 每天 cityCode 必须来自可选城市集合；多城市时按天分配，尽量连续。
                 3. 每天 1-6 个景点，name 必填；description 和 suggestedDuration 可为空字符串。
-                4. 不要输出 guides、preparations 或其他额外字段；攻略链接与行前须知由其他接口提供。
+                4. 每个景点必须输出 category（类别）、ticketPrice（门票）、highlights（亮点）、bestTime（最佳时段）、nearestStation（最近车站）、reservationRequired（是否需预约，布尔值）、area（区域）、warningNotes（避雷备注）。
+                5. ticketPrice 使用目的地原币文本（如“约 2000 円”“免费”），不要换算成人民币；不确定的字段输出空字符串，不要编造。
+                6. 不要输出 guides、preparations 或其他额外字段；攻略链接与行前须知由其他接口提供。
                 """.formatted(
                 request.countryName(), request.countryCode(),
                 cities.isBlank() ? request.cityCodes().get(0) : cities,

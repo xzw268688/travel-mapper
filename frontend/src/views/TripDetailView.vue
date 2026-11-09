@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getTripDetail, updateTripStatus, type TripDetail } from '../api/trips'
+import { getTripDetail, resetTripStatus, updateTripStatus, type TripDetail } from '../api/trips'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,16 +51,56 @@ function formatDate(value: string | null): string {
   return value ? value.slice(0, 10) : '—'
 }
 
+const stats = computed(() => {
+  if (!trip.value) return []
+  const summary = trip.value.summary
+  return [
+    { label: '行程', value: String(summary.itineraryCount) },
+    { label: '游记', value: String(summary.noteCount) },
+    { label: '消费笔数', value: String(summary.expenseCount) },
+    { label: '合计花费', value: `¥${summary.expenseCny}` }
+  ]
+})
+
+const dateRange = computed(() => {
+  if (!trip.value) return ''
+  const start = trip.value.effectiveStartDate
+  const end = trip.value.effectiveEndDate
+  if (!start && !end) return ''
+  if (start && end) return `${start} ~ ${end}`
+  return start || end || ''
+})
+
+const statusText = computed(() => {
+  const status = trip.value?.effectiveStatus
+  return status === 'COMPLETED' ? '已完成' : status === 'IN_PROGRESS' ? '进行中' : '计划中'
+})
+
+const statusTagType = computed<'success' | 'primary' | 'warning'>(() => {
+  const status = trip.value?.effectiveStatus
+  return status === 'COMPLETED' ? 'success' : status === 'IN_PROGRESS' ? 'primary' : 'warning'
+})
+
 async function toggleStatus(): Promise<void> {
   if (!trip.value) return
   try {
     await updateTripStatus(
       trip.value.id,
-      trip.value.status === 'COMPLETED' ? 'PLANNED' : 'COMPLETED'
+      trip.value.effectiveStatus === 'COMPLETED' ? 'PLANNED' : 'COMPLETED'
     )
     await load()
   } catch (err) {
-    ElMessage.error((err as Error).message || '更新归档状态失败')
+    ElMessage.error((err as Error).message || '更新旅行状态失败')
+  }
+}
+
+async function resetStatus(): Promise<void> {
+  if (!trip.value) return
+  try {
+    await resetTripStatus(trip.value.id)
+    await load()
+  } catch (err) {
+    ElMessage.error((err as Error).message || '恢复自动状态失败')
   }
 }
 
@@ -92,40 +132,52 @@ function addItinerary(): void {
             <div>
               <div class="trip-title">
                 {{ trip.name }}
-                <el-tag :type="trip.status === 'COMPLETED' ? 'success' : 'warning'" size="small">
-                  {{ trip.status === 'COMPLETED' ? '已完成' : '计划中' }}
+                <el-tag :type="statusTagType" size="small">{{ statusText }}</el-tag>
+                <el-tooltip
+                  v-if="trip.statusManual"
+                  content="这个状态是你自己改的。<br/>之后添加游记、消费或日期变化，系统都不会自动改变它。"
+                  raw-content
+                  popper-class="tm-tooltip"
+                  placement="top"
+                  :show-after="100"
+                >
+                  <el-tag type="info" size="small" effect="plain">手动标记</el-tag>
+                </el-tooltip>
+                <el-tag v-if="trip.expired" type="warning" size="small" effect="plain">
+                  已过期
                 </el-tag>
               </div>
               <div class="meta">
-                {{ trip.countryName }} · {{ formatDate(trip.startDate) }} ~ {{ formatDate(trip.endDate) }}
+                {{ trip.countryName }}<template v-if="dateRange"> · {{ dateRange }}</template>
+              </div>
+              <div v-if="trip.statusManual" class="meta">
+                你手动设置了这个状态，系统不会自动改变它。
               </div>
             </div>
             <div class="trip-hub-actions">
               <el-button size="small" @click="toggleStatus">
-                {{ trip.status === 'COMPLETED' ? '改回计划中' : '标记完成' }}
+                {{ trip.effectiveStatus === 'COMPLETED' ? '改回计划中' : '标记完成' }}
               </el-button>
+              <el-tooltip
+                v-if="trip.statusManual"
+                content="让系统重新判断：<br/>旅行结束后有游记或消费 → 已完成；旅行中 → 进行中；否则 → 计划中。"
+                raw-content
+                popper-class="tm-tooltip"
+                placement="top"
+                :show-after="100"
+              >
+                <el-button size="small" @click="resetStatus">恢复自动</el-button>
+              </el-tooltip>
               <el-button size="small" @click="addItinerary">规划行程</el-button>
               <el-button size="small" @click="addNote">写游记</el-button>
               <el-button size="small" type="primary" @click="addExpense">记一笔</el-button>
             </div>
           </div>
         </template>
-        <div class="trip-stat-grid">
-          <div class="trip-stat">
-            <span class="meta">行程</span>
-            <strong>{{ trip.summary.itineraryCount }}</strong>
-          </div>
-          <div class="trip-stat">
-            <span class="meta">游记</span>
-            <strong>{{ trip.summary.noteCount }}</strong>
-          </div>
-          <div class="trip-stat">
-            <span class="meta">消费笔数</span>
-            <strong>{{ trip.summary.expenseCount }}</strong>
-          </div>
-          <div class="trip-stat">
-            <span class="meta">合计花费</span>
-            <strong>¥{{ trip.summary.expenseCny }}</strong>
+        <div v-if="stats.length > 0" class="trip-stat-grid">
+          <div v-for="stat in stats" :key="stat.label" class="trip-stat">
+            <span class="meta">{{ stat.label }}</span>
+            <strong>{{ stat.value }}</strong>
           </div>
         </div>
         <el-alert

@@ -79,6 +79,7 @@ public abstract class AbstractIntegrationTest {
         registry.add("app.crypto.aes-key", () -> TEST_AES_KEY);
         registry.add("app.security.jwt-secret", () -> TEST_JWT_SECRET);
         registry.add("app.security.admin-stub-enabled", () -> "true");
+        registry.add("app.security.allow-insecure-dev-stub", () -> "true");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
     }
 

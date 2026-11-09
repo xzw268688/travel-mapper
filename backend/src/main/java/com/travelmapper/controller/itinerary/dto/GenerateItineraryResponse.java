@@ -29,6 +29,14 @@ public record GenerateItineraryResponse(
             String name,
             String description,
             String suggestedDuration,
+            String category,
+            String ticketPrice,
+            String highlights,
+            String bestTime,
+            String nearestStation,
+            boolean reservationRequired,
+            String area,
+            String warningNotes,
             String source) {
     }
 

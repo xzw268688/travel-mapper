@@ -2,7 +2,9 @@ package com.travelmapper.service.map;
 
 import com.travelmapper.controller.map.dto.CountryDrawerResponse;
 import com.travelmapper.controller.map.dto.MapStatsResponse;
+import com.travelmapper.repository.enums.TripStatus;
 import com.travelmapper.service.catalog.CatalogService;
+import com.travelmapper.service.trip.TripStatusResolver;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -22,10 +24,13 @@ public class MapService {
 
     private final JdbcTemplate jdbcTemplate;
     private final CatalogService catalogService;
+    private final TripStatusResolver statusResolver;
 
-    public MapService(JdbcTemplate jdbcTemplate, CatalogService catalogService) {
+    public MapService(JdbcTemplate jdbcTemplate, CatalogService catalogService,
+                      TripStatusResolver statusResolver) {
         this.jdbcTemplate = jdbcTemplate;
         this.catalogService = catalogService;
+        this.statusResolver = statusResolver;
     }
 
     public String statusFor(Long userId, String rawCountryCode) {
@@ -127,15 +132,38 @@ public class MapService {
 
         List<TripGroupBuilder> trips = new ArrayList<>();
         List<TripRow> tripRows = jdbcTemplate.query(
-                "SELECT id, name, start_date, end_date, status FROM trip "
-                        + "WHERE user_id = ? AND country_code = ? AND deleted = 0 "
-                        + "ORDER BY start_date DESC, created_at DESC",
-                (rs, rowNum) -> new TripRow(
-                        rs.getLong("id"),
-                        rs.getString("name"),
-                        toLocalDate(rs.getDate("start_date")),
-                        toLocalDate(rs.getDate("end_date")),
-                        rs.getString("status")),
+                "SELECT t.id, t.name, t.start_date, t.end_date, t.status, t.status_manual, "
+                        + "(SELECT COUNT(*) FROM travel_note n WHERE n.trip_id = t.id AND n.deleted = 0) AS note_count, "
+                        + "(SELECT COUNT(*) FROM expense e WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_count, "
+                        + "(SELECT MIN(DATE(n.created_at)) FROM travel_note n "
+                        + " WHERE n.trip_id = t.id AND n.deleted = 0) AS note_min, "
+                        + "(SELECT MAX(DATE(n.created_at)) FROM travel_note n "
+                        + " WHERE n.trip_id = t.id AND n.deleted = 0) AS note_max, "
+                        + "(SELECT MIN(e.expense_date) FROM expense e "
+                        + " WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_min, "
+                        + "(SELECT MAX(e.expense_date) FROM expense e "
+                        + " WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_max "
+                        + "FROM trip t WHERE t.user_id = ? AND t.country_code = ? AND t.deleted = 0 "
+                        + "ORDER BY t.start_date DESC, t.created_at DESC",
+                (rs, rowNum) -> {
+                    LocalDate recordStart = earliest(
+                            toLocalDate(rs.getDate("note_min")),
+                            toLocalDate(rs.getDate("expense_min")));
+                    LocalDate recordEnd = latest(
+                            toLocalDate(rs.getDate("note_max")),
+                            toLocalDate(rs.getDate("expense_max")));
+                    boolean hasRecords = rs.getInt("note_count") > 0 || rs.getInt("expense_count") > 0;
+                    return new TripRow(
+                            rs.getLong("id"),
+                            rs.getString("name"),
+                            toLocalDate(rs.getDate("start_date")),
+                            toLocalDate(rs.getDate("end_date")),
+                            rs.getString("status"),
+                            rs.getInt("status_manual") == 1,
+                            hasRecords,
+                            recordStart,
+                            recordEnd);
+                },
                 userId, countryCode);
 
         for (TripRow trip : tripRows) {
@@ -249,10 +277,25 @@ public class MapService {
                 itineraryCount, noteCount, money(totalExpense),
                 missingCount > 0, unconfiguredCurrencies);
         List<CountryDrawerResponse.TripGroup> tripGroups = trips.stream()
-                .map(trip -> new CountryDrawerResponse.TripGroup(
-                        trip.trip.id(), trip.trip.name(), trip.trip.startDate(), trip.trip.endDate(),
-                        trip.trip.status() == null ? "PLANNED" : trip.trip.status(),
-                        trip.subtotalCny, trip.cities))
+                .map(trip -> {
+                    TripStatusResolver.Result resolved = statusResolver.resolve(
+                            new TripStatusResolver.Snapshot(
+                                    trip.trip.statusManual(),
+                                    trip.trip.status() == null ? null : TripStatus.valueOf(trip.trip.status()),
+                                    trip.trip.startDate(),
+                                    trip.trip.endDate(),
+                                    trip.trip.hasRecords(),
+                                    trip.trip.recordStart(),
+                                    trip.trip.recordEnd()));
+                    return new CountryDrawerResponse.TripGroup(
+                            trip.trip.id(), trip.trip.name(),
+                            trip.trip.startDate(), trip.trip.endDate(),
+                            resolved.effectiveStartDate(), resolved.effectiveEndDate(),
+                            trip.trip.status() == null ? "PLANNED" : trip.trip.status(),
+                            resolved.effectiveStatus().name(),
+                            trip.trip.statusManual(), resolved.expired(),
+                            trip.subtotalCny, trip.cities);
+                })
                 .toList();
         CountryDrawerResponse.Ungrouped ungrouped = new CountryDrawerResponse.Ungrouped(
                 ungroupedItineraries, ungroupedNotes, ungroupedExpenses, money(ungroupedExpense));
@@ -272,6 +315,26 @@ public class MapService {
                 note.createdAt() == null ? null : note.createdAt().toLocalDateTime().toLocalDate());
     }
 
+    private LocalDate earliest(LocalDate left, LocalDate right) {
+        if (left == null) {
+            return right;
+        }
+        if (right == null) {
+            return left;
+        }
+        return left.isBefore(right) ? left : right;
+    }
+
+    private LocalDate latest(LocalDate left, LocalDate right) {
+        if (left == null) {
+            return right;
+        }
+        if (right == null) {
+            return left;
+        }
+        return left.isAfter(right) ? left : right;
+    }
+
     private LocalDate toLocalDate(Date date) {
         return date == null ? null : date.toLocalDate();
     }
@@ -289,7 +352,8 @@ public class MapService {
     }
 
     private record TripRow(Long id, String name, LocalDate startDate, LocalDate endDate,
-                           String status) {
+                           String status, boolean statusManual, boolean hasRecords,
+                           LocalDate recordStart, LocalDate recordEnd) {
     }
 
     private record ItineraryRow(Long id, String title, LocalDate startDate, LocalDate endDate) {

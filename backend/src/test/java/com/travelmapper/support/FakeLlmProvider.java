@@ -66,6 +66,14 @@ public class FakeLlmProvider implements LlmProvider {
             spot.put("name", "景点" + (i + 1));
             spot.put("description", "测试景点");
             spot.put("suggestedDuration", "2小时");
+            spot.put("category", "寺庙");
+            spot.put("ticketPrice", "约 500 円");
+            spot.put("highlights", "亮点" + (i + 1));
+            spot.put("bestTime", "上午");
+            spot.put("nearestStation", "浅草站");
+            spot.put("reservationRequired", i % 2 == 0);
+            spot.put("area", "台东区");
+            spot.put("warningNotes", "周末人多");
             Map<String, Object> day = new LinkedHashMap<>();
             day.put("dayIndex", i + 1);
             day.put("cityCode", dayCity);

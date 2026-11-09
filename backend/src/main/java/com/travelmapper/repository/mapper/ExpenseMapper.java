@@ -29,7 +29,9 @@ public interface ExpenseMapper extends BaseMapper<Expense> {
             FROM expense
             WHERE user_id = #{userId} AND deleted = 0
             <if test="countryCode != null">AND country_code = #{countryCode}</if>
+            <if test="cityCode != null">AND city_code = #{cityCode}</if>
             <if test="tripId != null">AND trip_id = #{tripId}</if>
+            <if test="category != null">AND category = #{category}</if>
             <if test="from != null">AND expense_date &gt;= #{from}</if>
             <if test="to != null">AND expense_date &lt;= #{to}</if>
             GROUP BY
@@ -41,7 +43,9 @@ public interface ExpenseMapper extends BaseMapper<Expense> {
     List<SummaryRow> selectSummaryGroups(@Param("userId") Long userId,
                                          @Param("groupColumns") List<String> groupColumns,
                                          @Param("countryCode") String countryCode,
+                                         @Param("cityCode") String cityCode,
                                          @Param("tripId") Long tripId,
+                                         @Param("category") String category,
                                          @Param("from") LocalDate from,
                                          @Param("to") LocalDate to);
 
@@ -52,7 +56,9 @@ public interface ExpenseMapper extends BaseMapper<Expense> {
             WHERE user_id = #{userId} AND deleted = 0
               AND exchange_rate_snapshot IS NULL
             <if test="countryCode != null">AND country_code = #{countryCode}</if>
+            <if test="cityCode != null">AND city_code = #{cityCode}</if>
             <if test="tripId != null">AND trip_id = #{tripId}</if>
+            <if test="category != null">AND category = #{category}</if>
             <if test="from != null">AND expense_date &gt;= #{from}</if>
             <if test="to != null">AND expense_date &lt;= #{to}</if>
             ORDER BY currency
@@ -60,7 +66,9 @@ public interface ExpenseMapper extends BaseMapper<Expense> {
             """)
     List<String> selectUnconfiguredCurrencies(@Param("userId") Long userId,
                                               @Param("countryCode") String countryCode,
+                                              @Param("cityCode") String cityCode,
                                               @Param("tripId") Long tripId,
+                                              @Param("category") String category,
                                               @Param("from") LocalDate from,
                                               @Param("to") LocalDate to);
 

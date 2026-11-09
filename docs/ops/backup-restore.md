@@ -24,12 +24,26 @@
 | `S3_ENDPOINT` / `S3_BUCKET` / `S3_PREFIX` | 对象存储位置 |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | 对象存储凭证 |
 | `S3_MODE` | `auto`（优先 aws，其次 mc）、`aws`、`mc`、`curl`（仅开发 Mock） |
+| `BACKUP_ENCRYPTION` | `required`（默认）、`age`、`gpg`、`off` |
+| `BACKUP_AGE_RECIPIENT` | age 公钥（如 `age1...`），`required`/`age` 模式使用 |
+| `BACKUP_GPG_RECIPIENT` | gpg 收件人 key id / 邮箱，`required`/`gpg` 模式使用 |
+| `BACKUP_ALLOW_PLAINTEXT` | 仅当 `BACKUP_ENCRYPTION=off` 时显式设为 `true` |
+
+> 备份包含邮箱、密码哈希、游记与反馈内容，**默认必须加密**。生产环境不要使用 `off`。
+
+生成本地 age 密钥对（示例）：
+
+```bash
+age-keygen -o backup-key.txt
+# 公钥用于 BACKUP_AGE_RECIPIENT；私钥 backup-key.txt 离线保存
+```
 
 本地验证（使用外部 MySQL 容器 + S3Mock）：
 
 ```bash
 DB_IN_CONTAINER=true DB_CONTAINER=tm-mysql \
 S3_ENDPOINT=http://127.0.0.1:19090 S3_BUCKET=travelmapper S3_MODE=curl \
+BACKUP_ENCRYPTION=off BACKUP_ALLOW_PLAINTEXT=true \
 ./scripts/backup.sh
 ```
 
@@ -37,8 +51,9 @@ S3_ENDPOINT=http://127.0.0.1:19090 S3_BUCKET=travelmapper S3_MODE=curl \
 
 1. `mysqldump --single-transaction --quick --routines --triggers` 导出。
 2. `gzip -t` 校验压缩包。
-3. 上传到 `s3://$S3_BUCKET/$S3_PREFIX/<db>_<timestamp>.sql.gz`。
-4. 删除本地超过 7 天的备份。
+3. 使用 age / gpg 加密，并立即删除本地明文转储。
+4. 上传加密文件到 `s3://$S3_BUCKET/$S3_PREFIX/<db>_<timestamp>.sql.gz.age`（或 `.gpg`）。
+5. 删除本地超过 7 天的备份。
 
 建议用 cron 每日执行：
 
@@ -49,9 +64,18 @@ S3_ENDPOINT=http://127.0.0.1:19090 S3_BUCKET=travelmapper S3_MODE=curl \
 ## 恢复步骤
 
 1. 停止应用，避免写入。
-2. 恢复数据库：
+2. 解密并恢复数据库：
 
 ```bash
+# age
+age -d -i backup-key.txt backups/travelmapper_20250601_030000.sql.gz.age | \
+  gunzip -c | mysql -h 127.0.0.1 -P 3306 -u root -p travelmapper
+
+# gpg
+gpg --decrypt backups/travelmapper_20250601_030000.sql.gz.gpg | \
+  gunzip -c | mysql -h 127.0.0.1 -P 3306 -u root -p travelmapper
+
+# 本地明文备份（仅开发）
 gunzip -c backups/travelmapper_20250601_030000.sql.gz | \
   mysql -h 127.0.0.1 -P 3306 -u root -p travelmapper
 ```
@@ -59,8 +83,8 @@ gunzip -c backups/travelmapper_20250601_030000.sql.gz | \
 或容器内：
 
 ```bash
-gunzip -c backups/travelmapper_20250601_030000.sql.gz | \
-  docker exec -i tm-mysql mysql -uroot -proot travelmapper
+age -d -i backup-key.txt backups/travelmapper_20250601_030000.sql.gz.age | \
+  gunzip -c | docker exec -i tm-mysql mysql -uroot -proot travelmapper
 ```
 
 3. 确认 `flyway_schema_history` 存在且版本为最新；不需要重新执行迁移。
@@ -89,9 +113,23 @@ docker run -d --name tm-redis -p 16379:6379 redis:7-alpine redis-server --append
 
 脚本会写入一个键、重启容器、再读回；值一致才算通过。
 
-## 管理员密码重置（V1 无自助找回）
+## 管理员密码初始化与重置
 
-管理员账号由数据库预置，V1 不开放自助找回。遗忘时由运维执行：
+### 推荐：通过环境变量注入
+
+生产部署必须设置：
+
+```bash
+TRAVELMAPPER_ADMIN_USERNAME=admin
+TRAVELMAPPER_ADMIN_PASSWORD='一个足够强的密码'
+SPRING_PROFILES_ACTIVE=prod
+```
+
+应用启动时会用该密码更新管理员密码；只有密码不一致时才更新，并递增
+`token_version` 使旧 JWT 失效。生产 profile 下如果仍使用种子密码
+`Admin@123456`，应用会**拒绝启动**。
+
+### 手工重置（环境变量不可用时）
 
 1. 用 BCrypt 生成新密码哈希（cost 10）。
 2. 执行：

@@ -21,7 +21,7 @@ public class GenerateItineraryRequest {
     private String requestId;
 
     @NotBlank
-    @Pattern(regexp = "[A-Za-z]{2}")
+    @Pattern(regexp = "[A-Za-z0-9]{2}")
     private String countryCode;
 
     @NotEmpty

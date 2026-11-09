@@ -15,11 +15,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 
+import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -124,13 +127,22 @@ class TripIntegrationTest extends AuthTestSupport {
         assertThat(response.detached().itineraries()).isEqualTo(1);
         assertThat(response.detached().notes()).isEqualTo(1);
         assertThat(response.detached().expenses()).isEqualTo(1);
+        assertThat(response.newTripId()).isNotNull();
+        assertThat(response.newTripName()).startsWith("未命名旅行 · ");
         assertThat(tripMapper.selectById(trip.getId())).isNull();
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT trip_id FROM itinerary WHERE id = ?", Long.class, itinerary.getId())).isNull();
+                "SELECT trip_id FROM itinerary WHERE id = ?", Long.class, itinerary.getId()))
+                .isEqualTo(response.newTripId());
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM travel_note WHERE trip_id = ?", Integer.class, trip.getId())).isZero();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM expense WHERE trip_id = ?", Integer.class, trip.getId())).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM travel_note WHERE trip_id = ?", Integer.class, response.newTripId()))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM expense WHERE trip_id = ?", Integer.class, response.newTripId()))
+                .isEqualTo(1);
 
         Trip second = tripService.createForItinerary(user.getId(), "JP",
                 LocalDate.of(2025, 8, 1), LocalDate.of(2025, 8, 2), "接口删除旅行");
@@ -141,7 +153,9 @@ class TripIntegrationTest extends AuthTestSupport {
                 .andExpect(jsonPath("$.code").value(2017));
         mockMvc.perform(withToken(delete("/api/trips/" + second.getId()).param("force", "true"), user))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.detached.itineraries").value(1));
+                .andExpect(jsonPath("$.data.detached.itineraries").value(1))
+                .andExpect(jsonPath("$.data.newTripId").isNumber())
+                .andExpect(jsonPath("$.data.newTripName").value(org.hamcrest.Matchers.startsWith("未命名旅行 · ")));
     }
 
     @Test
@@ -379,10 +393,79 @@ class TripIntegrationTest extends AuthTestSupport {
 
         mockMvc.perform(withToken(get("/api/trips/timeline"), user))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
                 .andExpect(jsonPath("$.data[0].id").value(first.getId()))
-                .andExpect(jsonPath("$.data[1].id").value(second.getId()))
+                .andExpect(jsonPath("$.data[0].name").value("第一段"))
                 .andExpect(jsonPath("$.data[0].countryName").value("日本"))
-                .andExpect(jsonPath("$.data[0].status").value("COMPLETED"));
+                .andExpect(jsonPath("$.data[0].status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data[1].id").value(second.getId()))
+                .andExpect(jsonPath("$.data[1].name").value("第二段"))
+                .andExpect(jsonPath("$.data[1].status").value("PLANNED"));
+    }
+
+    @Test
+    void timelineListsTripsSortedByStartDateAndIsolatesUsers() throws Exception {
+        User user = createVerifiedUser("timeline");
+
+        // 同一旅行下的多条行程只占一个归档节点
+        Trip shared = tripService.createForItinerary(user.getId(), "JP",
+                LocalDate.of(2024, 5, 1), LocalDate.of(2024, 5, 3), "关西行");
+        insertItinerary(user, shared.getId(), "JP", "京都",
+                LocalDate.of(2024, 5, 1), LocalDate.of(2024, 5, 2));
+        insertItinerary(user, shared.getId(), "JP", "大阪",
+                LocalDate.of(2024, 5, 3), LocalDate.of(2024, 5, 3));
+
+        // 只有游记/花费、没有行程的旅行照常出现
+        Trip notesOnly = tripService.createForItinerary(user.getId(), "TH",
+                LocalDate.of(2023, 12, 1), LocalDate.of(2023, 12, 5), "曼谷行");
+        jdbcTemplate.update("UPDATE trip SET start_date = NULL, end_date = NULL WHERE id = ?",
+                notesOnly.getId());
+        jdbcTemplate.update("INSERT INTO travel_note "
+                        + "(user_id, trip_id, country_code, city_code, title, content, created_at) "
+                        + "VALUES (?, ?, 'TH', 'BKK', '曼谷游记', '正文', ?)",
+                user.getId(), notesOnly.getId(), Timestamp.valueOf(LocalDateTime.of(2023, 12, 20, 10, 0)));
+        jdbcTemplate.update("INSERT INTO expense "
+                        + "(user_id, trip_id, country_code, city_code, currency, amount, "
+                        + "exchange_rate_snapshot, category, expense_date) "
+                        + "VALUES (?, ?, 'TH', 'BKK', 'THB', 100.00, 1.000000, 'FOOD', ?)",
+                user.getId(), notesOnly.getId(), LocalDate.of(2023, 12, 10));
+
+        // 未归组行程不属于任何归档，不产生节点
+        Itinerary orphan = insertItinerary(user, null, "FR", "巴黎",
+                LocalDate.of(2022, 9, 1), LocalDate.of(2022, 9, 3));
+
+        // 行程已删除的旅行仍保留为归档节点
+        Trip emptied = tripService.createForItinerary(user.getId(), "JP",
+                LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 1), "已删行程");
+        Itinerary deleted = insertItinerary(user, emptied.getId(), "JP", "已删除",
+                LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 1));
+        itineraryMapper.deleteById(deleted.getId());
+
+        // 他人数据不出现
+        User other = createVerifiedUser("timeline-other");
+        Trip otherTrip = tripService.createForItinerary(other.getId(), "JP",
+                LocalDate.of(2021, 1, 1), LocalDate.of(2021, 1, 1), "他人旅行");
+
+        mockMvc.perform(withToken(get("/api/trips/timeline"), user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(3))
+                // 2024 归档：两条行程合并为一个节点
+                .andExpect(jsonPath("$.data[0].id").value(shared.getId()))
+                .andExpect(jsonPath("$.data[0].name").value("关西行"))
+                .andExpect(jsonPath("$.data[0].itineraryCount").value(2))
+                .andExpect(jsonPath("$.data[0].countryName").value("日本"))
+                .andExpect(jsonPath("$.data[0].status").value("PLANNED"))
+                // 2025 归档：行程已删除，节点仍保留
+                .andExpect(jsonPath("$.data[1].id").value(emptied.getId()))
+                .andExpect(jsonPath("$.data[1].itineraryCount").value(0))
+                // 无日期归档按创建时间排在最后
+                .andExpect(jsonPath("$.data[2].id").value(notesOnly.getId()))
+                .andExpect(jsonPath("$.data[2].noteCount").value(1))
+                .andExpect(jsonPath("$.data[2].expenseCny").value("100.00"))
+                .andExpect(jsonPath("$.data[2].status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data[?(@.id == " + otherTrip.getId() + ")]").isEmpty());
+
+        assertThat(orphan.getId()).isNotNull();
     }
 
     private Itinerary insertItinerary(User user, Long tripId, String countryCode, String title,

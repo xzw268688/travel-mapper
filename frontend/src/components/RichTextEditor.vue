@@ -68,6 +68,7 @@ const blobUrls: string[] = []
 
 const polishStyle = ref('vivid')
 const polishStreaming = ref(false)
+const polishReady = ref(false)
 const polishPreview = ref('')
 const polishError = ref('')
 const polishStatus = ref('')
@@ -269,6 +270,7 @@ async function startPolish(retry = false): Promise<void> {
   }
   polishRange = { from, to }
   polishPreview.value = ''
+  polishReady.value = false
   polishError.value = ''
   polishStatus.value = '正在连接 AI…'
   polishStreaming.value = true
@@ -289,13 +291,16 @@ async function startPolish(retry = false): Promise<void> {
           polishPreview.value += delta
         },
         onDone: (totalChars) => {
-          replaceSelection()
-          polishStatus.value = `润色完成，已替换选中文本（${totalChars} 字），可使用撤销恢复`
+          polishReady.value = true
+          polishStatus.value = `润色完成（${totalChars} 字），确认后采用`
         },
         onCancelled: () => {
           polishStatus.value = '已取消（不退回额度）'
+          polishPreview.value = ''
+          polishRange = null
         },
         onError: (message) => {
+          polishReady.value = false
           polishError.value = message
           polishStatus.value = ''
           emit('error', message)
@@ -306,6 +311,8 @@ async function startPolish(retry = false): Promise<void> {
   } catch (error) {
     if ((error as Error).name === 'AbortError') {
       polishStatus.value = '已取消（不退回额度）'
+      polishPreview.value = ''
+      polishRange = null
     } else {
       polishError.value = (error as Error).message || '润色失败'
       polishStatus.value = ''
@@ -316,6 +323,15 @@ async function startPolish(retry = false): Promise<void> {
     instance.setEditable(true)
     polishController = null
   }
+}
+
+function adoptPolish(): void {
+  if (!polishReady.value || !polishPreview.value || polishError.value) {
+    return
+  }
+  replaceSelection()
+  polishReady.value = false
+  polishStatus.value = '已采用润色结果，可使用撤销恢复原文'
 }
 
 function replaceSelection(): void {
@@ -358,6 +374,8 @@ function dismissPolishPanel(): void {
   polishStatus.value = ''
   polishError.value = ''
   polishPreview.value = ''
+  polishReady.value = false
+  polishRange = null
 }
 
 function pickImage(): void {
@@ -435,35 +453,75 @@ function redo(): void {
 <template>
   <div class="rich-editor">
     <div class="rich-editor-toolbar">
-      <el-button size="small" :type="isActive('bold') ? 'primary' : 'default'" @click="toggleBold">加粗</el-button>
-      <el-button size="small" :type="isActive('italic') ? 'primary' : 'default'" @click="toggleItalic">斜体</el-button>
-      <el-button size="small" :type="isActive('strike') ? 'primary' : 'default'" @click="toggleStrike">删除线</el-button>
-      <el-button size="small" :type="isActive('heading', { level: 2 }) ? 'primary' : 'default'" @click="toggleHeading(2)">标题</el-button>
-      <el-button size="small" :type="isActive('heading', { level: 3 }) ? 'primary' : 'default'" @click="toggleHeading(3)">小标题</el-button>
-      <el-button size="small" :type="isActive('bulletList') ? 'primary' : 'default'" @click="toggleBulletList">无序列表</el-button>
-      <el-button size="small" :type="isActive('orderedList') ? 'primary' : 'default'" @click="toggleOrderedList">有序列表</el-button>
-      <el-button size="small" :type="isActive('blockquote') ? 'primary' : 'default'" @click="toggleBlockquote">引用</el-button>
-      <el-button size="small" :type="isActive('link') ? 'primary' : 'default'" @click="setLink">链接</el-button>
-      <el-select v-model="polishStyle" size="small" style="width: 92px" :disabled="polishStreaming">
-        <el-option label="生动" value="vivid" />
-        <el-option label="简洁" value="concise" />
-        <el-option label="优雅" value="elegant" />
-      </el-select>
-      <el-button
-        size="small"
-        :type="canPolish ? 'primary' : 'default'"
-        :disabled="polishStreaming"
-        @click="startPolish()"
+      <el-tooltip content="加粗选中文本（Ctrl+B）" placement="top" :show-after="300">
+        <el-button size="small" :type="isActive('bold') ? 'primary' : 'default'" @click="toggleBold">加粗</el-button>
+      </el-tooltip>
+      <el-tooltip content="斜体选中文本（Ctrl+I）" placement="top" :show-after="300">
+        <el-button size="small" :type="isActive('italic') ? 'primary' : 'default'" @click="toggleItalic">斜体</el-button>
+      </el-tooltip>
+      <el-tooltip content="给选中文本加删除线" placement="top" :show-after="300">
+        <el-button size="small" :type="isActive('strike') ? 'primary' : 'default'" @click="toggleStrike">删除线</el-button>
+      </el-tooltip>
+      <el-tooltip content="设为二级标题" placement="top" :show-after="300">
+        <el-button size="small" :type="isActive('heading', { level: 2 }) ? 'primary' : 'default'" @click="toggleHeading(2)">标题</el-button>
+      </el-tooltip>
+      <el-tooltip content="设为三级小标题" placement="top" :show-after="300">
+        <el-button size="small" :type="isActive('heading', { level: 3 }) ? 'primary' : 'default'" @click="toggleHeading(3)">小标题</el-button>
+      </el-tooltip>
+      <el-tooltip content="切换为无序列表" placement="top" :show-after="300">
+        <el-button size="small" :type="isActive('bulletList') ? 'primary' : 'default'" @click="toggleBulletList">无序列表</el-button>
+      </el-tooltip>
+      <el-tooltip content="切换为有序列表" placement="top" :show-after="300">
+        <el-button size="small" :type="isActive('orderedList') ? 'primary' : 'default'" @click="toggleOrderedList">有序列表</el-button>
+      </el-tooltip>
+      <el-tooltip content="将当前段落设为引用" placement="top" :show-after="300">
+        <el-button size="small" :type="isActive('blockquote') ? 'primary' : 'default'" @click="toggleBlockquote">引用</el-button>
+      </el-tooltip>
+      <el-tooltip content="为选中文本添加链接" placement="top" :show-after="300">
+        <el-button size="small" :type="isActive('link') ? 'primary' : 'default'" @click="setLink">链接</el-button>
+      </el-tooltip>
+      <el-tooltip content="选择 AI 润色的语言风格" placement="top" :show-after="300">
+        <el-select v-model="polishStyle" size="small" style="width: 92px" :disabled="polishStreaming">
+          <el-option label="生动" value="vivid" />
+          <el-option label="简洁" value="concise" />
+          <el-option label="优雅" value="elegant" />
+        </el-select>
+      </el-tooltip>
+      <el-tooltip
+        content="先选中 1–5000 字正文，再点击；结果会先预览，确认后采用"
+        placement="top"
+        :show-after="300"
       >
-        AI 润色
-      </el-button>
-      <el-button v-if="polishStreaming" size="small" type="danger" plain @click="cancelPolishStream">
-        取消润色
-      </el-button>
-      <el-button size="small" :loading="uploading" @click="pickImage">插入图片</el-button>
-      <el-button size="small" :loading="uploading" @click="pickVideo">插入视频</el-button>
-      <el-button size="small" :disabled="!editor?.can().undo()" @click="undo">撤销</el-button>
-      <el-button size="small" :disabled="!editor?.can().redo()" @click="redo">重做</el-button>
+        <el-button
+          size="small"
+          :type="canPolish ? 'primary' : 'default'"
+          :disabled="polishStreaming"
+          @click="startPolish()"
+        >
+          AI 润色
+        </el-button>
+      </el-tooltip>
+      <el-tooltip content="停止本次润色并保持原文" placement="top" :show-after="300">
+        <el-button v-if="polishStreaming" size="small" type="danger" plain @click="cancelPolishStream">
+          取消润色
+        </el-button>
+      </el-tooltip>
+      <el-tooltip content="上传图片并插入到光标位置（单张 ≤5MB）" placement="top" :show-after="300">
+        <el-button size="small" :loading="uploading" @click="pickImage">插入图片</el-button>
+      </el-tooltip>
+      <el-tooltip content="上传视频并插入到光标位置（单个 ≤100MB）" placement="top" :show-after="300">
+        <el-button size="small" :loading="uploading" @click="pickVideo">插入视频</el-button>
+      </el-tooltip>
+      <el-tooltip content="撤销上一步编辑，没有可撤销内容时不可用" placement="top" :show-after="300">
+        <span class="tooltip-wrap">
+          <el-button size="small" :disabled="!editor?.can().undo()" @click="undo">撤销</el-button>
+        </span>
+      </el-tooltip>
+      <el-tooltip content="重做被撤销的编辑，没有可重做内容时不可用" placement="top" :show-after="300">
+        <span class="tooltip-wrap">
+          <el-button size="small" :disabled="!editor?.can().redo()" @click="redo">重做</el-button>
+        </span>
+      </el-tooltip>
       <input
         ref="fileInput"
         type="file"
@@ -479,10 +537,19 @@ function redo(): void {
         @change="onVideoFileChange"
       />
     </div>
-    <div v-if="polishStreaming || polishStatus || polishError || polishPreview" class="polish-panel">
+    <div
+      v-if="polishStreaming || polishStatus || polishError || polishPreview"
+      class="polish-panel"
+      :class="{ 'polish-panel-ready': polishReady }"
+    >
       <div class="polish-head">
+        <strong class="polish-heading">AI 润色结果</strong>
         <span class="meta">{{ polishError || polishStatus }}</span>
-        <div style="display: flex; gap: 6px">
+        <div class="polish-actions">
+          <el-button v-if="polishReady" type="primary" size="small" @click="adoptPolish">
+            采用
+          </el-button>
+          <el-button v-if="polishReady" size="small" @click="dismissPolishPanel">放弃</el-button>
           <el-button
             v-if="polishError && !polishStreaming"
             size="small"
@@ -492,10 +559,13 @@ function redo(): void {
           >
             重试
           </el-button>
-          <el-button v-if="!polishStreaming" text size="small" @click="dismissPolishPanel">关闭</el-button>
+          <el-button v-if="!polishStreaming && !polishReady" text size="small" @click="dismissPolishPanel">
+            关闭
+          </el-button>
         </div>
       </div>
       <pre v-if="polishPreview" class="polish-preview">{{ polishPreview }}</pre>
+      <div v-if="polishReady" class="meta polish-hint">结果尚未写入正文，点击「采用」替换选中文本。</div>
     </div>
     <EditorContent :editor="editor" class="rich-editor-body" />
   </div>
@@ -547,17 +617,42 @@ function redo(): void {
   background: #000;
 }
 
+.tooltip-wrap {
+  display: inline-flex;
+}
+
 .polish-panel {
   padding: 10px 12px;
   background: #f5f9ff;
   border-bottom: 1px solid #e4e7ed;
+  border-left: 3px solid #a0b4f5;
+}
+
+.polish-panel-ready {
+  background: #eff6ff;
+  border-left-color: var(--tm-brand, #3b5bdb);
 }
 
 .polish-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.polish-heading {
+  color: var(--tm-brand, #3b5bdb);
+  font-size: 13px;
+}
+
+.polish-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.polish-hint {
+  margin-top: 6px;
 }
 
 .polish-preview {

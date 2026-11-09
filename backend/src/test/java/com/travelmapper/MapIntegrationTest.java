@@ -185,9 +185,12 @@ class MapIntegrationTest extends AuthTestSupport {
 
         MvcResult result = mockMvc.perform(withToken(get("/api/map/country/JP"), user))
                 .andExpect(status().isOk()).andReturn();
-        JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
-        assertThat(data.path("trips").size()).isZero();
-        assertThat(data.path("ungrouped").path("itineraries").size()).isEqualTo(1);
+        JsonNode data = objectMapper.readTree(
+                result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8)).path("data");
+        assertThat(data.path("trips").size()).isEqualTo(1);
+        assertThat(data.path("trips").get(0).path("tripName").asText())
+                .startsWith("未命名旅行 · ");
+        assertThat(data.path("ungrouped").path("itineraries").size()).isZero();
     }
 
     @Test

@@ -58,6 +58,14 @@ public final class ItineraryDtos {
         private String description;
         @Size(max = 20)
         private String suggestedDuration;
+        private String category;
+        private String ticketPrice;
+        private String highlights;
+        private String bestTime;
+        private String nearestStation;
+        private Boolean reservationRequired;
+        private String area;
+        private String warningNotes;
         private String source;
     }
 
@@ -105,7 +113,15 @@ public final class ItineraryDtos {
             String source,
             String name,
             String description,
-            String suggestedDuration) {
+            String suggestedDuration,
+            String category,
+            String ticketPrice,
+            String highlights,
+            String bestTime,
+            String nearestStation,
+            boolean reservationRequired,
+            String area,
+            String warningNotes) {
     }
 
     @Data
@@ -116,7 +132,7 @@ public final class ItineraryDtos {
         private LocalDate endDate;
     }
 
-    public record DeleteResponse(Long itineraryId, String countryStatusAfter) {
+    public record DeleteResponse(Long itineraryId, String countryStatusAfter, boolean tripDeleted) {
     }
 
     @Data
@@ -145,6 +161,14 @@ public final class ItineraryDtos {
         private String description;
         @Size(max = 20)
         private String suggestedDuration;
+        private String category;
+        private String ticketPrice;
+        private String highlights;
+        private String bestTime;
+        private String nearestStation;
+        private Boolean reservationRequired;
+        private String area;
+        private String warningNotes;
         private Integer insertIndex;
     }
 
@@ -165,6 +189,14 @@ public final class ItineraryDtos {
         private String description;
         @Size(max = 20)
         private String suggestedDuration;
+        private String category;
+        private String ticketPrice;
+        private String highlights;
+        private String bestTime;
+        private String nearestStation;
+        private Boolean reservationRequired;
+        private String area;
+        private String warningNotes;
     }
 
     public record UpdateSpotResponse(Long spotId, String source, String name) {

@@ -20,6 +20,14 @@ public class ItinerarySpot {
     private String name;
     private String description;
     private String suggestedDuration;
+    private String category;
+    private String ticketPrice;
+    private String highlights;
+    private String bestTime;
+    private String nearestStation;
+    private Boolean reservationRequired;
+    private String area;
+    private String warningNotes;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

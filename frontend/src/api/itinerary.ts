@@ -10,7 +10,18 @@ export interface GenerateRequest {
   preference?: string
 }
 
-export interface SpotPlan {
+export interface SpotExtendedFields {
+  category?: string
+  ticketPrice?: string
+  highlights?: string
+  bestTime?: string
+  nearestStation?: string
+  reservationRequired?: boolean
+  area?: string
+  warningNotes?: string
+}
+
+export interface SpotPlan extends SpotExtendedFields {
   name: string
   description: string
   suggestedDuration: string
@@ -71,7 +82,7 @@ export interface SaveResponse {
   manualSpotCount: number
 }
 
-export interface SpotView {
+export interface SpotView extends Required<SpotExtendedFields> {
   spotId: number
   sortOrder: number
   source: string
@@ -112,6 +123,7 @@ export interface ItineraryDetail {
 export interface DeleteResponse {
   itineraryId: number
   countryStatusAfter: string
+  tripDeleted: boolean
 }
 
 export interface RegenerateResponse {
@@ -138,6 +150,7 @@ export function getItinerary(id: number): Promise<ItineraryDetail> {
   return apiGet<ItineraryDetail>(`/itinerary/${id}`)
 }
 
+
 export function updateItinerary(
   id: number,
   body: { title?: string; startDate?: string; endDate?: string }
@@ -159,14 +172,19 @@ export function regenerateItinerary(
 export function addSpot(
   itineraryId: number,
   dayId: number,
-  body: { name: string; description?: string; suggestedDuration?: string; insertIndex?: number }
+  body: SpotExtendedFields & {
+    name: string
+    description?: string
+    suggestedDuration?: string
+    insertIndex?: number
+  }
 ): Promise<{ spotId: number; dayId: number; sortOrder: number; source: string; manualSpotCount: number }> {
   return apiPost(`/itinerary/${itineraryId}/days/${dayId}/spots`, body)
 }
 
 export function updateSpot(
   spotId: number,
-  body: { name: string; description?: string; suggestedDuration?: string }
+  body: SpotExtendedFields & { name: string; description?: string; suggestedDuration?: string }
 ): Promise<{ spotId: number; source: string; name: string }> {
   return apiPut(`/itinerary/spots/${spotId}`, body)
 }

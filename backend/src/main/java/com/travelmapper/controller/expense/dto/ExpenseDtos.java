@@ -76,7 +76,7 @@ public final class ExpenseDtos {
             boolean tripInherited) {
     }
 
-    public record DeleteResponse(Long id) {
+    public record DeleteResponse(Long id, boolean tripDeleted) {
     }
 
     public record SummaryResponse(

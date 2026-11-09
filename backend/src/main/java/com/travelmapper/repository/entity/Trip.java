@@ -22,6 +22,7 @@ public class Trip {
     private LocalDate startDate;
     private LocalDate endDate;
     private TripStatus status;
+    private Boolean statusManual;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

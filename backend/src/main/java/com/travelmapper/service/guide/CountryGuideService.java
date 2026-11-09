@@ -240,8 +240,8 @@ public class CountryGuideService {
     }
 
     private String normalizeCountry(String rawCountryCode) {
-        if (rawCountryCode == null || !rawCountryCode.matches("[A-Za-z]{2}")) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "countryCode 必须为两位字母");
+        if (rawCountryCode == null || !rawCountryCode.matches("[A-Za-z0-9]{2}")) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "countryCode 必须为两位字母或数字");
         }
         return rawCountryCode.toUpperCase(Locale.ROOT);
     }

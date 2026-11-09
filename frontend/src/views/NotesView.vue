@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import CountryCitySelector from '../components/CountryCitySelector.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
-import { createNote } from '../api/notes'
+import { createNote, deleteNote, listNotes, type NoteListItem } from '../api/notes'
 import { hasContent } from '../utils/noteContent'
 
 const router = useRouter()
@@ -17,19 +17,81 @@ const images = ref<string[]>([])
 const videos = ref<string[]>([])
 const cover = ref<string | null>(null)
 const saving = ref(false)
-const openId = ref('')
-const recentIds = ref<number[]>([])
 
-const RECENT_KEY = 'tm_note_recent_ids'
+const keyword = ref('')
+const dateRange = ref<[string, string] | null>(null)
+const notes = ref<NoteListItem[]>([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = 10
+const loadingNotes = ref(false)
+const failedCovers = ref(new Set<number>())
 
 onMounted(() => {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
-    recentIds.value = Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'number').slice(0, 10) : []
-  } catch {
-    recentIds.value = []
-  }
+  void loadNotes()
 })
+
+async function loadNotes(resetPage = false): Promise<void> {
+  if (resetPage) {
+    page.value = 1
+  }
+  loadingNotes.value = true
+  try {
+    const result = await listNotes({
+      keyword: keyword.value.trim() || undefined,
+      from: dateRange.value?.[0],
+      to: dateRange.value?.[1],
+      page: page.value,
+      size: pageSize
+    })
+    notes.value = result.list
+    total.value = result.total
+  } catch (error) {
+    ElMessage.error((error as Error).message || '加载游记失败')
+  } finally {
+    loadingNotes.value = false
+  }
+}
+
+function resetSearch(): void {
+  keyword.value = ''
+  dateRange.value = null
+  void loadNotes(true)
+}
+
+function markCoverFailed(id: number): void {
+  failedCovers.value.add(id)
+}
+
+function formatDate(value: string): string {
+  return value ? value.slice(0, 10) : ''
+}
+
+function visibilityLabel(item: NoteListItem): string {
+  if (item.takenDown) {
+    return '已下架'
+  }
+  return item.visibility === 'SHARED' ? '已分享' : '私密'
+}
+
+async function removeNote(item: NoteListItem): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`删除游记「${item.title}」？`, '删除游记', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteNote(item.id)
+    ElMessage.success('游记已删除')
+    await loadNotes()
+  } catch (error) {
+    ElMessage.error((error as Error).message || '删除失败')
+  }
+}
 
 function addImage(objectKey: string): void {
   if (!images.value.includes(objectKey)) {
@@ -67,7 +129,6 @@ async function save(): Promise<void> {
       cityCode: city.value,
       visibility: visibility.value
     })
-    remember(result.id)
     ElMessage.success('游记已保存')
     await router.push(`/notes/${result.id}`)
   } catch (error) {
@@ -76,25 +137,78 @@ async function save(): Promise<void> {
     saving.value = false
   }
 }
-
-function remember(id: number): void {
-  recentIds.value = [id, ...recentIds.value.filter((item) => item !== id)].slice(0, 10)
-  localStorage.setItem(RECENT_KEY, JSON.stringify(recentIds.value))
-}
-
-function openNote(): void {
-  const id = Number(openId.value)
-  if (!Number.isInteger(id) || id <= 0) {
-    ElMessage.warning('请输入正确的游记 ID')
-    return
-  }
-  void router.push(`/notes/${id}`)
-}
 </script>
 
 <template>
   <div class="plan-page">
     <el-card>
+      <template #header>
+        <div class="notes-head">
+          <span class="trip-title">最近游记</span>
+          <span class="meta">共 {{ total }} 篇</span>
+        </div>
+      </template>
+      <div class="notes-search">
+        <el-input
+          v-model="keyword"
+          placeholder="搜索标题或正文"
+          clearable
+          style="width: 240px"
+          @keyup.enter="loadNotes(true)"
+        />
+        <el-date-picker
+          v-model="dateRange"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          style="width: 260px"
+        />
+        <el-button type="primary" :loading="loadingNotes" @click="loadNotes(true)">查询</el-button>
+        <el-button @click="resetSearch">重置</el-button>
+      </div>
+
+      <div v-loading="loadingNotes">
+        <el-empty v-if="!loadingNotes && notes.length === 0" description="还没有游记，先在下方发布一篇吧" />
+        <div v-for="item in notes" :key="item.id" class="note-row">
+          <img
+            v-if="item.coverImageUrl && !failedCovers.has(item.id)"
+            :src="item.coverImageUrl"
+            class="note-cover"
+            alt=""
+            @error="markCoverFailed(item.id)"
+          />
+          <div v-else class="note-cover note-cover-empty">无封面</div>
+          <div class="note-main">
+            <div class="note-title-row">
+              <strong>{{ item.title }}</strong>
+              <el-tag v-if="item.takenDown" type="danger" size="small" effect="plain">已下架</el-tag>
+            </div>
+            <div v-if="item.summary" class="meta note-summary">{{ item.summary }}</div>
+            <div class="meta">
+              {{ item.countryName }} · {{ item.cityName }} · {{ formatDate(item.createdAt) }} ·
+              {{ visibilityLabel(item) }}
+            </div>
+          </div>
+          <div class="note-actions">
+            <el-button text type="primary" @click="router.push(`/notes/${item.id}`)">打开</el-button>
+            <el-button text type="danger" @click="removeNote(item)">删除</el-button>
+          </div>
+        </div>
+      </div>
+
+      <el-pagination
+        v-if="total > pageSize"
+        v-model:current-page="page"
+        :page-size="pageSize"
+        :total="total"
+        layout="prev, pager, next"
+        style="margin-top: 12px"
+        @current-change="loadNotes()"
+      />
+    </el-card>
+
+    <el-card style="margin-top: 16px">
       <template #header><div class="trip-title">发布游记</div></template>
       <CountryCitySelector v-model:country="country" v-model:city="city" />
       <el-input
@@ -132,30 +246,85 @@ function openNote(): void {
         <el-button type="primary" :loading="saving" @click="save">保存并查看详情</el-button>
       </div>
     </el-card>
-
-    <el-card style="margin-top: 16px">
-      <template #header><div class="trip-title">打开已有游记</div></template>
-      <div style="display: flex; gap: 8px; align-items: center">
-        <el-input v-model="openId" placeholder="游记 ID" style="width: 160px" @keyup.enter="openNote" />
-        <el-button @click="openNote">打开</el-button>
-      </div>
-      <div v-if="recentIds.length" style="margin-top: 8px">
-        <span class="meta">最近保存：</span>
-        <el-button
-          v-for="id in recentIds"
-          :key="id"
-          link
-          type="primary"
-          @click="router.push(`/notes/${id}`)"
-        >
-          #{{ id }}
-        </el-button>
-      </div>
-    </el-card>
   </div>
 </template>
 
 <style scoped>
+.notes-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.notes-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.note-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--tm-border);
+}
+
+.note-cover {
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex: none;
+  background: var(--tm-brand-soft);
+}
+
+.note-cover-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--tm-text-muted);
+}
+
+.note-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.note-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.note-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  .note-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .note-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
 .cover-list {
   display: flex;
   flex-wrap: wrap;

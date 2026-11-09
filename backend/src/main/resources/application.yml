@@ -78,11 +78,15 @@ springdoc:
 
 app:
   security:
-    admin-stub-enabled: ${ADMIN_STUB_ENABLED:true}
+    admin-stub-enabled: ${ADMIN_STUB_ENABLED:false}
+    allow-insecure-dev-stub: ${ALLOW_INSECURE_DEV_STUB:false}
     jwt-secret: ${TRAVELMAPPER_JWT_SECRET:}
     jwt-ttl-seconds: ${TRAVELMAPPER_JWT_TTL:604800}
+    admin-username: ${TRAVELMAPPER_ADMIN_USERNAME:admin}
+    admin-password: ${TRAVELMAPPER_ADMIN_PASSWORD:}
   mail:
     enabled: ${MAIL_ENABLED:false}
+    log-verification-codes: ${MAIL_LOG_VERIFICATION_CODES:false}
     host: ${MAIL_HOST:localhost}
     port: ${MAIL_PORT:25}
     username: ${MAIL_USERNAME:}
@@ -102,3 +106,7 @@ app:
     read-timeout-seconds: 5
   rate-limit:
     enabled: true
+  exchange-rate:
+    api-url: ${EXCHANGE_RATE_API_URL:https://api.exchangerate-api.com/v4/latest/CNY}
+    connect-timeout-seconds: 3
+    read-timeout-seconds: 5

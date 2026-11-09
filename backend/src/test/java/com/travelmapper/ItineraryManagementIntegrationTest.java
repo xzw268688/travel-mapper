@@ -82,7 +82,8 @@ class ItineraryManagementIntegrationTest extends AiTestSupport {
 
         mockMvc.perform(withToken(delete("/api/itinerary/" + itineraryId), user))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.countryStatusAfter").value("GRAY"));
+                .andExpect(jsonPath("$.data.countryStatusAfter").value("GRAY"))
+                .andExpect(jsonPath("$.data.tripDeleted").value(true));
         mockMvc.perform(withToken(get("/api/itinerary/" + itineraryId), user))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(2003));
@@ -91,8 +92,7 @@ class ItineraryManagementIntegrationTest extends AiTestSupport {
                 .andExpect(status().isNotFound());
         mockMvc.perform(withToken(get("/api/trips").param("countryCode", "JP"), user))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(1))
-                .andExpect(jsonPath("$.data[0].itineraryCount").value(0));
+                .andExpect(jsonPath("$.data.length()").value(0));
 
         User invalid = createVerifiedUser("itinvalid");
         mockMvc.perform(withToken(post("/api/itinerary/save"), invalid)
@@ -194,6 +194,48 @@ class ItineraryManagementIntegrationTest extends AiTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"越权\"}"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void spotExtendedFieldsRoundTripAndTruncate() throws Exception {
+        User user = createVerifiedUser("spotfields");
+        LocalDate start = LocalDate.now().plusDays(1);
+        Map<String, Object> extended = spot("浅草寺", "AI");
+        extended.put("category", "寺庙");
+        extended.put("ticketPrice", "约 500 円");
+        extended.put("highlights", "雷门");
+        extended.put("bestTime", "上午");
+        extended.put("nearestStation", "浅草站");
+        extended.put("reservationRequired", true);
+        extended.put("area", "台东区");
+        extended.put("warningNotes", "周末人多");
+
+        long itineraryId = save(user, "扩展字段", start,
+                List.of(day(1, start, "TYO", List.of(extended))));
+        JsonNode spot = detail(user, itineraryId).path("days").get(0).path("spots").get(0);
+        assertThat(spot.path("category").asText()).isEqualTo("寺庙");
+        assertThat(spot.path("ticketPrice").asText()).isEqualTo("约 500 円");
+        assertThat(spot.path("highlights").asText()).isEqualTo("雷门");
+        assertThat(spot.path("bestTime").asText()).isEqualTo("上午");
+        assertThat(spot.path("nearestStation").asText()).isEqualTo("浅草站");
+        assertThat(spot.path("reservationRequired").asBoolean()).isTrue();
+        assertThat(spot.path("area").asText()).isEqualTo("台东区");
+        assertThat(spot.path("warningNotes").asText()).isEqualTo("周末人多");
+
+        long dayId = detail(user, itineraryId).path("days").get(0).path("dayId").asLong();
+        MvcResult added = mockMvc.perform(withToken(post("/api/itinerary/" + itineraryId
+                        + "/days/" + dayId + "/spots"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("name", "长字段", "ticketPrice", "长".repeat(100)))))
+                .andExpect(status().isOk()).andReturn();
+        long spotId = data(added).path("spotId").asLong();
+
+        JsonNode spots = detail(user, itineraryId).path("days").get(0).path("spots");
+        JsonNode truncated = spots.get(spots.size() - 1);
+        assertThat(truncated.path("spotId").asLong()).isEqualTo(spotId);
+        assertThat(truncated.path("ticketPrice").asText()).hasSize(64);
+        assertThat(truncated.path("category").asText()).isEmpty();
+        assertThat(truncated.path("reservationRequired").asBoolean()).isFalse();
     }
 
     @Test
@@ -336,6 +378,62 @@ class ItineraryManagementIntegrationTest extends AiTestSupport {
     }
 
     @Test
+    void checklistSupportsCustomItemsAndBatchSave() throws Exception {
+        User user = createVerifiedUser("prepcustom");
+        LocalDate start = LocalDate.now().plusDays(1);
+        long itineraryId = save(user, "自定义清单", start,
+                List.of(day(1, start, "TYO", List.of())));
+
+        mockMvc.perform(withToken(get("/api/prep/checklist/template"), user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items.length()").value(10));
+
+        MvcResult created = mockMvc.perform(withToken(post("/api/prep/checklist/items"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "itineraryId", itineraryId,
+                                "title", "租车",
+                                "description", "提前预订",
+                                "daysBefore", 10))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.custom").value(true))
+                .andExpect(jsonPath("$.data.itemKey").value(org.hamcrest.Matchers.startsWith("CUSTOM_")))
+                .andReturn();
+        long itemId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+        String customKey = objectMapper.readTree(created.getResponse().getContentAsString())
+                .path("data").path("itemKey").asText();
+
+        mockMvc.perform(withToken(get("/api/prep/checklist").param("itineraryId", String.valueOf(itineraryId)), user))
+                .andExpect(jsonPath("$.data.items.length()").value(11))
+                .andExpect(jsonPath("$.data.items[10].itemKey").value(customKey));
+
+        mockMvc.perform(withToken(delete("/api/prep/checklist/items/" + itemId), user))
+                .andExpect(status().isOk());
+        mockMvc.perform(withToken(get("/api/prep/checklist").param("itineraryId", String.valueOf(itineraryId)), user))
+                .andExpect(jsonPath("$.data.items.length()").value(10));
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        items.add(Map.of("itemKey", "VISA", "title", "签证", "checked", true));
+        items.add(Map.of("itemKey", "CUSTOM_TEST123", "title", "租车",
+                "description", "提前预订", "daysBefore", 10, "checked", true, "custom", true));
+        mockMvc.perform(withToken(put("/api/prep/checklist/batch"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("itineraryId", itineraryId, "items", items))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items.length()").value(11))
+                .andExpect(jsonPath("$.data.items[10].itemKey").value("CUSTOM_TEST123"))
+                .andExpect(jsonPath("$.data.items[10].checked").value(true))
+                .andExpect(jsonPath("$.data.items[0].checked").value(true));
+
+        mockMvc.perform(withToken(put("/api/prep/checklist/batch"), user)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("itineraryId", itineraryId, "items", List.of()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items.length()").value(10));
+    }
+
+    @Test
     void checklistAndOfficialLinks() throws Exception {
         User user = createVerifiedUser("prep");
         LocalDate start = LocalDate.now().plusDays(1);
@@ -344,7 +442,7 @@ class ItineraryManagementIntegrationTest extends AiTestSupport {
 
         mockMvc.perform(withToken(get("/api/prep/checklist").param("itineraryId", String.valueOf(itineraryId)), user))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.items.length()").value(7))
+                .andExpect(jsonPath("$.data.items.length()").value(10))
                 .andExpect(jsonPath("$.data.items[0].itemKey").value("VISA"))
                 .andExpect(jsonPath("$.data.items[0].checked").value(false));
         mockMvc.perform(withToken(put("/api/prep/checklist"), user)

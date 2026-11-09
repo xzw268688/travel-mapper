@@ -49,7 +49,6 @@ const filters = reactive({
   cityCode: '',
   tripId: null as number | null,
   category: '',
-  ungrouped: false,
   range: [] as string[]
 })
 
@@ -186,14 +185,20 @@ watch(
 watch(
   () => form.country,
   async (code) => {
-    form.tripId = null
     formTrips.value = []
-    if (code) {
-      try {
-        formTrips.value = await getTrips(code)
-      } catch {
-        formTrips.value = []
+    if (!code) {
+      form.tripId = null
+      return
+    }
+    try {
+      const trips = await getTrips(code)
+      formTrips.value = trips
+      // 只有当前归档不属于新国家时才清空，避免编辑表单回填时丢失归档。
+      if (form.tripId && !trips.some((trip) => trip.id === form.tripId)) {
+        form.tripId = null
       }
+    } catch {
+      formTrips.value = []
     }
   }
 )
@@ -211,7 +216,6 @@ function filterParams(): Record<string, unknown> {
     countryCode: filters.countryCode || undefined,
     cityCode: filters.cityCode || undefined,
     tripId: filters.tripId ?? undefined,
-    ungrouped: filters.ungrouped || undefined,
     category: filters.category || undefined,
     from: filters.range?.[0] || undefined,
     to: filters.range?.[1] || undefined
@@ -235,7 +239,9 @@ async function loadMonthSummary(): Promise<void> {
   try {
     monthSummary.value = await getExpenseSummary('country', {
       countryCode: filters.countryCode || undefined,
+      cityCode: filters.cityCode || undefined,
       tripId: filters.tripId ?? undefined,
+      category: filters.category || undefined,
       from,
       to
     })
@@ -253,7 +259,6 @@ async function loadList(): Promise<void> {
       countryCode: filters.countryCode || undefined,
       cityCode: filters.cityCode || undefined,
       tripId: filters.tripId ?? undefined,
-      ungrouped: filters.ungrouped || undefined,
       category: filters.category || undefined,
       from: filters.range?.[0] || undefined,
       to: filters.range?.[1] || undefined
@@ -271,7 +276,9 @@ async function loadSummary(): Promise<void> {
   try {
     summary.value = await getExpenseSummary(groupBy.value, {
       countryCode: filters.countryCode || undefined,
+      cityCode: filters.cityCode || undefined,
       tripId: filters.tripId ?? undefined,
+      category: filters.category || undefined,
       from: filters.range?.[0] || undefined,
       to: filters.range?.[1] || undefined
     })
@@ -290,7 +297,6 @@ function resetFilters(): void {
   filters.cityCode = ''
   filters.tripId = null
   filters.category = ''
-  filters.ungrouped = false
   filters.range = []
   filterCities.value = []
   filterTrips.value = []
@@ -394,9 +400,9 @@ async function remove(row: ExpenseResponse): Promise<void> {
     return
   }
   try {
-    await deleteExpense(row.id)
+    const result = await deleteExpense(row.id)
     await loadAll()
-    ElMessage.success('已删除')
+    ElMessage.success(result.tripDeleted ? '已删除，旅行已无内容并自动清理' : '已删除')
   } catch (error) {
     ElMessage.error((error as Error).message || '删除失败')
   }
@@ -648,7 +654,12 @@ function todayString(): string {
 <template>
   <div class="plan-page">
     <el-card>
-      <template #header><div class="trip-title">记账</div></template>
+      <template #header>
+        <div class="expense-card-head">
+          <div class="trip-title">记账</div>
+          <el-button type="success" @click="openCreate">记一笔</el-button>
+        </div>
+      </template>
       <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
         <el-select v-model="filters.countryCode" placeholder="全部国家" clearable filterable style="width: 160px">
           <el-option v-for="item in countries" :key="item.code" :label="item.nameZh" :value="item.code" />
@@ -684,13 +695,11 @@ function todayString(): string {
           end-placeholder="结束日期"
           style="width: 260px"
         />
-        <el-checkbox v-model="filters.ungrouped">仅未归组</el-checkbox>
         <el-button type="primary" @click="search">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
-        <el-button type="success" @click="openCreate">记一笔</el-button>
       </div>
       <div class="meta" style="margin-top: 8px">
-        汇总支持国家、旅行与日期筛选；列表筛选同时支持城市、分类与未归组。
+        列表、汇总与月度合计使用相同的筛选条件（月度合计固定按所选月份统计）。
       </div>
     </el-card>
 
@@ -887,6 +896,25 @@ function todayString(): string {
 </template>
 
 <style scoped>
+.expense-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* 移动端：表格与筛选控件的固有宽度会把卡片撑出视口，
+   限制卡片宽度并让卡片内部横向滚动，保证标题栏操作按钮可见。 */
+@media (max-width: 768px) {
+  :deep(.el-card) {
+    max-width: 100%;
+  }
+
+  :deep(.el-card__body) {
+    overflow-x: auto;
+  }
+}
 .expense-charts {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);

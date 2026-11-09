@@ -84,7 +84,12 @@ export interface TripGroup {
   tripName: string
   startDate: string | null
   endDate: string | null
-  status: 'PLANNED' | 'COMPLETED' 
+  effectiveStartDate: string | null
+  effectiveEndDate: string | null
+  status: 'PLANNED' | 'COMPLETED'
+  effectiveStatus: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED'
+  statusManual: boolean
+  expired: boolean
   subtotalCny: string
   cities: CityGroup[]
 }
@@ -128,11 +133,16 @@ export interface TripView {
   name: string
   startDate: string | null
   endDate: string | null
+  effectiveStartDate: string | null
+  effectiveEndDate: string | null
   itineraryCount: number
   noteCount: number
   expenseCount: number
   expenseCny: string
   status: 'PLANNED' | 'COMPLETED'
+  effectiveStatus: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED'
+  statusManual: boolean
+  expired: boolean
   createdAt: string
 }
 

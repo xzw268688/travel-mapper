@@ -94,7 +94,17 @@ class ItineraryGenerationIntegrationTest extends AuthTestSupport {
                 .andExpect(jsonPath("$.data.quota.freeUsedToday").value(1))
                 .andExpect(jsonPath("$.data.deduplicated").value(false))
                 .andReturn();
-        JsonNode firstData = objectMapper.readTree(first.getResponse().getContentAsString()).path("data");
+        JsonNode firstData = objectMapper.readTree(
+                first.getResponse().getContentAsString(StandardCharsets.UTF_8)).path("data");
+        JsonNode firstSpot = firstData.path("days").get(0).path("spots").get(0);
+        assertThat(firstSpot.path("category").asText()).isEqualTo("寺庙");
+        assertThat(firstSpot.path("ticketPrice").asText()).isEqualTo("约 500 円");
+        assertThat(firstSpot.path("highlights").asText()).isEqualTo("亮点1");
+        assertThat(firstSpot.path("bestTime").asText()).isEqualTo("上午");
+        assertThat(firstSpot.path("nearestStation").asText()).isEqualTo("浅草站");
+        assertThat(firstSpot.path("reservationRequired").asBoolean()).isTrue();
+        assertThat(firstSpot.path("area").asText()).isEqualTo("台东区");
+        assertThat(firstSpot.path("warningNotes").asText()).isEqualTo("周末人多");
         assertThat(firstData.path("warnings").size()).isZero();
         assertThat(firstData.path("days").get(0).path("cityCode").asText()).isEqualTo("TYO");
         assertThat(firstData.path("days").get(1).path("cityCode").asText()).isEqualTo("OSA");

@@ -13,6 +13,7 @@ public class AppProperties {
     private Search search = new Search();
     private RateLimit rateLimit = new RateLimit();
     private Mail mail = new Mail();
+    private ExchangeRate exchangeRate = new ExchangeRate();
 
     @Data
     public static class Security {
@@ -20,9 +21,15 @@ public class AppProperties {
          * Temporary development-only identity stub. JWT is authoritative when an
          * Authorization header is present. Must be false in production.
          */
-        private boolean adminStubEnabled = true;
+        private boolean adminStubEnabled = false;
+        /**
+         * 仅本地开发/集成测试显式开启；生产环境保持 false，防止误用 X-User-* 身份头。
+         */
+        private boolean allowInsecureDevStub = false;
         private String jwtSecret = "";
         private long jwtTtlSeconds = 604800;
+        private String adminUsername = "admin";
+        private String adminPassword = "";
     }
 
     @Data
@@ -62,5 +69,12 @@ public class AppProperties {
     @Data
     public static class RateLimit {
         private boolean enabled = true;
+    }
+
+    @Data
+    public static class ExchangeRate {
+        private String apiUrl = "https://api.exchangerate-api.com/v4/latest/CNY";
+        private int connectTimeoutSeconds = 3;
+        private int readTimeoutSeconds = 5;
     }
 }

@@ -24,7 +24,12 @@ public record CountryDrawerResponse(
             String tripName,
             LocalDate startDate,
             LocalDate endDate,
+            LocalDate effectiveStartDate,
+            LocalDate effectiveEndDate,
             String status,
+            String effectiveStatus,
+            boolean statusManual,
+            boolean expired,
             String subtotalCny,
             List<CityGroup> cities) {
     }
