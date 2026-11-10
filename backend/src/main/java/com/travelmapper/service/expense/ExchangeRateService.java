@@ -2,6 +2,7 @@ package com.travelmapper.service.expense;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.travelmapper.common.api.BusinessException;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.security.CurrentUser;
 import com.travelmapper.controller.admin.dto.ExchangeRateDtos;
@@ -30,13 +31,16 @@ public class ExchangeRateService {
     private final JdbcTemplate jdbcTemplate;
     private final AuditLogService auditLogService;
     private final ExchangeRateProvider provider;
+    private final TimeProvider timeProvider;
 
     public ExchangeRateService(ExchangeRateMapper mapper, JdbcTemplate jdbcTemplate,
-                               AuditLogService auditLogService, ExchangeRateProvider provider) {
+                               AuditLogService auditLogService, ExchangeRateProvider provider,
+                               TimeProvider timeProvider) {
         this.mapper = mapper;
         this.jdbcTemplate = jdbcTemplate;
         this.auditLogService = auditLogService;
         this.provider = provider;
+        this.timeProvider = timeProvider;
     }
 
     public List<ExchangeRateDtos.RateView> list() {
@@ -55,7 +59,7 @@ public class ExchangeRateService {
         List<ExchangeRate> existing = mapper.selectList(new LambdaQueryWrapper<ExchangeRate>()
                 .orderByAsc(ExchangeRate::getCurrency));
         if (existing.isEmpty()) {
-            return new ExchangeRateDtos.RefreshResponse(provider.source(), LocalDateTime.now(),
+            return new ExchangeRateDtos.RefreshResponse(provider.source(), timeProvider.now(),
                     apply, 0, 0, 0, List.of());
         }
         Set<String> currencies = existing.stream()
@@ -105,7 +109,7 @@ public class ExchangeRateService {
             detail.put("changes", changes);
             auditLogService.record(CurrentUser.id(), "RATE_REFRESH", "RATE", null, detail, null);
         }
-        return new ExchangeRateDtos.RefreshResponse(provider.source(), LocalDateTime.now(),
+        return new ExchangeRateDtos.RefreshResponse(provider.source(), timeProvider.now(),
                 apply, updated, unchanged, unsupported, items);
     }
 

@@ -5,6 +5,7 @@ import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.api.PageRequest;
 import com.travelmapper.common.api.PageResult;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.admin.dto.AdminAnnouncementDetailView;
 import com.travelmapper.controller.admin.dto.AdminAnnouncementView;
 import com.travelmapper.controller.admin.dto.AnnouncementRequest;
@@ -49,17 +50,20 @@ public class AnnouncementService {
     private final UserMapper userMapper;
     private final AuditLogService auditLogService;
     private final JdbcTemplate jdbcTemplate;
+    private final TimeProvider timeProvider;
 
     public AnnouncementService(AnnouncementMapper announcementMapper,
                                AnnouncementReadMapper readMapper,
                                UserMapper userMapper,
                                AuditLogService auditLogService,
-                               JdbcTemplate jdbcTemplate) {
+                               JdbcTemplate jdbcTemplate,
+                               TimeProvider timeProvider) {
         this.announcementMapper = announcementMapper;
         this.readMapper = readMapper;
         this.userMapper = userMapper;
         this.auditLogService = auditLogService;
         this.jdbcTemplate = jdbcTemplate;
+        this.timeProvider = timeProvider;
     }
 
     public PageResult<AdminAnnouncementView> adminList(String status, String type, String keyword,
@@ -105,8 +109,8 @@ public class AnnouncementService {
                             readCount,
                             totalUsers,
                             readRate(readCount, totalUsers),
-                            toLocalDateTime(rs.getTimestamp("created_at")),
-                            toLocalDateTime(rs.getTimestamp("updated_at")));
+                            rs.getObject("created_at", LocalDateTime.class),
+                            rs.getObject("updated_at", LocalDateTime.class));
                 },
                 pageParams.toArray());
         return PageResult.of(total == null ? 0 : total, request, rows);
@@ -261,7 +265,7 @@ public class AnnouncementService {
         AnnouncementRead read = new AnnouncementRead();
         read.setAnnouncementId(id);
         read.setUserId(userId);
-        read.setReadAt(LocalDateTime.now());
+        read.setReadAt(timeProvider.now());
         try {
             readMapper.insert(read);
         } catch (DuplicateKeyException ignored) {

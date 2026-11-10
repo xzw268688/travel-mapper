@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.common.api.PageRequest;
 import com.travelmapper.common.api.PageResult;
 import com.travelmapper.common.security.CurrentUser;
@@ -77,6 +78,7 @@ public class NoteService {
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final TimeProvider timeProvider;
     private final SecureRandom random = new SecureRandom();
 
     @Value("${app.share.base-url:http://localhost:8080}")
@@ -89,7 +91,7 @@ public class NoteService {
                        StorageUrlService storageUrlService, NoteMediaValidator mediaValidator,
                        SensitiveWordFilter sensitiveWordFilter,
                        AuditLogService auditLogService, ObjectMapper objectMapper,
-                       JdbcTemplate jdbcTemplate) {
+                       JdbcTemplate jdbcTemplate, TimeProvider timeProvider) {
         this.noteMapper = noteMapper;
         this.shareMapper = shareMapper;
         this.itineraryMapper = itineraryMapper;
@@ -105,6 +107,7 @@ public class NoteService {
         this.auditLogService = auditLogService;
         this.objectMapper = objectMapper;
         this.jdbcTemplate = jdbcTemplate;
+        this.timeProvider = timeProvider;
     }
 
     @Transactional
@@ -155,7 +158,7 @@ public class NoteService {
             } else {
                 // 未指定时按创建日期自动匹配归档；没有归档就新建，保证不会留在未归组。
                 Trip matched = tripService.resolveOrCreateForDate(
-                        userId, countryCode, LocalDate.now());
+                        userId, countryCode, timeProvider.today());
                 tripId = matched.getId();
             }
         }
@@ -348,7 +351,7 @@ public class NoteService {
         NoteShare share = new NoteShare();
         share.setNoteId(noteId);
         share.setToken(generateToken());
-        share.setExpireAt(days == 0 ? null : LocalDateTime.now().plusDays(days));
+        share.setExpireAt(days == 0 ? null : timeProvider.now().plusDays(days));
         share.setRevoked(false);
         shareMapper.insert(share);
         note.setVisibility(Visibility.SHARED);
@@ -374,7 +377,7 @@ public class NoteService {
         NoteShare share = shareMapper.selectOne(new LambdaQueryWrapper<NoteShare>()
                 .eq(NoteShare::getToken, token));
         if (share == null || Boolean.TRUE.equals(share.getRevoked())
-                || (share.getExpireAt() != null && share.getExpireAt().isBefore(LocalDateTime.now()))) {
+                || (share.getExpireAt() != null && share.getExpireAt().isBefore(timeProvider.now()))) {
             throw new BusinessException(ErrorCode.SHARE_INVALID);
         }
         TravelNote note = noteMapper.selectById(share.getNoteId());
@@ -395,7 +398,7 @@ public class NoteService {
         NoteShare share = shareMapper.selectOne(new LambdaQueryWrapper<NoteShare>()
                 .eq(NoteShare::getToken, token));
         if (share == null || Boolean.TRUE.equals(share.getRevoked())
-                || (share.getExpireAt() != null && share.getExpireAt().isBefore(LocalDateTime.now()))) {
+                || (share.getExpireAt() != null && share.getExpireAt().isBefore(timeProvider.now()))) {
             throw new BusinessException(ErrorCode.SHARE_INVALID);
         }
         TravelNote note = noteMapper.selectById(share.getNoteId());
@@ -515,12 +518,9 @@ public class NoteService {
                             rs.getInt("takedown") == 1,
                             rs.getString("takedown_reason"),
                             rs.getInt("has_media") == 1,
-                            rs.getTimestamp("media_reviewed_at") == null ? null
-                                    : rs.getTimestamp("media_reviewed_at").toLocalDateTime(),
-                            rs.getTimestamp("created_at") == null ? null
-                                    : rs.getTimestamp("created_at").toLocalDateTime(),
-                            rs.getTimestamp("updated_at") == null ? null
-                                    : rs.getTimestamp("updated_at").toLocalDateTime());
+                            rs.getObject("media_reviewed_at", LocalDateTime.class),
+                            rs.getObject("created_at", LocalDateTime.class),
+                            rs.getObject("updated_at", LocalDateTime.class));
                 },
                 pageParams.toArray());
         return PageResult.of(total == null ? 0 : total, request, rows);
@@ -588,7 +588,7 @@ public class NoteService {
         }
         note.setTakedown(true);
         note.setTakedownReason(reason);
-        note.setTakedownAt(LocalDateTime.now());
+        note.setTakedownAt(timeProvider.now());
         note.setTakedownBy(adminId);
         noteMapper.updateById(note);
         int revoked = revokeAllShares(noteId);
@@ -606,7 +606,7 @@ public class NoteService {
         if (note.getMediaReviewedAt() != null) {
             return new NoteDtos.MediaReviewResponse(noteId, true, note.getMediaReviewedAt());
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = timeProvider.now();
         note.setMediaReviewedAt(now);
         note.setMediaReviewedBy(adminId);
         noteMapper.updateById(note);
@@ -685,7 +685,7 @@ public class NoteService {
                 .eq(NoteShare::getNoteId, noteId)
                 .eq(NoteShare::getRevoked, false)
                 .and(wrapper -> wrapper.isNull(NoteShare::getExpireAt)
-                        .or().gt(NoteShare::getExpireAt, LocalDateTime.now()))
+                        .or().gt(NoteShare::getExpireAt, timeProvider.now()))
                 .orderByDesc(NoteShare::getId)
                 .last("LIMIT 1"));
     }
@@ -695,7 +695,7 @@ public class NoteService {
                 .eq(NoteShare::getNoteId, noteId)
                 .eq(NoteShare::getRevoked, false)
                 .set(NoteShare::getRevoked, true)
-                .set(NoteShare::getRevokedAt, LocalDateTime.now()));
+                .set(NoteShare::getRevokedAt, timeProvider.now()));
     }
 
     private ShareDtos.ShareResponse shareResponse(NoteShare share, boolean created) {

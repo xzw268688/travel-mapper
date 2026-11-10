@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '../utils/datetime'
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -155,7 +156,7 @@ async function reject(): Promise<void> {
 }
 
 function formatTime(value: string | null | undefined): string {
-  return value ? value.replace('T', ' ').slice(0, 16) : '—'
+  return formatDateTime(value) || '—'
 }
 </script>
 

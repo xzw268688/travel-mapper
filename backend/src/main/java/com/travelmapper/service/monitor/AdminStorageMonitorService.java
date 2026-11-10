@@ -1,5 +1,6 @@
 package com.travelmapper.service.monitor;
 
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.admin.dto.MonitorDtos;
 import com.travelmapper.service.storage.StorageConfig;
 import com.travelmapper.service.storage.StorageProvider;
@@ -16,10 +17,12 @@ public class AdminStorageMonitorService {
     private static final Duration CACHE_TTL = Duration.ofMinutes(5);
 
     private final StorageProviderHolder providerHolder;
+    private final TimeProvider timeProvider;
     private volatile CachedStats cached;
 
-    public AdminStorageMonitorService(StorageProviderHolder providerHolder) {
+    public AdminStorageMonitorService(StorageProviderHolder providerHolder, TimeProvider timeProvider) {
         this.providerHolder = providerHolder;
+        this.timeProvider = timeProvider;
     }
 
     public MonitorDtos.StorageMetrics metrics() {
@@ -49,7 +52,7 @@ public class AdminStorageMonitorService {
             if (current != null && current.configKey().equals(configKey) && !current.expired()) {
                 return current.stats();
             }
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = timeProvider.now();
             if (!config.isConfigured()) {
                 return new MonitorDtos.StorageStats(0, 0, false, false, now);
             }

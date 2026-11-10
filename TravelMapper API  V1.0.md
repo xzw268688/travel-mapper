@@ -40,8 +40,8 @@
 | 传输 | 生产 HTTPS；本地 HTTP |
 | 编码 | UTF-8 |
 | Content-Type | `application/json`；文件上传走 OSS 直传，不经后端 |
-| 时间格式 | `yyyy-MM-dd'T'HH:mm:ss`（无时区，服务端统一按 `Asia/Shanghai` 解释） |
-| 日期格式 | `yyyy-MM-dd` |
+| 时间格式 | `yyyy-MM-dd'T'HH:mm:ss`（无时区，固定表示北京时间墙钟值；客户端不得按浏览器时区转换，后台日期时间输入同样按北京时间解释） |
+| 日期格式 | `yyyy-MM-dd`（北京时间自然日；`from`/`to` 过滤按北京时间当天首尾，含首尾） |
 | 金额格式 | **字符串**，保留两位小数，如 `"12500.00"`；避免 JS 浮点误差 |
 | 字段映射 | API 用 camelCase，DB 用 snake_case，由 MyBatis-Plus 自动映射。**唯一例外**：行程天的 API 字段为 `date`，对应 DB 列 `visit_date`（`date` 是 MySQL 关键字），需在 DTO 上用 `@TableField("visit_date")` 显式指定 |
 

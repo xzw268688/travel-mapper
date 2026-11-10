@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '../utils/datetime'
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -211,8 +212,8 @@ function statusTag(value: AnnouncementStatus): 'info' | 'success' | 'warning' {
   return STATUS_TAG[value]
 }
 
-function formatTime(value: string | null): string {
-  return value ? value.replace('T', ' ').slice(0, 16) : '—'
+function formatTime(value: string | null | undefined): string {
+  return formatDateTime(value) || '—'
 }
 
 function readRateText(row: AdminAnnouncementView): string {
@@ -329,20 +330,20 @@ function readRateText(row: AdminAnnouncementView): string {
         <el-form-item label="正文（纯文本，保留换行）" required>
           <el-input v-model="form.content" type="textarea" :rows="10" maxlength="5000" show-word-limit />
         </el-form-item>
-        <el-form-item label="生效时间（可选）">
+        <el-form-item label="生效时间（北京时间，可选）">
           <div style="display: flex; gap: 12px; flex-wrap: wrap">
             <el-date-picker
               v-model="form.publishAt"
               type="datetime"
               value-format="YYYY-MM-DDTHH:mm:ss"
-              placeholder="开始时间，留空为发布即生效"
+              placeholder="开始时间（北京时间），留空为发布即生效"
               style="width: 230px"
             />
             <el-date-picker
               v-model="form.expireAt"
               type="datetime"
               value-format="YYYY-MM-DDTHH:mm:ss"
-              placeholder="结束时间，留空为长期有效"
+              placeholder="结束时间（北京时间），留空为长期有效"
               style="width: 230px"
             />
           </div>

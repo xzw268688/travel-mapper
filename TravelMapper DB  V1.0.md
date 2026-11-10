@@ -41,7 +41,7 @@
 | 枚举 | `VARCHAR(16)` + 应用层校验（不用 MySQL `ENUM`，便于扩展） |
 | 布尔 | `TINYINT(1)`，0/1 |
 | JSON | MySQL `JSON` 类型，仅用于结构不固定的字段 |
-| 时区 | 服务端统一 `Asia/Shanghai`；`DATETIME` 不带时区 |
+| 时区 | 全系统固定北京时间（`Asia/Shanghai`）：`DATETIME` 存北京时间墙钟值且不带时区；`DATE` 存北京时间自然日；应用、JDBC 会话与数据库默认时区均统一为 +08:00，业务切日不依赖数据库默认时区 |
 
 ### 1.2 DTO 与字段映射
 

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -60,7 +61,7 @@ public class AdminAuditService {
                         + "a.detail, a.ip, a.created_at" + where
                         + " ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
                 (rs, rowNum) -> {
-                    Timestamp created = rs.getTimestamp("created_at");
+                    LocalDateTime created = rs.getObject("created_at", LocalDateTime.class);
                     return new AdminAuditView(
                             rs.getLong("id"),
                             rs.getObject("user_id") == null ? null : rs.getLong("user_id"),
@@ -71,7 +72,7 @@ public class AdminAuditService {
                             rs.getObject("target_id") == null ? null : rs.getLong("target_id"),
                             rs.getString("detail"),
                             rs.getString("ip"),
-                            created == null ? null : created.toLocalDateTime());
+                            created);
                 },
                 pageParams.toArray());
         return PageResult.of(total == null ? 0 : total, request, rows);

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.itinerary.dto.GenerateItineraryResponse;
 import com.travelmapper.controller.itinerary.dto.ItineraryDtos;
 import com.travelmapper.repository.entity.City;
@@ -61,6 +62,7 @@ public class ItineraryService {
     private final QuotaService quotaService;
     private final ItineraryGenerationService generationService;
     private final AuditLogService auditLogService;
+    private final TimeProvider timeProvider;
 
     public ItineraryService(ItineraryMapper itineraryMapper, ItineraryDayMapper dayMapper,
                             ItinerarySpotMapper spotMapper, TripMapper tripMapper,
@@ -68,7 +70,7 @@ public class ItineraryService {
                             MapService mapService, GuideLinkSanitizer guideLinkSanitizer,
                             ObjectMapper objectMapper, QuotaService quotaService,
                             ItineraryGenerationService generationService,
-                            AuditLogService auditLogService) {
+                            AuditLogService auditLogService, TimeProvider timeProvider) {
         this.itineraryMapper = itineraryMapper;
         this.dayMapper = dayMapper;
         this.spotMapper = spotMapper;
@@ -81,6 +83,7 @@ public class ItineraryService {
         this.quotaService = quotaService;
         this.generationService = generationService;
         this.auditLogService = auditLogService;
+        this.timeProvider = timeProvider;
     }
 
     @Transactional
@@ -602,7 +605,7 @@ public class ItineraryService {
                 itinerary.getStartDate(),
                 itinerary.getEndDate(),
                 itinerary.getStatus().name(),
-                itinerary.getEndDate().isBefore(LocalDate.now()),
+                itinerary.getEndDate().isBefore(timeProvider.today()),
                 parseGuides(itinerary.getGuidesJson()),
                 parsePreparations(itinerary.getPreparationsJson()),
                 dayViews,

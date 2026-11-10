@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDate as formatDateValue } from '../utils/datetime'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -241,8 +242,8 @@ function visibilityLabel(value: string): string {
   return value === 'SHARED' ? '已分享' : '私密'
 }
 
-function formatDate(value: string | null): string {
-  return value ? value.slice(0, 10) : '—'
+function formatDate(value: string | null | undefined): string {
+  return formatDateValue(value) || '—'
 }
 </script>
 

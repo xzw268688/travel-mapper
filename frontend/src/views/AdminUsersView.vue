@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime, formatDateTimeSeconds } from '../utils/datetime'
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -167,7 +168,7 @@ async function openDetail(user: AdminUserView): Promise<void> {
   detailLoading.value = true
   try {
     detail.value = await getUserDetail(user.id)
-    vipDate.value = detail.value.vipExpireAt ? detail.value.vipExpireAt.slice(0, 19) : ''
+    vipDate.value = formatDateTimeSeconds(detail.value.vipExpireAt)
   } catch (error) {
     ElMessage.error((error as Error).message || '加载用户详情失败')
   } finally {
@@ -181,7 +182,7 @@ async function submitVip(expireAt: string | null): Promise<void> {
   try {
     const result = await setUserVip(detail.value.id, expireAt)
     detail.value.vipExpireAt = result.vipExpireAt
-    vipDate.value = result.vipExpireAt ? result.vipExpireAt.slice(0, 19) : ''
+    vipDate.value = formatDateTimeSeconds(result.vipExpireAt)
     await load()
     ElMessage.success(expireAt ? 'VIP 到期日已更新' : 'VIP 已清除')
   } catch (error) {
@@ -191,8 +192,8 @@ async function submitVip(expireAt: string | null): Promise<void> {
   }
 }
 
-function formatTime(value: string | null): string {
-  return value ? value.replace('T', ' ').slice(0, 16) : '—'
+function formatTime(value: string | null | undefined): string {
+  return formatDateTime(value) || '—'
 }
 </script>
 
@@ -346,7 +347,7 @@ function formatTime(value: string | null): string {
                 v-model="vipDate"
                 type="datetime"
                 value-format="YYYY-MM-DDTHH:mm:ss"
-                placeholder="设置到期时间"
+                placeholder="设置到期时间（北京时间）"
               />
               <el-button
                 type="primary"
@@ -359,7 +360,7 @@ function formatTime(value: string | null): string {
               <el-button :loading="vipSaving" @click="submitVip(null)">清除 VIP</el-button>
             </div>
             <div class="meta" style="margin-top: 6px">
-              设为过去时间即立即收回；按天数调整请使用列表中的「调整额度」。
+              时间为北京时间；设为过去时间即立即收回；按天数调整请使用列表中的「调整额度」。
             </div>
           </div>
 

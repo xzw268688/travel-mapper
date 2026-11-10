@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTimeSeconds } from '../../utils/datetime'
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { kickOnlineUser, listOnlineUsers, type OnlineUserView } from '../../api/admin'
@@ -70,7 +71,7 @@ function roleLabel(value: string | null): string {
 }
 
 function formatTime(value: string): string {
-  return value ? value.replace('T', ' ').slice(0, 19) : '—'
+  return formatDateTimeSeconds(value) || '—'
 }
 </script>
 

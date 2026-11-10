@@ -3,6 +3,7 @@ package com.travelmapper.service.prep;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.prep.dto.ChecklistDtos;
 import com.travelmapper.repository.entity.Itinerary;
 import com.travelmapper.repository.entity.TripChecklist;
@@ -31,12 +32,14 @@ public class ChecklistService {
     private final TripChecklistMapper checklistMapper;
     private final ItineraryMapper itineraryMapper;
     private final AuditLogService auditLogService;
+    private final TimeProvider timeProvider;
 
     public ChecklistService(TripChecklistMapper checklistMapper, ItineraryMapper itineraryMapper,
-                            AuditLogService auditLogService) {
+                            AuditLogService auditLogService, TimeProvider timeProvider) {
         this.checklistMapper = checklistMapper;
         this.itineraryMapper = itineraryMapper;
         this.auditLogService = auditLogService;
+        this.timeProvider = timeProvider;
     }
 
     /** 新建规划使用的默认模板，不依赖行程。 */
@@ -93,7 +96,7 @@ public class ChecklistService {
             PrepChecklistTemplate.DefaultItem item = template.get();
             checklistMapper.upsert(userId, itinerary.getCountryCode(), itinerary.getId(),
                     item.key(), item.title(), item.description(), item.daysBefore(),
-                    item.sortOrder(), false, checked);
+                    item.sortOrder(), false, checked, timeProvider.now());
         } else {
             TripChecklist row = findByKey(userId, itinerary.getId(), request.getItemKey().trim());
             if (row == null) {
@@ -102,7 +105,7 @@ public class ChecklistService {
             row.setChecked(checked);
             checklistMapper.updateById(row);
         }
-        return new ChecklistDtos.UpdateResponse(request.getItemKey(), checked, LocalDateTime.now());
+        return new ChecklistDtos.UpdateResponse(request.getItemKey(), checked, timeProvider.now());
     }
 
     @Transactional
@@ -159,7 +162,8 @@ public class ChecklistService {
                 PrepChecklistTemplate.DefaultItem def = template.get();
                 checklistMapper.upsert(userId, itinerary.getCountryCode(), itinerary.getId(),
                         def.key(), def.title(), def.description(), def.daysBefore(),
-                        def.sortOrder(), false, Boolean.TRUE.equals(item.getChecked()));
+                        def.sortOrder(), false, Boolean.TRUE.equals(item.getChecked()),
+                        timeProvider.now());
                 continue;
             }
 
@@ -183,7 +187,7 @@ public class ChecklistService {
                     ? current.getSortOrder() : nextSort++;
             checklistMapper.upsert(userId, itinerary.getCountryCode(), itinerary.getId(),
                     customKey, title, description, days, sortOrder, true,
-                    Boolean.TRUE.equals(item.getChecked()));
+                    Boolean.TRUE.equals(item.getChecked()), timeProvider.now());
         }
 
         // 本次没有提交的自定义项视为已删除。

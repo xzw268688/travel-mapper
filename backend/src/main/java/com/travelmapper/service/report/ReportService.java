@@ -7,6 +7,7 @@ import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.api.PageRequest;
 import com.travelmapper.common.api.PageResult;
 import com.travelmapper.common.ratelimit.RedisRateLimiter;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.admin.dto.AcceptReportRequest;
 import com.travelmapper.controller.admin.dto.AdminReportDetailView;
 import com.travelmapper.controller.admin.dto.AdminReportView;
@@ -85,11 +86,12 @@ public class ReportService {
     private final StringRedisTemplate redis;
     private final AuditLogService auditLogService;
     private final JdbcTemplate jdbcTemplate;
+    private final TimeProvider timeProvider;
 
     public ReportService(NoteReportMapper reportMapper, TravelNoteMapper noteMapper,
                          NoteService noteService, RedisRateLimiter rateLimiter,
                          StringRedisTemplate redis, AuditLogService auditLogService,
-                         JdbcTemplate jdbcTemplate) {
+                         JdbcTemplate jdbcTemplate, TimeProvider timeProvider) {
         this.reportMapper = reportMapper;
         this.noteMapper = noteMapper;
         this.noteService = noteService;
@@ -97,6 +99,7 @@ public class ReportService {
         this.redis = redis;
         this.auditLogService = auditLogService;
         this.jdbcTemplate = jdbcTemplate;
+        this.timeProvider = timeProvider;
     }
 
     public ReportDtos.Receipt submit(String token, String clientIp, Long reporterUserId,
@@ -131,7 +134,7 @@ public class ReportService {
                 return new ReportDtos.Receipt(null, true, null);
             }
             try {
-                rateLimiter.check("report:ip:" + hashedIp + ":" + LocalDate.now(),
+                rateLimiter.check("report:ip:" + hashedIp + ":" + timeProvider.today(),
                         ANONYMOUS_DAILY_LIMIT, DAY_SECONDS);
             } catch (RuntimeException ex) {
                 redis.delete(dedupeKey);
@@ -139,7 +142,7 @@ public class ReportService {
             }
         }
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = timeProvider.now();
         NoteReport report = new NoteReport();
         report.setNoteId(note.getId());
         report.setReporterUserId(reporterUserId);
@@ -209,8 +212,8 @@ public class ReportService {
                         rs.getString("note_title"),
                         rs.getString("current_title"),
                         authorName(rs),
-                        toLocalDateTime(rs.getTimestamp("created_at")),
-                        toLocalDateTime(rs.getTimestamp("handled_at"))),
+                        rs.getObject("created_at", LocalDateTime.class),
+                        rs.getObject("handled_at", LocalDateTime.class)),
                 pageParams.toArray());
         return PageResult.of(total == null ? 0 : total, request, rows);
     }
@@ -266,7 +269,7 @@ public class ReportService {
             noteService.adminTakedown(adminId, note.getId(), reason);
         }
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = timeProvider.now();
         reportMapper.update(null, new LambdaUpdateWrapper<NoteReport>()
                 .eq(NoteReport::getNoteId, report.getNoteId())
                 .eq(NoteReport::getStatus, ReportStatus.PENDING)
@@ -297,7 +300,7 @@ public class ReportService {
                 .eq(NoteReport::getId, id)
                 .set(NoteReport::getStatus, ReportStatus.REJECTED)
                 .set(NoteReport::getHandledBy, adminId)
-                .set(NoteReport::getHandledAt, LocalDateTime.now()));
+                .set(NoteReport::getHandledAt, timeProvider.now()));
 
         Map<String, Object> auditDetail = new LinkedHashMap<>();
         auditDetail.put("reportId", id);
@@ -320,17 +323,17 @@ public class ReportService {
                 rs.getString("description"),
                 rs.getString("note_title"),
                 rs.getString("note_content_text"),
-                toLocalDateTime(rs.getTimestamp("note_updated_at")),
+                rs.getObject("note_updated_at", LocalDateTime.class),
                 ReportStatus.valueOf(rs.getString("status")),
                 rs.getObject("handled_by") == null ? null : rs.getLong("handled_by"),
                 displayName(rs.getString("handler_username"), rs.getString("handler_nickname")),
-                toLocalDateTime(rs.getTimestamp("handled_at")),
-                toLocalDateTime(rs.getTimestamp("created_at")),
+                rs.getObject("handled_at", LocalDateTime.class),
+                rs.getObject("created_at", LocalDateTime.class),
                 authorId,
                 authorName(rs),
                 rs.getString("current_title"),
                 rs.getString("current_visibility"),
-                toLocalDateTime(rs.getTimestamp("current_updated_at")),
+                rs.getObject("current_updated_at", LocalDateTime.class),
                 rs.getInt("current_takedown") == 1,
                 currentDeleted != null && rs.getInt("current_deleted") == 1,
                 acceptedByAuthor);

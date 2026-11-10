@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDate as formatDateValue } from '../utils/datetime'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -47,8 +48,8 @@ function categoryLabel(value: string | null): string {
   return value ? CATEGORY_LABELS[value] ?? value : '—'
 }
 
-function formatDate(value: string | null): string {
-  return value ? value.slice(0, 10) : '—'
+function formatDate(value: string | null | undefined): string {
+  return formatDateValue(value) || '—'
 }
 
 const stats = computed(() => {

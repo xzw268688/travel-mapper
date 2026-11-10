@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCities } from '../api/catalog'
+import { addDays } from '../utils/datetime'
 import {
   addDay,
   addSpot,
@@ -351,11 +352,6 @@ async function onSpotDrop(day: DayView, targetIndex: number): Promise<void> {
 
 // ---------- 天 ----------
 
-function addDays(value: string, amount: number): string {
-  const date = new Date(`${value}T00:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + amount)
-  return date.toISOString().slice(0, 10)
-}
 
 function openAddDay(): void {
   if (!detail.value) return

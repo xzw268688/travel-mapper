@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDate as formatDateValue } from '../utils/datetime'
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -78,8 +79,8 @@ function markCoverFailed(item: NoteListItem): void {
   failedCovers.value.add(item.id)
 }
 
-function formatDate(value: string): string {
-  return value ? value.slice(0, 10) : ''
+function formatDate(value: string | null | undefined): string {
+  return formatDateValue(value) || ''
 }
 
 function visibilityLabel(item: NoteListItem): string {

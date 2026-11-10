@@ -4,6 +4,7 @@ import com.travelmapper.common.api.ApiResponse;
 import com.travelmapper.common.api.PageRequest;
 import com.travelmapper.common.api.PageResult;
 import com.travelmapper.common.security.CurrentUser;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.admin.dto.CardBatchStatsView;
 import com.travelmapper.controller.admin.dto.CardKeyView;
 import com.travelmapper.controller.admin.dto.CardRedemptionView;
@@ -37,9 +38,11 @@ public class AdminCardController {
     private static final DateTimeFormatter FILE_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
     private final CardKeyService cardKeyService;
+    private final TimeProvider timeProvider;
 
-    public AdminCardController(CardKeyService cardKeyService) {
+    public AdminCardController(CardKeyService cardKeyService, TimeProvider timeProvider) {
         this.cardKeyService = cardKeyService;
+        this.timeProvider = timeProvider;
     }
 
     @PostMapping("/generate")
@@ -78,7 +81,7 @@ public class AdminCardController {
     @GetMapping("/export")
     public ResponseEntity<byte[]> export(@RequestParam String batchId) {
         byte[] body = cardKeyService.exportCsv(batchId);
-        String filename = "cards_" + batchId + "_" + LocalDateTime.now().format(FILE_TIME) + ".csv";
+        String filename = "cards_" + batchId + "_" + timeProvider.now().format(FILE_TIME) + ".csv";
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .contentType(MediaType.parseMediaType("text/csv;charset=utf-8"))

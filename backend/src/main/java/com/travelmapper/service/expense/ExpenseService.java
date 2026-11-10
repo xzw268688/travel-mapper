@@ -3,6 +3,7 @@ package com.travelmapper.service.expense;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.travelmapper.common.api.BusinessException;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.api.PageRequest;
 import com.travelmapper.common.api.PageResult;
@@ -54,11 +55,13 @@ public class ExpenseService {
     private final TripService tripService;
     private final CatalogService catalogService;
     private final AuditLogService auditLogService;
+    private final TimeProvider timeProvider;
 
     public ExpenseService(ExpenseMapper expenseMapper, ExchangeRateMapper rateMapper,
                           ItineraryMapper itineraryMapper, ItineraryDayMapper itineraryDayMapper,
                           TripMapper tripMapper, TripService tripService,
-                          CatalogService catalogService, AuditLogService auditLogService) {
+                          CatalogService catalogService, AuditLogService auditLogService,
+                          TimeProvider timeProvider) {
         this.expenseMapper = expenseMapper;
         this.rateMapper = rateMapper;
         this.itineraryMapper = itineraryMapper;
@@ -67,6 +70,7 @@ public class ExpenseService {
         this.tripService = tripService;
         this.catalogService = catalogService;
         this.auditLogService = auditLogService;
+        this.timeProvider = timeProvider;
     }
 
     @Transactional
@@ -453,7 +457,7 @@ public class ExpenseService {
     }
 
     private void validateDate(LocalDate date) {
-        if (date == null || date.isAfter(LocalDate.now())) {
+        if (date == null || date.isAfter(timeProvider.today())) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "消费日期不得晚于今天");
         }
     }

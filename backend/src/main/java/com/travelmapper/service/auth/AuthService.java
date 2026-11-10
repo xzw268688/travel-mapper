@@ -9,6 +9,7 @@ import com.travelmapper.common.security.JwtPayload;
 import com.travelmapper.common.security.JwtService;
 import com.travelmapper.common.security.OnlineUserRegistry;
 import com.travelmapper.common.security.UserStatusCache;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.auth.dto.EmailSentResponse;
 import com.travelmapper.controller.auth.dto.LoginRequest;
 import com.travelmapper.controller.auth.dto.LoginResponse;
@@ -59,6 +60,7 @@ public class AuthService {
     private final UserAccountSecurityService accountSecurityService;
     private final StringRedisTemplate redis;
     private final RedisRateLimiter rateLimiter;
+    private final TimeProvider timeProvider;
 
     public AuthService(UserMapper userMapper, PasswordEncoder passwordEncoder,
                        EmailCodeService emailCodeService,
@@ -69,7 +71,8 @@ public class AuthService {
                        QuotaService quotaService, LoginLogService loginLogService,
                        AuditLogService auditLogService,
                        UserAccountSecurityService accountSecurityService,
-                       StringRedisTemplate redis, RedisRateLimiter rateLimiter) {
+                       StringRedisTemplate redis, RedisRateLimiter rateLimiter,
+                       TimeProvider timeProvider) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.emailCodeService = emailCodeService;
@@ -84,6 +87,7 @@ public class AuthService {
         this.accountSecurityService = accountSecurityService;
         this.redis = redis;
         this.rateLimiter = rateLimiter;
+        this.timeProvider = timeProvider;
     }
 
     @Transactional
@@ -200,7 +204,7 @@ public class AuthService {
                     user.getId(), user.getTokenVersion());
             return LoginResponse.twoFactorChallenge(challenge);
         }
-        user.setLastLoginAt(LocalDateTime.now());
+        user.setLastLoginAt(timeProvider.now());
         userMapper.updateById(user);
         recordLogin(user, account, true, null, clientIp, userAgent);
         String jwt = jwtService.issue(user.getId(), user.getRole().name(), user.getTokenVersion());
@@ -250,7 +254,7 @@ public class AuthService {
         redis.opsForValue().set(usedKey, "1",
                 Duration.ofSeconds(JwtService.TWO_FACTOR_CHALLENGE_TTL_SECONDS));
         loginAttemptService.clear(user.getUsername());
-        user.setLastLoginAt(LocalDateTime.now());
+        user.setLastLoginAt(timeProvider.now());
         userMapper.updateById(user);
         recordLogin(user, user.getUsername(), true, null, clientIp, userAgent);
         String jwt = jwtService.issue(user.getId(), user.getRole().name(), user.getTokenVersion());
@@ -350,7 +354,7 @@ public class AuthService {
 
     public UserView toUserView(User user) {
         String plan = user.getVipExpireAt() != null
-                && user.getVipExpireAt().isAfter(LocalDateTime.now()) ? "VIP" : "FREE";
+                && user.getVipExpireAt().isAfter(timeProvider.now()) ? "VIP" : "FREE";
         return new UserView(
                 user.getId(),
                 user.getUsername(),

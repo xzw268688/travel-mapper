@@ -2,6 +2,7 @@ package com.travelmapper.service.storage;
 
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
+import com.travelmapper.common.time.TimeProvider;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -20,6 +21,12 @@ public class ObjectKeyGenerator {
             "video/webm", "webm",
             "video/quicktime", "mov");
 
+    private final TimeProvider timeProvider;
+
+    public ObjectKeyGenerator(TimeProvider timeProvider) {
+        this.timeProvider = timeProvider;
+    }
+
     public String generate(Long userId, String contentType) {
         String extension = CONTENT_TYPE_EXTENSIONS.get(contentType == null
                 ? "" : contentType.toLowerCase(Locale.ROOT));
@@ -29,7 +36,7 @@ public class ObjectKeyGenerator {
                     ? ErrorCode.VIDEO_TYPE_UNSUPPORTED
                     : ErrorCode.IMAGE_TYPE_UNSUPPORTED);
         }
-        LocalDate today = LocalDate.now();
+        LocalDate today = timeProvider.today();
         return "note/%d/%04d/%02d/%s.%s".formatted(
                 userId, today.getYear(), today.getMonthValue(), UUID.randomUUID(), extension);
     }

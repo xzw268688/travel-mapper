@@ -177,6 +177,24 @@ class FeedbackIntegrationTest extends AuthTestSupport {
     }
 
     @Test
+    void adminDateFilterUsesBeijingDayBoundary() throws Exception {
+        User author = createVerifiedUser("fb_tz");
+        String marker = "TZ" + UUID.randomUUID().toString().substring(0, 8);
+        long afterMidnight = insertFeedback(author.getId(), "BUG", "NEW", marker + " 零点后",
+                marker + " 北京时间零点后的反馈正文。", LocalDateTime.of(2026, 11, 10, 0, 30));
+        insertFeedback(author.getId(), "BUG", "NEW", marker + " 前一日",
+                marker + " 北京时间前一日的反馈正文。", LocalDateTime.of(2026, 11, 9, 23, 30));
+
+        mockMvc.perform(asAdmin(get("/api/admin/feedback"))
+                        .param("keyword", marker)
+                        .param("from", "2026-11-10")
+                        .param("to", "2026-11-10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].id").value(afterMidnight));
+    }
+
+    @Test
     void adminFiltersStatsDetailUpdatesAndAudits() throws Exception {
         User author = createVerifiedUser("fb_admin_a");
         User other = createVerifiedUser("fb_admin_b");
@@ -296,8 +314,8 @@ class FeedbackIntegrationTest extends AuthTestSupport {
             statement.setString(3, title);
             statement.setString(4, content);
             statement.setString(5, status);
-            statement.setTimestamp(6, Timestamp.valueOf(createdAt));
-            statement.setTimestamp(7, Timestamp.valueOf(createdAt));
+            statement.setObject(6, createdAt);
+            statement.setObject(7, createdAt);
             return statement;
         }, keyHolder);
         Number key = keyHolder.getKey();

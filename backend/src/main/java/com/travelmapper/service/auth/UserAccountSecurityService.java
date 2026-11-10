@@ -8,6 +8,7 @@ import com.travelmapper.common.crypto.AesCryptoService;
 import com.travelmapper.common.security.JwtService;
 import com.travelmapper.common.security.TotpService;
 import com.travelmapper.common.security.UserStatusCache;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.auth.dto.EmailSentResponse;
 import com.travelmapper.controller.user.dto.ChangeEmailRequest;
 import com.travelmapper.controller.user.dto.ChangePasswordRequest;
@@ -56,6 +57,7 @@ public class UserAccountSecurityService {
     private final AuditLogService auditLogService;
     private final AesCryptoService aesCryptoService;
     private final TotpService totpService;
+    private final TimeProvider timeProvider;
     private final SecureRandom random = new SecureRandom();
 
     public UserAccountSecurityService(UserMapper userMapper,
@@ -67,7 +69,8 @@ public class UserAccountSecurityService {
                                       SecurityNoticeService securityNoticeService,
                                       AuditLogService auditLogService,
                                       AesCryptoService aesCryptoService,
-                                      TotpService totpService) {
+                                      TotpService totpService,
+                                      TimeProvider timeProvider) {
         this.userMapper = userMapper;
         this.recoveryCodeMapper = recoveryCodeMapper;
         this.passwordEncoder = passwordEncoder;
@@ -78,6 +81,7 @@ public class UserAccountSecurityService {
         this.auditLogService = auditLogService;
         this.aesCryptoService = aesCryptoService;
         this.totpService = totpService;
+        this.timeProvider = timeProvider;
     }
 
     @Transactional
@@ -167,7 +171,7 @@ public class UserAccountSecurityService {
         userMapper.update(null, new LambdaUpdateWrapper<User>()
                 .eq(User::getId, userId)
                 .set(User::getTotpEnabled, true)
-                .set(User::getTotpConfirmedAt, LocalDateTime.now()));
+                .set(User::getTotpConfirmedAt, timeProvider.now()));
         userStatusCache.evict(userId);
         auditLogService.record(userId, "USER_2FA_ENABLE", "USER", userId, Map.of(), null);
         securityNoticeService.twoFactorEnabled(user.getEmail());

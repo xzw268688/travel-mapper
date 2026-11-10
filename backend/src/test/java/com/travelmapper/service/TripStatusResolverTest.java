@@ -1,17 +1,31 @@
 package com.travelmapper.service;
 
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.repository.enums.TripStatus;
 import com.travelmapper.service.trip.TripStatusResolver;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class TripStatusResolverTest {
 
-    private final TripStatusResolver resolver = new TripStatusResolver();
+    private final TimeProvider timeProvider = new TimeProvider(
+            Clock.fixed(Instant.parse("2026-11-04T16:00:00Z"), TimeProvider.BEIJING));
+    private final TripStatusResolver resolver = new TripStatusResolver(timeProvider);
     private final LocalDate today = LocalDate.of(2026, 11, 5);
+
+    @Test
+    void defaultResolveUsesBeijingToday() {
+        var result = resolver.resolve(new TripStatusResolver.Snapshot(
+                false, TripStatus.PLANNED, today.minusDays(2), today.minusDays(1),
+                false, null, null));
+
+        assertThat(result.expired()).isTrue();
+    }
 
     @Test
     void manualStatusWins() {

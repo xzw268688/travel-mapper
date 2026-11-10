@@ -3,6 +3,7 @@ package com.travelmapper.service.map;
 import com.travelmapper.controller.map.dto.CountryDrawerResponse;
 import com.travelmapper.controller.map.dto.MapStatsResponse;
 import com.travelmapper.repository.enums.TripStatus;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.service.catalog.CatalogService;
 import com.travelmapper.service.trip.TripStatusResolver;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -13,6 +14,7 @@ import java.math.RoundingMode;
 import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -25,12 +27,14 @@ public class MapService {
     private final JdbcTemplate jdbcTemplate;
     private final CatalogService catalogService;
     private final TripStatusResolver statusResolver;
+    private final TimeProvider timeProvider;
 
     public MapService(JdbcTemplate jdbcTemplate, CatalogService catalogService,
-                      TripStatusResolver statusResolver) {
+                      TripStatusResolver statusResolver, TimeProvider timeProvider) {
         this.jdbcTemplate = jdbcTemplate;
         this.catalogService = catalogService;
         this.statusResolver = statusResolver;
+        this.timeProvider = timeProvider;
     }
 
     public String statusFor(Long userId, String rawCountryCode) {
@@ -49,7 +53,7 @@ public class MapService {
         Map<String, ItineraryAgg> itineraryByCountry = new TreeMap<>();
         jdbcTemplate.query(
                 "SELECT country_code, COUNT(*) AS cnt, "
-                        + "MAX(CASE WHEN end_date >= CURDATE() THEN 1 ELSE 0 END) AS unexpired "
+                        + "MAX(CASE WHEN end_date >= ? THEN 1 ELSE 0 END) AS unexpired "
                         + "FROM itinerary WHERE user_id = ? AND deleted = 0 AND status = 'SAVED' "
                         + "GROUP BY country_code",
                 (rs, rowNum) -> {
@@ -57,7 +61,7 @@ public class MapService {
                             new ItineraryAgg(rs.getInt("cnt"), rs.getInt("unexpired") == 1));
                     return null;
                 },
-                userId);
+                timeProvider.today(), userId);
 
         Map<String, Integer> notesByCountry = new TreeMap<>();
         jdbcTemplate.query(
@@ -135,9 +139,9 @@ public class MapService {
                 "SELECT t.id, t.name, t.start_date, t.end_date, t.status, t.status_manual, "
                         + "(SELECT COUNT(*) FROM travel_note n WHERE n.trip_id = t.id AND n.deleted = 0) AS note_count, "
                         + "(SELECT COUNT(*) FROM expense e WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_count, "
-                        + "(SELECT MIN(DATE(n.created_at)) FROM travel_note n "
+                        + "(SELECT MIN(n.created_at) FROM travel_note n "
                         + " WHERE n.trip_id = t.id AND n.deleted = 0) AS note_min, "
-                        + "(SELECT MAX(DATE(n.created_at)) FROM travel_note n "
+                        + "(SELECT MAX(n.created_at) FROM travel_note n "
                         + " WHERE n.trip_id = t.id AND n.deleted = 0) AS note_max, "
                         + "(SELECT MIN(e.expense_date) FROM expense e "
                         + " WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_min, "
@@ -147,10 +151,10 @@ public class MapService {
                         + "ORDER BY t.start_date DESC, t.created_at DESC",
                 (rs, rowNum) -> {
                     LocalDate recordStart = earliest(
-                            toLocalDate(rs.getDate("note_min")),
+                            toLocalDate(rs.getObject("note_min", LocalDateTime.class)),
                             toLocalDate(rs.getDate("expense_min")));
                     LocalDate recordEnd = latest(
-                            toLocalDate(rs.getDate("note_max")),
+                            toLocalDate(rs.getObject("note_max", LocalDateTime.class)),
                             toLocalDate(rs.getDate("expense_max")));
                     boolean hasRecords = rs.getInt("note_count") > 0 || rs.getInt("expense_count") > 0;
                     return new TripRow(
@@ -200,7 +204,7 @@ public class MapService {
                             rs.getLong("id"),
                             rs.getString("title"),
                             rs.getString("visibility"),
-                            rs.getTimestamp("created_at"),
+                            rs.getObject("created_at", LocalDateTime.class),
                             rs.getString("city_code")),
                     userId, trip.id());
             for (NoteRow note : notes) {
@@ -245,7 +249,7 @@ public class MapService {
                     .toList();
             ungroupedItineraries.add(new CountryDrawerResponse.UngroupedItinerary(
                     row.id(), row.title(), row.startDate(), row.endDate(),
-                    row.endDate() != null && row.endDate().isBefore(LocalDate.now()), cityRefs));
+                    row.endDate() != null && row.endDate().isBefore(timeProvider.today()), cityRefs));
         }
 
         List<CountryDrawerResponse.NoteItem> ungroupedNotes = jdbcTemplate.query(
@@ -254,7 +258,7 @@ public class MapService {
                         + "ORDER BY created_at DESC",
                 (rs, rowNum) -> new CountryDrawerResponse.NoteItem(
                         rs.getLong("id"), rs.getString("title"), rs.getString("visibility"),
-                        toLocalDate(rs.getTimestamp("created_at"))),
+                        toLocalDate(rs.getObject("created_at", LocalDateTime.class))),
                 userId, countryCode);
 
         List<CountryDrawerResponse.ExpenseItem> ungroupedExpenses = jdbcTemplate.query(
@@ -306,13 +310,13 @@ public class MapService {
     private CountryDrawerResponse.ItineraryItem toItineraryItem(ItineraryRow itinerary) {
         return new CountryDrawerResponse.ItineraryItem(
                 itinerary.id(), itinerary.title(), itinerary.startDate(), itinerary.endDate(),
-                itinerary.endDate() != null && itinerary.endDate().isBefore(LocalDate.now()));
+                itinerary.endDate() != null && itinerary.endDate().isBefore(timeProvider.today()));
     }
 
     private CountryDrawerResponse.NoteItem toNoteItem(NoteRow note) {
         return new CountryDrawerResponse.NoteItem(
                 note.id(), note.title(), note.visibility(),
-                note.createdAt() == null ? null : note.createdAt().toLocalDateTime().toLocalDate());
+                note.createdAt() == null ? null : note.createdAt().toLocalDate());
     }
 
     private LocalDate earliest(LocalDate left, LocalDate right) {
@@ -343,6 +347,10 @@ public class MapService {
         return timestamp == null ? null : timestamp.toLocalDateTime().toLocalDate();
     }
 
+    private LocalDate toLocalDate(LocalDateTime dateTime) {
+        return dateTime == null ? null : dateTime.toLocalDate();
+    }
+
     private String money(BigDecimal value) {
         return (value == null ? BigDecimal.ZERO : value)
                 .setScale(2, RoundingMode.HALF_UP).toPlainString();
@@ -359,7 +367,7 @@ public class MapService {
     private record ItineraryRow(Long id, String title, LocalDate startDate, LocalDate endDate) {
     }
 
-    private record NoteRow(Long id, String title, String visibility, Timestamp createdAt, String cityCode) {
+    private record NoteRow(Long id, String title, String visibility, LocalDateTime createdAt, String cityCode) {
     }
 
     private static final class CityGroupBuilder {

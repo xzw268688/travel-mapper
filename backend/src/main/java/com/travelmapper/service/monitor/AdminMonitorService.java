@@ -6,6 +6,7 @@ import com.travelmapper.common.api.PageRequest;
 import com.travelmapper.common.api.PageResult;
 import com.travelmapper.common.security.OnlineUserRegistry;
 import com.travelmapper.common.security.UserStatusCache;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.admin.dto.MonitorDtos;
 import com.travelmapper.repository.entity.User;
 import com.travelmapper.repository.mapper.UserMapper;
@@ -44,18 +45,21 @@ public class AdminMonitorService {
     private final AuditLogService auditLogService;
     private final DataSource dataSource;
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    private final TimeProvider timeProvider;
 
     public AdminMonitorService(OnlineUserRegistry onlineUserRegistry, UserMapper userMapper,
                                UserStatusCache userStatusCache,
                                AuditLogService auditLogService,
                                DataSource dataSource,
-                               io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+                               io.micrometer.core.instrument.MeterRegistry meterRegistry,
+                               TimeProvider timeProvider) {
         this.onlineUserRegistry = onlineUserRegistry;
         this.userMapper = userMapper;
         this.userStatusCache = userStatusCache;
         this.auditLogService = auditLogService;
         this.dataSource = dataSource;
         this.meterRegistry = meterRegistry;
+        this.timeProvider = timeProvider;
     }
 
     public PageResult<MonitorDtos.OnlineUserView> onlineUsers(String keyword, String role, String ip,
@@ -100,7 +104,7 @@ public class AdminMonitorService {
                     item.ip(),
                     item.userAgent(),
                     LocalDateTime.ofInstant(Instant.ofEpochSecond(item.lastSeenEpoch()),
-                            ZoneId.systemDefault())));
+                            timeProvider.zone())));
         }
         int from = (int) Math.min(request.offset(), filtered.size());
         int to = Math.min(from + request.getSize(), filtered.size());
@@ -238,7 +242,7 @@ public class AdminMonitorService {
                 System.getProperty("java.version", ""),
                 System.getProperty("java.vendor", ""),
                 LocalDateTime.ofInstant(Instant.ofEpochMilli(runtime.getStartTime()),
-                        ZoneId.systemDefault()));
+                        timeProvider.zone()));
     }
 
     private double safeLoad(double value) {

@@ -56,7 +56,7 @@ jobs:
         env:
           SPRING_PROFILES_ACTIVE: local
           SERVER_PORT: '8080'
-          DB_URL: jdbc:mysql://127.0.0.1:3306/travelmapper?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+          DB_URL: jdbc:mysql://127.0.0.1:3306/travelmapper?useUnicode=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true
           DB_USERNAME: travelmapper
           DB_PASSWORD: travelmapper
           REDIS_HOST: 127.0.0.1

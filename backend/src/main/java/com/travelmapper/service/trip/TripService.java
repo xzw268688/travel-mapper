@@ -3,6 +3,7 @@ package com.travelmapper.service.trip;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.trip.dto.TripDeleteResponse;
 import com.travelmapper.controller.trip.dto.TripDetailView;
 import com.travelmapper.controller.trip.dto.TripRenameResponse;
@@ -29,6 +30,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Date;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -51,11 +53,13 @@ public class TripService {
     private final JdbcTemplate jdbcTemplate;
     private final TripStatusResolver statusResolver;
     private final AuditLogService auditLogService;
+    private final TimeProvider timeProvider;
 
     public TripService(TripMapper tripMapper, ItineraryMapper itineraryMapper,
                        TravelNoteMapper travelNoteMapper, ExpenseMapper expenseMapper,
                        CatalogService catalogService, JdbcTemplate jdbcTemplate,
-                       TripStatusResolver statusResolver, AuditLogService auditLogService) {
+                       TripStatusResolver statusResolver, AuditLogService auditLogService,
+                       TimeProvider timeProvider) {
         this.tripMapper = tripMapper;
         this.itineraryMapper = itineraryMapper;
         this.travelNoteMapper = travelNoteMapper;
@@ -64,6 +68,7 @@ public class TripService {
         this.jdbcTemplate = jdbcTemplate;
         this.statusResolver = statusResolver;
         this.auditLogService = auditLogService;
+        this.timeProvider = timeProvider;
     }
 
     /** 旅行详情：概览 + 行程/游记全量 + 最近 10 条消费。 */
@@ -93,7 +98,7 @@ public class TripService {
                         .orderByDesc(Expense::getId)
                         .last("LIMIT " + RECENT_EXPENSE_LIMIT));
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = timeProvider.today();
         List<TripDetailView.ItineraryItem> itineraries = itineraryList.stream()
                 .map(item -> new TripDetailView.ItineraryItem(
                         item.getId(), item.getTitle(), item.getStartDate(), item.getEndDate(),
@@ -294,12 +299,15 @@ public class TripService {
             tripMapper.insert(newTrip);
             newTripId = newTrip.getId();
 
-            jdbcTemplate.update("UPDATE itinerary SET trip_id = ? WHERE trip_id = ? AND deleted = 0",
-                    newTripId, tripId);
-            jdbcTemplate.update("UPDATE travel_note SET trip_id = ? WHERE trip_id = ? AND deleted = 0",
-                    newTripId, tripId);
-            jdbcTemplate.update("UPDATE expense SET trip_id = ? WHERE trip_id = ? AND deleted = 0",
-                    newTripId, tripId);
+            jdbcTemplate.update("UPDATE itinerary SET trip_id = ?, updated_at = ? "
+                            + "WHERE trip_id = ? AND deleted = 0",
+                    newTripId, timeProvider.now(), tripId);
+            jdbcTemplate.update("UPDATE travel_note SET trip_id = ?, updated_at = ? "
+                            + "WHERE trip_id = ? AND deleted = 0",
+                    newTripId, timeProvider.now(), tripId);
+            jdbcTemplate.update("UPDATE expense SET trip_id = ?, updated_at = ? "
+                            + "WHERE trip_id = ? AND deleted = 0",
+                    newTripId, timeProvider.now(), tripId);
             recalculateDates(newTripId);
         }
 
@@ -377,25 +385,25 @@ public class TripService {
                         + "(SELECT COUNT(*) FROM expense e WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_count, "
                         + "(SELECT COALESCE(SUM(e.amount_cny), 0) FROM expense e "
                         + " WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_cny, "
-                        + "(SELECT MIN(DATE(n.created_at)) FROM travel_note n "
+                        + "(SELECT MIN(n.created_at) FROM travel_note n "
                         + " WHERE n.trip_id = t.id AND n.deleted = 0) AS note_min, "
-                        + "(SELECT MAX(DATE(n.created_at)) FROM travel_note n "
+                        + "(SELECT MAX(n.created_at) FROM travel_note n "
                         + " WHERE n.trip_id = t.id AND n.deleted = 0) AS note_max, "
                         + "(SELECT MIN(e.expense_date) FROM expense e "
                         + " WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_min, "
                         + "(SELECT MAX(e.expense_date) FROM expense e "
                         + " WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_max "
                         + "FROM trip t WHERE t.user_id = ? AND t.deleted = 0 "
-                        + "ORDER BY COALESCE(t.start_date, DATE(t.created_at)) ASC, t.id ASC",
+                        + "ORDER BY COALESCE(t.start_date, t.created_at) ASC, t.id ASC",
                 (rs, rowNum) -> {
                     String countryCode = rs.getString("country_code");
                     LocalDate start = toLocalDate(rs.getDate("start_date"));
                     LocalDate end = toLocalDate(rs.getDate("end_date"));
                     LocalDate recordStart = earliest(
-                            toLocalDate(rs.getDate("note_min")),
+                            toLocalDate(rs.getObject("note_min", LocalDateTime.class)),
                             toLocalDate(rs.getDate("expense_min")));
                     LocalDate recordEnd = latest(
-                            toLocalDate(rs.getDate("note_max")),
+                            toLocalDate(rs.getObject("note_max", LocalDateTime.class)),
                             toLocalDate(rs.getDate("expense_max")));
                     boolean statusManual = rs.getInt("status_manual") == 1;
                     TripStatus stored = rs.getString("status") == null
@@ -431,9 +439,9 @@ public class TripService {
                         + "(SELECT COUNT(*) FROM expense e WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_count, "
                         + "(SELECT COALESCE(SUM(e.amount_cny), 0) FROM expense e "
                         + " WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_cny, "
-                        + "(SELECT MIN(DATE(n.created_at)) FROM travel_note n "
+                        + "(SELECT MIN(n.created_at) FROM travel_note n "
                         + " WHERE n.trip_id = t.id AND n.deleted = 0) AS note_min, "
-                        + "(SELECT MAX(DATE(n.created_at)) FROM travel_note n "
+                        + "(SELECT MAX(n.created_at) FROM travel_note n "
                         + " WHERE n.trip_id = t.id AND n.deleted = 0) AS note_max, "
                         + "(SELECT MIN(e.expense_date) FROM expense e "
                         + " WHERE e.trip_id = t.id AND e.deleted = 0) AS expense_min, "
@@ -445,10 +453,10 @@ public class TripService {
                     LocalDate start = toLocalDate(rs.getDate("start_date"));
                     LocalDate end = toLocalDate(rs.getDate("end_date"));
                     LocalDate recordStart = earliest(
-                            toLocalDate(rs.getDate("note_min")),
+                            toLocalDate(rs.getObject("note_min", LocalDateTime.class)),
                             toLocalDate(rs.getDate("expense_min")));
                     LocalDate recordEnd = latest(
-                            toLocalDate(rs.getDate("note_max")),
+                            toLocalDate(rs.getObject("note_max", LocalDateTime.class)),
                             toLocalDate(rs.getDate("expense_max")));
                     boolean statusManual = rs.getInt("status_manual") == 1;
                     TripStatus stored = rs.getString("status") == null
@@ -473,7 +481,7 @@ public class TripService {
                             resolved.effectiveStatus().name(),
                             statusManual,
                             resolved.expired(),
-                            rs.getTimestamp("created_at").toLocalDateTime());
+                            rs.getObject("created_at", LocalDateTime.class));
                 },
                 userId, countryCode);
     }
@@ -540,9 +548,9 @@ public class TripService {
                 "SELECT "
                         + "(SELECT COUNT(*) FROM travel_note WHERE trip_id = ? AND deleted = 0) AS note_count, "
                         + "(SELECT COUNT(*) FROM expense WHERE trip_id = ? AND deleted = 0) AS expense_count, "
-                        + "(SELECT MIN(DATE(created_at)) FROM travel_note "
+                        + "(SELECT MIN(created_at) FROM travel_note "
                         + " WHERE trip_id = ? AND deleted = 0) AS note_min, "
-                        + "(SELECT MAX(DATE(created_at)) FROM travel_note "
+                        + "(SELECT MAX(created_at) FROM travel_note "
                         + " WHERE trip_id = ? AND deleted = 0) AS note_max, "
                         + "(SELECT MIN(expense_date) FROM expense "
                         + " WHERE trip_id = ? AND deleted = 0) AS expense_min, "
@@ -550,10 +558,10 @@ public class TripService {
                         + " WHERE trip_id = ? AND deleted = 0) AS expense_max",
                 trip.getId(), trip.getId(), trip.getId(),
                 trip.getId(), trip.getId(), trip.getId());
-        LocalDate noteMin = toLocalDate((Date) row.get("note_min"));
-        LocalDate noteMax = toLocalDate((Date) row.get("note_max"));
-        LocalDate expenseMin = toLocalDate((Date) row.get("expense_min"));
-        LocalDate expenseMax = toLocalDate((Date) row.get("expense_max"));
+        LocalDate noteMin = toLocalDate(row.get("note_min"));
+        LocalDate noteMax = toLocalDate(row.get("note_max"));
+        LocalDate expenseMin = toLocalDate(row.get("expense_min"));
+        LocalDate expenseMax = toLocalDate(row.get("expense_max"));
         boolean hasRecords = ((Number) row.get("note_count")).intValue() > 0
                 || ((Number) row.get("expense_count")).intValue() > 0;
         return new TripStatusResolver.Snapshot(
@@ -567,14 +575,14 @@ public class TripService {
     }
 
     private String unnamedTripName(Long tripId) {
-        Date earliest = jdbcTemplate.queryForObject(
+        LocalDateTime earliest = jdbcTemplate.queryForObject(
                 "SELECT MIN(d) FROM ("
-                        + " SELECT start_date AS d FROM itinerary WHERE trip_id = ? AND deleted = 0"
-                        + " UNION ALL SELECT DATE(created_at) AS d FROM travel_note WHERE trip_id = ? AND deleted = 0"
-                        + " UNION ALL SELECT expense_date AS d FROM expense WHERE trip_id = ? AND deleted = 0"
+                        + " SELECT CAST(start_date AS DATETIME) AS d FROM itinerary WHERE trip_id = ? AND deleted = 0"
+                        + " UNION ALL SELECT created_at AS d FROM travel_note WHERE trip_id = ? AND deleted = 0"
+                        + " UNION ALL SELECT CAST(expense_date AS DATETIME) AS d FROM expense WHERE trip_id = ? AND deleted = 0"
                         + ") records",
-                Date.class, tripId, tripId, tripId);
-        LocalDate month = earliest == null ? LocalDate.now() : earliest.toLocalDate();
+                LocalDateTime.class, tripId, tripId, tripId);
+        LocalDate month = earliest == null ? timeProvider.today() : earliest.toLocalDate();
         return "未命名旅行 · " + MONTH_FORMAT.format(month);
     }
 
@@ -600,6 +608,20 @@ public class TripService {
 
     private LocalDate toLocalDate(Date date) {
         return date == null ? null : date.toLocalDate();
+    }
+
+    private LocalDate toLocalDate(LocalDateTime dateTime) {
+        return dateTime == null ? null : dateTime.toLocalDate();
+    }
+
+    private LocalDate toLocalDate(Object value) {
+        if (value instanceof LocalDateTime dateTime) {
+            return dateTime.toLocalDate();
+        }
+        if (value instanceof Date date) {
+            return date.toLocalDate();
+        }
+        return null;
     }
 
     private String money(BigDecimal value) {

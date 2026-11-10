@@ -8,6 +8,7 @@ import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.api.PageRequest;
 import com.travelmapper.common.api.PageResult;
 import com.travelmapper.common.redis.DistributedLock;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.admin.dto.CardBatchStatsView;
 import com.travelmapper.controller.admin.dto.CardKeyView;
 import com.travelmapper.controller.admin.dto.CardRedemptionView;
@@ -59,12 +60,14 @@ public class CardKeyService {
     private final ObjectMapper objectMapper;
     private final AuditLogService auditLogService;
     private final JdbcTemplate jdbcTemplate;
+    private final TimeProvider timeProvider;
     private final SecureRandom random = new SecureRandom();
 
     public CardKeyService(CardKeyMapper cardKeyMapper, UserMapper userMapper, QuotaService quotaService,
                           CardCodeGenerator codeGenerator, DistributedLock distributedLock,
                           StringRedisTemplate redis, ObjectMapper objectMapper,
-                          AuditLogService auditLogService, JdbcTemplate jdbcTemplate) {
+                          AuditLogService auditLogService, JdbcTemplate jdbcTemplate,
+                          TimeProvider timeProvider) {
         this.cardKeyMapper = cardKeyMapper;
         this.userMapper = userMapper;
         this.quotaService = quotaService;
@@ -74,6 +77,7 @@ public class CardKeyService {
         this.objectMapper = objectMapper;
         this.auditLogService = auditLogService;
         this.jdbcTemplate = jdbcTemplate;
+        this.timeProvider = timeProvider;
     }
 
     @Transactional
@@ -96,7 +100,7 @@ public class CardKeyService {
         if (quantity == null || quantity < 1 || quantity > 500) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "生成数量必须在 1 到 500 之间");
         }
-        if (request.getExpireAt() != null && request.getExpireAt().isBefore(LocalDateTime.now())) {
+        if (request.getExpireAt() != null && request.getExpireAt().isBefore(timeProvider.now())) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "卡密有效期不能早于当前时间");
         }
         BigDecimal priceCny = request.getPriceCny();
@@ -110,7 +114,7 @@ public class CardKeyService {
             priceCny = priceCny.setScale(2, RoundingMode.HALF_UP);
         }
         String prefix = codeGenerator.normalizePrefix(request.getPrefix());
-        String batchId = "B" + LocalDateTime.now().format(BATCH_FORMAT)
+        String batchId = "B" + timeProvider.now().format(BATCH_FORMAT)
                 + String.format("%04d", random.nextInt(10_000));
 
         List<String> codes = new ArrayList<>(quantity);
@@ -154,13 +158,13 @@ public class CardKeyService {
                     BigDecimal price = rs.getBigDecimal("price_cny");
                     BigDecimal revenue = price == null ? null
                             : price.multiply(BigDecimal.valueOf(used)).setScale(2, RoundingMode.HALF_UP);
-                    java.sql.Timestamp created = rs.getTimestamp("created_at");
+                    LocalDateTime created = rs.getObject("created_at", LocalDateTime.class);
                     return new CardBatchStatsView(
                             rs.getString("batch_id"),
                             rs.getString("type"),
                             rs.getInt("value"),
                             price,
-                            created == null ? null : created.toLocalDateTime(),
+                            created,
                             rs.getLong("total"),
                             used,
                             rs.getLong("unused"),
@@ -189,7 +193,7 @@ public class CardKeyService {
                         + "k.used_by, u.username, k.used_at" + where
                         + " ORDER BY k.used_at DESC, k.id DESC LIMIT ? OFFSET ?",
                 (rs, rowNum) -> {
-                    java.sql.Timestamp usedAt = rs.getTimestamp("used_at");
+                    LocalDateTime usedAt = rs.getObject("used_at", LocalDateTime.class);
                     return new CardRedemptionView(
                             rs.getLong("id"),
                             rs.getString("code"),
@@ -199,7 +203,7 @@ public class CardKeyService {
                             rs.getBigDecimal("price_cny"),
                             rs.getObject("used_by") == null ? null : rs.getLong("used_by"),
                             rs.getString("username"),
-                            usedAt == null ? null : usedAt.toLocalDateTime());
+                            usedAt);
                 },
                 pageParams.toArray());
         return PageResult.of(total == null ? 0 : total, request, rows);
@@ -276,10 +280,10 @@ public class CardKeyService {
             }
             if (card.getStatus() == CardStatus.VOID
                     || card.getStatus() == CardStatus.EXPIRED
-                    || (card.getExpireAt() != null && card.getExpireAt().isBefore(LocalDateTime.now()))) {
+                    || (card.getExpireAt() != null && card.getExpireAt().isBefore(timeProvider.now()))) {
                 throw new BusinessException(ErrorCode.CARD_VOID_OR_EXPIRED);
             }
-            if (cardKeyMapper.markUsed(card.getId(), userId) != 1) {
+            if (cardKeyMapper.markUsed(card.getId(), userId, timeProvider.now()) != 1) {
                 throw new BusinessException(ErrorCode.CARD_USED);
             }
 

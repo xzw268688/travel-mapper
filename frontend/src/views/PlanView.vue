@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCities, getCountries } from '../api/catalog'
+import { addDays, todayInBeijing } from '../utils/datetime'
 import {
   generateItinerary,
   saveItinerary,
@@ -33,7 +34,7 @@ const draftCities = ref<City[]>([])
 const country = ref('JP')
 const cityCodes = ref<string[]>(['TYO'])
 const days = ref(3)
-const startDate = ref(new Date(Date.now() + 86_400_000).toISOString().slice(0, 10))
+const startDate = ref(addDays(todayInBeijing(), 1))
 const preference = ref('')
 const generating = ref(false)
 const generatingSeconds = ref(0)
@@ -130,11 +131,6 @@ async function loadCities(): Promise<void> {
   }
 }
 
-function addDays(value: string, amount: number): string {
-  const date = new Date(`${value}T00:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + amount)
-  return date.toISOString().slice(0, 10)
-}
 
 function cityNameOf(cityCode: string): string {
   return (

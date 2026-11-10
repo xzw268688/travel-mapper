@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '../utils/datetime'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -404,7 +405,7 @@ function openFeedbackDetail(item: FeedbackHistoryItem): void {
 }
 
 function formatTime(value: string | null | undefined): string {
-  return value ? value.replace('T', ' ').slice(0, 16) : '—'
+  return formatDateTime(value) || '—'
 }
 
 function planLabel(plan: string | undefined): string {

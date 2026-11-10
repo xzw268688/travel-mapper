@@ -25,6 +25,18 @@ docker compose --profile s3mock up -d s3mock
 
 然后在后台把 `storage.endpoint` 配成 `http://127.0.0.1:19090`，并填写对象存储 Key（S3Mock 可用 `test/test`）。
 
+## 时区约定（重要）
+
+全系统固定北京时间：数据库存北京时间墙钟（无时区 `DATETIME`），后端所有“现在/今天”由固定 `Asia/Shanghai` 的 `TimeProvider` 计算，前端只做格式化不转换时区。
+
+本地环境需要三处一致：
+
+- MySQL 容器：`TZ=Asia/Shanghai` 且 `--default-time-zone=+08:00`（见下方启动依赖与测试章节）。
+- JDBC：URL 使用 `connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true`，强制会话时区，避免容器默认 UTC。
+- JVM：建议设置 `TZ=Asia/Shanghai` 或 `-Duser.timezone=Asia/Shanghai`；业务代码本身不依赖该默认值。
+
+如果本地 MySQL 是用旧命令手动创建的（没有时区参数），需要删除容器后按新命令重建。开发库中已有的混时区旧数据不做迁移，可直接清库重跑种子数据。
+
 ## 启动后端
 
 ```bash
@@ -180,7 +192,8 @@ mvn test
 集成测试需要 MySQL 8 / Redis / S3 兼容服务。外部容器模式：
 
 ```bash
-docker run -d --name tm-mysql -e MYSQL_ROOT_PASSWORD=root \
+docker run -d --name tm-mysql -e TZ=Asia/Shanghai \
+  -e MYSQL_ROOT_PASSWORD=root \
   -e MYSQL_DATABASE=travelmapper -e MYSQL_USER=travelmapper \
   -e MYSQL_PASSWORD=travelmapper -p 13306:3306 mysql:8.0 \
   --default-time-zone=+08:00
@@ -191,7 +204,7 @@ docker run -d --name tm-s3mock -p 19090:9090 \
 
 mvn -q \
   -Dtest.containers.enabled=false \
-  -Dtest.mysql.url='jdbc:mysql://127.0.0.1:13306/travelmapper?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true' \
+  -Dtest.mysql.url='jdbc:mysql://127.0.0.1:13306/travelmapper?useUnicode=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true' \
   -Dtest.mysql.username=travelmapper -Dtest.mysql.password=travelmapper \
   -Dtest.mysql.admin-username=root -Dtest.mysql.admin-password=root \
   -Dtest.redis.host=127.0.0.1 -Dtest.redis.port=16379 \
@@ -238,6 +251,7 @@ E2E_BACKEND_LOG='D:/path/to/backend.log' E2E_PREVIEW=1 npm run test:e2e  # 生�
 - `ci.yml`：在 PR 与推送 `main`、`release/**` 时运行。
   - `Backend unit tests`：`mvn test`（只跑单元测试）。
   - `Backend integration tests`：`mvn verify`（Testcontainers；GitHub 托管 runner 自带 Docker）。
+  - `Timezone matrix (UTC host and DB)`：`TZ=UTC` + `-Duser.timezone=UTC` + MySQL 默认 UTC，运行时区核心集成测试。
   - `Frontend checks`：`npm ci`、Vitest 覆盖率、`vue-tsc` + 生产构建、体积预算。
   - `CI gate`：汇总以上三个 job，任一失败则整体失败；建议作为分支保护的必需检查。
 - `e2e-nightly.yml`：每日 02:17（北京时间）与手动触发。启动 MySQL/Redis/MinIO，构建后端 jar 与前端生产包，以 `vite preview` 运行 Playwright；失败时上传 `playwright-report`、`test-results` 与后端日志。

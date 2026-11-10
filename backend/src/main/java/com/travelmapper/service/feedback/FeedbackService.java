@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.travelmapper.common.api.BusinessException;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.api.PageRequest;
 import com.travelmapper.common.api.PageResult;
@@ -61,23 +62,25 @@ public class FeedbackService {
     private final RedisRateLimiter rateLimiter;
     private final SensitiveWordFilter sensitiveWordFilter;
     private final AuditLogService auditLogService;
+    private final TimeProvider timeProvider;
 
     public FeedbackService(FeedbackMapper feedbackMapper, JdbcTemplate jdbcTemplate,
                            RedisRateLimiter rateLimiter, SensitiveWordFilter sensitiveWordFilter,
-                           AuditLogService auditLogService) {
+                           AuditLogService auditLogService, TimeProvider timeProvider) {
         this.feedbackMapper = feedbackMapper;
         this.jdbcTemplate = jdbcTemplate;
         this.rateLimiter = rateLimiter;
         this.sensitiveWordFilter = sensitiveWordFilter;
         this.auditLogService = auditLogService;
+        this.timeProvider = timeProvider;
     }
 
     public FeedbackDtos.CreateResponse submit(Long userId, FeedbackDtos.CreateRequest request,
                                               String userAgent) {
-        rateLimiter.check("feedback:submit:" + userId + ":" + LocalDate.now(),
+        rateLimiter.check("feedback:submit:" + userId + ":" + timeProvider.today(),
                 DAILY_LIMIT, DAY_SECONDS);
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = timeProvider.now();
         Feedback feedback = new Feedback();
         feedback.setUserId(userId);
         feedback.setType(request.getType());
@@ -178,9 +181,9 @@ public class FeedbackService {
                         rs.getString("title"),
                         FeedbackStatus.valueOf(rs.getString("status")),
                         rs.getString("contact"),
-                        toLocalDateTime(rs.getTimestamp("created_at")),
-                        toLocalDateTime(rs.getTimestamp("updated_at")),
-                        toLocalDateTime(rs.getTimestamp("handled_at"))),
+                        rs.getObject("created_at", LocalDateTime.class),
+                        rs.getObject("updated_at", LocalDateTime.class),
+                        rs.getObject("handled_at", LocalDateTime.class)),
                 pageParams.toArray());
         return PageResult.of(total == null ? 0 : total, request, rows);
     }
@@ -234,7 +237,7 @@ public class FeedbackService {
         FeedbackStatus oldStatus = feedback.getStatus();
         FeedbackStatus newStatus = statusProvided ? request.getStatus() : oldStatus;
         String newNote = noteProvided ? trimToNull(request.getAdminNote()) : feedback.getAdminNote();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = timeProvider.now();
 
         feedbackMapper.update(null, new LambdaUpdateWrapper<Feedback>()
                 .eq(Feedback::getId, id)
@@ -271,9 +274,9 @@ public class FeedbackService {
                 rs.getString("admin_note"),
                 rs.getObject("handled_by") == null ? null : rs.getLong("handled_by"),
                 handlerName,
-                toLocalDateTime(rs.getTimestamp("handled_at")),
-                toLocalDateTime(rs.getTimestamp("created_at")),
-                toLocalDateTime(rs.getTimestamp("updated_at")));
+                rs.getObject("handled_at", LocalDateTime.class),
+                rs.getObject("created_at", LocalDateTime.class),
+                rs.getObject("updated_at", LocalDateTime.class));
     }
 
     private String submitterName(ResultSet rs) throws SQLException {

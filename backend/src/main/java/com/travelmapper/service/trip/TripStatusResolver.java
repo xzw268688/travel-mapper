@@ -1,5 +1,6 @@
 package com.travelmapper.service.trip;
 
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.repository.enums.EffectiveTripStatus;
 import com.travelmapper.repository.enums.TripStatus;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,12 @@ import java.time.LocalDate;
  */
 @Component
 public class TripStatusResolver {
+
+    private final TimeProvider timeProvider;
+
+    public TripStatusResolver(TimeProvider timeProvider) {
+        this.timeProvider = timeProvider;
+    }
 
     public record Snapshot(
             boolean statusManual,
@@ -30,7 +37,7 @@ public class TripStatusResolver {
     }
 
     public Result resolve(Snapshot snapshot) {
-        return resolve(snapshot, LocalDate.now());
+        return resolve(snapshot, timeProvider.today());
     }
 
     public Result resolve(Snapshot snapshot, LocalDate today) {

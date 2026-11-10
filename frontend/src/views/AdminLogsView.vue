@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTimeSeconds } from '../utils/datetime'
 import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -236,8 +237,8 @@ function resetLogin(): void {
   searchLogin()
 }
 
-function formatTime(value: string | null): string {
-  return value ? value.replace('T', ' ').slice(0, 19) : '—'
+function formatTime(value: string): string {
+  return formatDateTimeSeconds(value) || '—'
 }
 
 function pretty(detail: string | null): string {

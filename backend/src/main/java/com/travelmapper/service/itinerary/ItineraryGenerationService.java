@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.controller.itinerary.dto.GenerateItineraryRequest;
 import com.travelmapper.controller.itinerary.dto.GenerateItineraryResponse;
 import com.travelmapper.repository.entity.Country;
@@ -66,6 +67,7 @@ public class ItineraryGenerationService {
     private final ConfigService configService;
     private final UserMapper userMapper;
     private final AuditLogService auditLogService;
+    private final TimeProvider timeProvider;
 
     public ItineraryGenerationService(CatalogService catalogService, QuotaService quotaService,
                                       LlmProviderRegistry llmProviderRegistry,
@@ -73,7 +75,7 @@ public class ItineraryGenerationService {
                                       GuideLinkSanitizer guideLinkSanitizer,
                                       StringRedisTemplate redis, ObjectMapper objectMapper,
                                       ConfigService configService, UserMapper userMapper,
-                                      AuditLogService auditLogService) {
+                                      AuditLogService auditLogService, TimeProvider timeProvider) {
         this.catalogService = catalogService;
         this.quotaService = quotaService;
         this.llmProviderRegistry = llmProviderRegistry;
@@ -84,6 +86,7 @@ public class ItineraryGenerationService {
         this.configService = configService;
         this.userMapper = userMapper;
         this.auditLogService = auditLogService;
+        this.timeProvider = timeProvider;
     }
 
     public GenerateItineraryResponse generate(Long userId, GenerateItineraryRequest request) {
@@ -197,7 +200,7 @@ public class ItineraryGenerationService {
         }
         String countryCode = request.getCountryCode().toUpperCase(Locale.ROOT);
         Country country = catalogService.requireEnabledCountry(countryCode);
-        if (request.getStartDate().isBefore(LocalDate.now().minusDays(1))) {
+        if (request.getStartDate().isBefore(timeProvider.today().minusDays(1))) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "开始日期不得早于昨天");
         }
         LinkedHashSet<String> cities = new LinkedHashSet<>();

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '../utils/datetime'
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -174,8 +175,8 @@ async function restore(note: { id: number; title: string }): Promise<void> {
   }
 }
 
-function formatTime(value: string | null): string {
-  return value ? value.replace('T', ' ').slice(0, 16) : '—'
+function formatTime(value: string | null | undefined): string {
+  return formatDateTime(value) || '—'
 }
 
 function visibilityLabel(value: string): string {

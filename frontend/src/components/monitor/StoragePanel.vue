@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTimeSeconds } from '../../utils/datetime'
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
@@ -56,7 +57,7 @@ function formatBytes(value: number): string {
 }
 
 function formatTime(value: string): string {
-  return value ? value.replace('T', ' ').slice(0, 19) : '—'
+  return formatDateTimeSeconds(value) || '—'
 }
 </script>
 

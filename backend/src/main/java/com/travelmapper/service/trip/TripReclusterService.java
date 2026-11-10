@@ -1,6 +1,7 @@
 package com.travelmapper.service.trip;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.repository.entity.Expense;
 import com.travelmapper.repository.entity.Itinerary;
 import com.travelmapper.repository.entity.TravelNote;
@@ -39,11 +40,12 @@ public class TripReclusterService {
     private final TripService tripService;
     private final CatalogService catalogService;
     private final JdbcTemplate jdbcTemplate;
+    private final TimeProvider timeProvider;
 
     public TripReclusterService(TripMapper tripMapper, ItineraryMapper itineraryMapper,
                                 TravelNoteMapper noteMapper, ExpenseMapper expenseMapper,
                                 TripService tripService, CatalogService catalogService,
-                                JdbcTemplate jdbcTemplate) {
+                                JdbcTemplate jdbcTemplate, TimeProvider timeProvider) {
         this.tripMapper = tripMapper;
         this.itineraryMapper = itineraryMapper;
         this.noteMapper = noteMapper;
@@ -51,6 +53,7 @@ public class TripReclusterService {
         this.tripService = tripService;
         this.catalogService = catalogService;
         this.jdbcTemplate = jdbcTemplate;
+        this.timeProvider = timeProvider;
     }
 
     public record Result(int itineraries, int mergedTrips, int deletedTrips) {
@@ -100,10 +103,10 @@ public class TripReclusterService {
             if (entry.getKey().equals(entry.getValue())) {
                 continue;
             }
-            jdbcTemplate.update("UPDATE travel_note SET trip_id = ? WHERE trip_id = ?",
-                    entry.getValue(), entry.getKey());
-            jdbcTemplate.update("UPDATE expense SET trip_id = ? WHERE trip_id = ?",
-                    entry.getValue(), entry.getKey());
+            jdbcTemplate.update("UPDATE travel_note SET trip_id = ?, updated_at = ? WHERE trip_id = ?",
+                    entry.getValue(), timeProvider.now(), entry.getKey());
+            jdbcTemplate.update("UPDATE expense SET trip_id = ?, updated_at = ? WHERE trip_id = ?",
+                    entry.getValue(), timeProvider.now(), entry.getKey());
         }
 
         assignOrphans();
@@ -165,7 +168,7 @@ public class TripReclusterService {
                 new LambdaQueryWrapper<TravelNote>().isNull(TravelNote::getTripId));
         for (TravelNote note : notes) {
             LocalDate date = note.getCreatedAt() == null
-                    ? LocalDate.now() : note.getCreatedAt().toLocalDate();
+                    ? timeProvider.today() : note.getCreatedAt().toLocalDate();
             Trip trip = tripService.resolveOrCreateForDate(
                     note.getUserId(), note.getCountryCode(), date);
             note.setTripId(trip.getId());

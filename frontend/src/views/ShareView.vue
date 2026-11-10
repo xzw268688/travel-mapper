@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchSharePage, type SharePage } from '../api/notes'
 import { submitReport, type ReportReason } from '../api/reports'
+import { formatDate } from '../utils/datetime'
 
 const route = useRoute()
 const page = ref<SharePage | null>(null)
@@ -100,7 +101,7 @@ async function submit(): Promise<void> {
         <div class="trip-title">{{ page.title }}</div>
       </template>
       <div class="meta">
-        {{ page.countryName }} · {{ page.cityName }} · {{ page.createdAt?.slice(0, 10) }} ·
+        {{ page.countryName }} · {{ page.cityName }} · {{ formatDate(page.createdAt) }} ·
         来自 {{ page.nicknameMasked }}
       </div>
       <p style="line-height: 1.8">{{ page.summary }}</p>

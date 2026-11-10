@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '../utils/datetime'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
@@ -575,7 +576,7 @@ function dismissAnnouncementBanner(): void {
 }
 
 function formatAnnouncementTime(value: string | null): string {
-  return value ? value.replace('T', ' ').slice(0, 16) : '长期有效'
+  return formatDateTime(value) || '长期有效'
 }
 
 onBeforeUnmount(() => {

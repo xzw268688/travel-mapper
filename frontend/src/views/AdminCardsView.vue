@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '../utils/datetime'
 import { onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -190,8 +191,8 @@ async function downloadBatch(id: string): Promise<void> {
   }
 }
 
-function formatTime(value: string | null): string {
-  return value ? value.replace('T', ' ').slice(0, 16) : '—'
+function formatTime(value: string | null | undefined): string {
+  return formatDateTime(value) || '—'
 }
 
 function money(value: string | null): string {
@@ -228,13 +229,13 @@ function money(value: string | null): string {
           v-model="form.expireAt"
           type="datetime"
           value-format="YYYY-MM-DDTHH:mm:ss"
-          placeholder="过期时间（可选）"
+          placeholder="过期时间（北京时间，可选）"
         />
         <el-input v-model="form.prefix" maxlength="10" placeholder="前缀（可选）" style="width: 140px" />
         <el-button type="primary" :loading="generating" @click="generate">生成</el-button>
       </div>
       <div class="meta" style="margin-top: 8px">
-        AI 次数包的 value 为次数，VIP 的 value 为天数；售价用于批次估算收入（已用 × 售价），不代表实际收款。
+        AI 次数包的 value 为次数，VIP 的 value 为天数；售价用于批次估算收入（已用 × 售价），不代表实际收款。过期时间按北京时间填写。
       </div>
     </el-card>
 

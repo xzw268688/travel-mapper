@@ -63,11 +63,17 @@ public final class TestInfrastructure {
         boolean privateBucketEnforced;
 
         if (CONTAINERS_ENABLED) {
+            String dbTimeZone = System.getProperty("test.mysql.time-zone", "+08:00");
+            String connectionTimeZone = "+00:00".equals(dbTimeZone) ? "UTC" : "Asia/Shanghai";
             mysqlContainer = new MySQLContainer<>(DockerImageName.parse("mysql:8.0"))
                     .withDatabaseName("travelmapper")
                     .withUsername("travelmapper")
                     .withPassword("travelmapper")
                     .withEnv("MYSQL_ROOT_PASSWORD", "root")
+                    .withEnv("TZ", "UTC".equals(connectionTimeZone) ? "UTC" : "Asia/Shanghai")
+                    .withCommand("--default-time-zone=" + dbTimeZone)
+                    .withUrlParam("connectionTimeZone", connectionTimeZone)
+                    .withUrlParam("forceConnectionTimeZoneToSession", "true")
                     .withStartupTimeout(Duration.ofMinutes(3));
             redisContainer = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
                     .withExposedPorts(6379)
@@ -100,7 +106,8 @@ public final class TestInfrastructure {
         } else {
             mysqlUrl = System.getProperty("test.mysql.url",
                     "jdbc:mysql://127.0.0.1:13306/travelmapper"
-                            + "?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
+                            + "?useUnicode=true&characterEncoding=utf8"
+                            + "&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true"
                             + "&useSSL=false&allowPublicKeyRetrieval=true");
             mysqlUsername = System.getProperty("test.mysql.username", "travelmapper");
             mysqlPassword = System.getProperty("test.mysql.password", "travelmapper");

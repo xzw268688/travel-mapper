@@ -53,7 +53,7 @@ services:
       - .env
     environment:
       SPRING_PROFILES_ACTIVE: prod
-      DB_URL: jdbc:mysql://mysql:3306/${DB_NAME:-travelmapper}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+      DB_URL: jdbc:mysql://mysql:3306/${DB_NAME:-travelmapper}?useUnicode=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""

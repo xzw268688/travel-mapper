@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import CountryCitySelector from '../components/CountryCitySelector.vue'
+import { currentBeijingMonth, monthRange, todayInBeijing } from '../utils/datetime'
 import { getCities, getCountries } from '../api/catalog'
 import { getTripDetail, getTrips } from '../api/trips'
 import {
@@ -63,7 +64,7 @@ const saving = ref(false)
 const viewMode = ref<'LIST' | 'DATE'>('LIST')
 const dateGrouped = ref<ExpenseDateGrouped | null>(null)
 const dateLoading = ref(false)
-const month = ref(currentMonth())
+const month = ref(currentBeijingMonth())
 const monthSummary = ref<ExpenseSummary | null>(null)
 
 const formVisible = ref(false)
@@ -75,7 +76,7 @@ const form = reactive({
   currency: 'CNY',
   amount: '',
   category: 'FOOD',
-  expenseDate: todayString(),
+  expenseDate: todayInBeijing(),
   remark: ''
 })
 
@@ -235,7 +236,7 @@ async function loadDateGroups(): Promise<void> {
 }
 
 async function loadMonthSummary(): Promise<void> {
-  const [from, to] = monthRange()
+  const [from, to] = monthRange(month.value)
   try {
     monthSummary.value = await getExpenseSummary('country', {
       countryCode: filters.countryCode || undefined,
@@ -325,7 +326,7 @@ function openCreate(): void {
   form.currency = prefs?.currency || 'CNY'
   form.amount = ''
   form.category = prefs?.category || 'FOOD'
-  form.expenseDate = todayString()
+  form.expenseDate = todayInBeijing()
   form.remark = ''
   formVisible.value = true
   void loadFormTrips()
@@ -622,19 +623,6 @@ function savePrefs(prefs: { countryCode: string; currency: string; category: str
   }
 }
 
-function currentMonth(): string {
-  const date = new Date()
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-}
-
-function monthRange(): [string, string] {
-  const [year, monthValue] = month.value.split('-').map(Number)
-  const lastDay = new Date(year, monthValue, 0).getDate()
-  return [
-    `${month.value}-01`,
-    `${month.value}-${String(lastDay).padStart(2, '0')}`
-  ]
-}
 
 function categoryLabel(value: string): string {
   return CATEGORIES.find((item) => item.value === value)?.label || value
@@ -644,11 +632,6 @@ function tripLabel(trip: TripView): string {
   return `${trip.name}${trip.startDate ? `（${trip.startDate}）` : ''}`
 }
 
-function todayString(): string {
-  const date = new Date()
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
 </script>
 
 <template>

@@ -2,6 +2,7 @@ package com.travelmapper.service.quota;
 
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.repository.entity.QuotaLedger;
 import com.travelmapper.repository.entity.QuotaPack;
 import com.travelmapper.repository.entity.User;
@@ -56,20 +57,23 @@ public class QuotaService {
     private final StringRedisTemplate redis;
     private final ConfigService configService;
     private final JdbcTemplate jdbcTemplate;
+    private final TimeProvider timeProvider;
 
     public QuotaService(UserMapper userMapper, QuotaPackMapper packMapper, QuotaLedgerMapper ledgerMapper,
-                        StringRedisTemplate redis, ConfigService configService, JdbcTemplate jdbcTemplate) {
+                        StringRedisTemplate redis, ConfigService configService, JdbcTemplate jdbcTemplate,
+                        TimeProvider timeProvider) {
         this.userMapper = userMapper;
         this.packMapper = packMapper;
         this.ledgerMapper = ledgerMapper;
         this.redis = redis;
         this.configService = configService;
         this.jdbcTemplate = jdbcTemplate;
+        this.timeProvider = timeProvider;
     }
 
     public QuotaSummary getSummary(Long userId) {
         User user = requireUser(userId);
-        LocalDateTime now = LocalDateTime.now(BEIJING);
+        LocalDateTime now = timeProvider.now();
         boolean vip = user.getVipExpireAt() != null && user.getVipExpireAt().isAfter(now);
         int freeLimit = configService.getInt(ConfigKeys.QUOTA_FREE_LIMIT, 3);
         int vipDailyLimit = configService.getInt(ConfigKeys.QUOTA_VIP_DAILY, 200);
@@ -79,16 +83,16 @@ public class QuotaService {
 
         Integer expiringCount = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(SUM(granted_count - used_count), 0) FROM quota_pack "
-                        + "WHERE user_id = ? AND used_count < granted_count AND expire_at > NOW() "
-                        + "AND expire_at <= DATE_ADD(NOW(), INTERVAL 30 DAY)",
-                Integer.class, userId);
-        Timestamp nearest = jdbcTemplate.queryForObject(
+                        + "WHERE user_id = ? AND used_count < granted_count AND expire_at > ? "
+                        + "AND expire_at <= ?",
+                Integer.class, userId, now, now.plusDays(30));
+        LocalDateTime nearest = jdbcTemplate.queryForObject(
                 "SELECT MIN(expire_at) FROM quota_pack "
-                        + "WHERE user_id = ? AND used_count < granted_count AND expire_at > NOW() "
-                        + "AND expire_at <= DATE_ADD(NOW(), INTERVAL 30 DAY)",
-                Timestamp.class, userId);
+                        + "WHERE user_id = ? AND used_count < granted_count AND expire_at > ? "
+                        + "AND expire_at <= ?",
+                LocalDateTime.class, userId, now, now.plusDays(30));
         QuotaSummary.PackExpiringSoon expiringSoon = expiringCount != null && expiringCount > 0
-                ? new QuotaSummary.PackExpiringSoon(expiringCount, nearest.toLocalDateTime())
+                ? new QuotaSummary.PackExpiringSoon(expiringCount, nearest)
                 : null;
 
         return new QuotaSummary(
@@ -119,7 +123,7 @@ public class QuotaService {
      */
     public void assertAvailable(Long userId) {
         User user = requireUser(userId);
-        LocalDateTime now = LocalDateTime.now(BEIJING);
+        LocalDateTime now = timeProvider.now();
         if (user.getVipExpireAt() != null && user.getVipExpireAt().isAfter(now)) {
             int limit = configService.getInt(ConfigKeys.QUOTA_VIP_DAILY, 200);
             if (vipDailyUsed(userId) >= limit) {
@@ -141,8 +145,8 @@ public class QuotaService {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "requestId 必填");
         }
         User user = requireUser(userId);
-        LocalDateTime now = LocalDateTime.now(BEIJING);
-        String date = LocalDate.now(BEIJING).format(DATE_KEY);
+        LocalDateTime now = timeProvider.now();
+        String date = timeProvider.today().format(DATE_KEY);
         int ttl = nightlyTtlSeconds();
 
         if (user.getVipExpireAt() != null && user.getVipExpireAt().isAfter(now)) {
@@ -152,7 +156,7 @@ public class QuotaService {
             return deduction(userId, "VIP");
         }
 
-        QuotaPack pack = packMapper.selectAvailableForUpdate(userId);
+        QuotaPack pack = packMapper.selectAvailableForUpdate(userId, now);
         if (pack != null) {
             for (int attempt = 0; attempt < 2; attempt++) {
                 if (packMapper.incrementUsed(pack.getId()) == 1) {
@@ -160,7 +164,7 @@ public class QuotaService {
                     appendLedger(userId, QuotaType.AI_QUOTA, -1, QuotaSource.CONSUME, requestId, "AI consume");
                     return deduction(userId, "PACK");
                 }
-                pack = packMapper.selectAvailableForUpdate(userId);
+                pack = packMapper.selectAvailableForUpdate(userId, now);
                 if (pack == null) {
                     break;
                 }
@@ -212,7 +216,7 @@ public class QuotaService {
         pack.setCardKeyId(cardKeyId);
         pack.setGrantedCount(count);
         pack.setUsedCount(0);
-        pack.setExpireAt(LocalDateTime.now(BEIJING).plusDays(validDays));
+        pack.setExpireAt(timeProvider.now().plusDays(validDays));
         packMapper.insert(pack);
         appendLedger(userId, QuotaType.AI_QUOTA, count, source, refId, remark);
     }
@@ -241,7 +245,7 @@ public class QuotaService {
         }
         int remaining = needed;
         while (remaining > 0) {
-            QuotaPack pack = packMapper.selectAvailableForUpdate(userId);
+            QuotaPack pack = packMapper.selectAvailableForUpdate(userId, timeProvider.now());
             if (pack == null) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, "扣减后次数包余额不能小于 0");
             }
@@ -263,7 +267,7 @@ public class QuotaService {
 
     private void extendVip(Long userId, int days, QuotaSource source, String refId, String remark) {
         User user = requireUser(userId);
-        LocalDateTime now = LocalDateTime.now(BEIJING);
+        LocalDateTime now = timeProvider.now();
         LocalDateTime base = user.getVipExpireAt() != null && user.getVipExpireAt().isAfter(now)
                 ? user.getVipExpireAt() : now;
         LocalDateTime next = base.plusDays(days);
@@ -278,8 +282,8 @@ public class QuotaService {
     public int packBalance(Long userId) {
         Integer balance = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(SUM(granted_count - used_count), 0) FROM quota_pack "
-                        + "WHERE user_id = ? AND used_count < granted_count AND expire_at > NOW()",
-                Integer.class, userId);
+                        + "WHERE user_id = ? AND used_count < granted_count AND expire_at > ?",
+                Integer.class, userId, timeProvider.now());
         return balance == null ? 0 : balance;
     }
 
@@ -349,11 +353,11 @@ public class QuotaService {
     }
 
     private String freeKey(Long userId) {
-        return "quota:free:" + userId + ":" + LocalDate.now(BEIJING).format(DATE_KEY);
+        return "quota:free:" + userId + ":" + timeProvider.today().format(DATE_KEY);
     }
 
     private String vipKey(Long userId) {
-        return "quota:daily:vip:" + userId + ":" + LocalDate.now(BEIJING).format(DATE_KEY);
+        return "quota:daily:vip:" + userId + ":" + timeProvider.today().format(DATE_KEY);
     }
 
     private String deductKey(Long userId, String requestId) {
@@ -361,11 +365,11 @@ public class QuotaService {
     }
 
     private LocalDateTime nextMidnight() {
-        return LocalDate.now(BEIJING).plusDays(1).atStartOfDay();
+        return timeProvider.today().plusDays(1).atStartOfDay();
     }
 
     private int nightlyTtlSeconds() {
-        long seconds = Duration.between(LocalDateTime.now(BEIJING), nextMidnight()).getSeconds();
+        long seconds = Duration.between(timeProvider.now(), nextMidnight()).getSeconds();
         return (int) Math.max(1, Math.min(Integer.MAX_VALUE, seconds));
     }
 }

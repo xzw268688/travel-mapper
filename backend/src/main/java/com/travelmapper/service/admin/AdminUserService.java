@@ -76,8 +76,8 @@ public class AdminUserService {
                         + where + " ORDER BY id DESC LIMIT ? OFFSET ?",
                 (rs, rowNum) -> {
                     long id = rs.getLong("id");
-                    Timestamp vip = rs.getTimestamp("vip_expire_at");
-                    Timestamp created = rs.getTimestamp("created_at");
+                    LocalDateTime vip = rs.getObject("vip_expire_at", LocalDateTime.class);
+                    LocalDateTime created = rs.getObject("created_at", LocalDateTime.class);
                     return new AdminUserView(
                             id,
                             rs.getString("username"),
@@ -85,10 +85,10 @@ public class AdminUserService {
                             rs.getString("email"),
                             rs.getString("role"),
                             rs.getString("status"),
-                            vip == null ? null : vip.toLocalDateTime(),
+                            vip,
                             quotaService.freeUsedToday(id),
                             quotaService.packBalance(id),
-                            created == null ? null : created.toLocalDateTime());
+                            created);
                 },
                 keywordLike, keywordLike, keywordLike, keywordLike, statusFilter, statusFilter,
                 request.getSize(), request.offset());

@@ -1,6 +1,7 @@
 package com.travelmapper.common.alert;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.travelmapper.common.time.TimeProvider;
 import com.travelmapper.service.config.AlertConfig;
 import com.travelmapper.service.config.AlertConfigService;
 import jakarta.annotation.PreDestroy;
@@ -32,13 +33,16 @@ public class AlertNotifier {
 
     private final ObjectMapper objectMapper;
     private final AlertConfigService configService;
+    private final TimeProvider timeProvider;
     private final HttpClient httpClient;
     private final ExecutorService executor;
     private final Map<String, Long> lastSent = new ConcurrentHashMap<>();
 
-    public AlertNotifier(ObjectMapper objectMapper, AlertConfigService configService) {
+    public AlertNotifier(ObjectMapper objectMapper, AlertConfigService configService,
+                         TimeProvider timeProvider) {
         this.objectMapper = objectMapper;
         this.configService = configService;
+        this.timeProvider = timeProvider;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(3))
                 .build();
@@ -108,7 +112,7 @@ public class AlertNotifier {
     private String buildText(String title, String message) {
         return "【旅迹地图】" + title + "\n"
                 + message + "\n"
-                + "时间：" + LocalDateTime.now().format(TIME_FORMAT);
+                + "时间：" + timeProvider.now().format(TIME_FORMAT);
     }
 
     @PreDestroy
