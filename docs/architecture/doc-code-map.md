@@ -20,7 +20,7 @@
 
 | 链路 | SRS | DB | API | 后端代码 | 前端代码 |
 |---|---|---|---|---|---|
-| 注册 / 验邮 / 登录 | 5、AC | `user`、`email_token` | 第 3 章 | `controller/auth`、`service/auth` | `views/RegisterView.vue`、`VerifyEmailView.vue`、`LoginView.vue` |
+| 注册 / 验邮 / 登录 | 5、AC | `user`、`email_token` | 第 3 章 | `controller/auth`、`service/auth` | `views/RegisterView.vue`、`views/ResetPasswordView.vue`、`views/LoginView.vue` |
 | 地图点亮 / 国家抽屉 | REQ-MAP-001 | `country`、`city`、`trip`、`itinerary`、`travel_note` | 第 5 章 | `service/map`、`service/catalog` | `views/MapView.vue` |
 | AI 规划 / 保存 / 编辑 | REQ-AI-001/002/003 | `itinerary`、`itinerary_day`、`itinerary_spot`、`trip` | 第 6 章 | `service/itinerary`、`service/llm`、`service/search` | `views/PlanView.vue`、`ItineraryEditView.vue` |
 | 行前准备 / 官方链接 | 功能清单 | `trip_checklist`、`country_official_link` | 第 7 章 | `service/prep` | PlanView 下半部分 |
@@ -37,6 +37,7 @@
 - 接口路由：`backend/src/main/java/com/travelmapper/controller/`
 - 前端路由：`frontend/src/router/index.ts`
 - 前端 API 客户端：`frontend/src/api/`
+- 邮箱输入归一化（全角/空白容错）：`frontend/src/utils/email.ts`
 - 浏览器 E2E：`frontend/e2e/`
 - 性能基准：`scripts/perf/`、`docs/ops/performance.md`
 

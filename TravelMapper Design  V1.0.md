@@ -260,12 +260,10 @@ record GuideLink(
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/auth/register` | 注册，发送验证邮件 |
-| POST | `/api/auth/verify-email` | 邮箱验证 |
-| POST | `/api/auth/resend-verify` | 重发验证邮件（60 秒限流） |
+| POST | `/api/auth/register` | 注册，校验邮箱验证码并创建已激活账号 |
+| POST | `/api/auth/send-code` | 发送邮箱验证码（`VERIFY` / `RESET`，60 秒间隔、每日 10 次） |
 | POST | `/api/auth/login` | 登录，返回 JWT |
-| POST | `/api/auth/forgot-password` | 发送重置令牌 |
-| POST | `/api/auth/reset-password` | 重置密码 |
+| POST | `/api/auth/reset-password` | 用邮箱验证码重置密码 |
 | POST | `/api/auth/logout` | 退出（可选，JWT 无状态） |
 | POST | `/api/user/logout-account` | 账号注销 |
 | GET | `/api/user/profile` | 当前用户信息 |
@@ -1377,7 +1375,7 @@ docker-compose（可选）：
 ├─ MySQL 8.0
 ├─ Redis 7
 ├─ MinIO（替代云 OSS）
-└─ MailHog（可选，替代 QQ 邮箱 SMTP）
+└─ 邮件：默认关闭（验证码只写日志）；需真实发信时配置外部 SMTP（如 Resend）
 
 本地启动：
 ├─ backend: mvn spring-boot:run
@@ -1459,6 +1457,7 @@ docker-compose（可选）：
 | V1.0 修订版 | 第 1 次 | AI 取消机制（7.4/7.21）、60 秒生成去重（7.1/7.2）、preparations 24h 缓存（7.10.1）、多城市回退（7.17）、卡密 CSV（7.18）、汇率快照存值（7.15）、旅行隐私（7.14）、Token 版本号（7.19）、搜索日上限（7.11） | 需求补丁版下推 |
 | V1.0 一致性修订 | 本次 | ① 新增 `country` 国家字典表；② 新增 `quota_pack` 批次表，解决次数包 365 天过期（7.2）；③ AI 生成去重改为「结果缓存 + 在途锁」，消除并发双扣（7.1）；④ 汇率新增时回填 NULL 快照，落实"补配置自动纳入"（7.15）；⑤ 新增行程增删天/改当天城市流程（7.22）与接口（5.4）；⑥ 补 `resend-verify`、`upload/presign`、`GET /expenses`、`countries`、城市/官方链接增删、`restore` 等接口；⑦ 错误码补齐 1008、2015–2026；⑧ 修正 7.6 地图 SQL 的 `MAX/MIN` 语义；⑨ 对象 Key 去掉不存在的 `noteId`；⑩ 取消事件统一为 `event: cancelled`；⑪ `itinerary.status` 只保留 `SAVED`；⑫ 补 `quota:req` 键；⑬ 新增第 11 章待补清单；⑭ **`role` 收敛为 `USER`/`ADMIN`，VIP 由 `vip_expire_at` 派生**；⑮ 行程天 API 字段统一为 `date`，DB 列 `visit_date` 用 `@TableField` 显式映射；⑯ 抽屉 `ungrouped` 补入**行程**，修复"删除旅行后行程从抽屉消失"；⑰ 明确多城市行程在每个涉足城市下各展示一次；⑱ 卡密兑换/管理调增**必须写入 `quota_pack` 批次**，并补 VIP 到期叠加公式；⑲ 注销清单补 `quota_pack` 与 `token_version`；⑳ 7.14 补 `unconfiguredCurrencies`；㉑ 7.22 明确单行程上限 15 天；㉒ 7.4 请求体与接口文档对齐；㉓ 7.5 补**跨国家挂载拦截**与**旅行日期区间派生维护**；㉔ 7.13 明确草稿页景点仅前端本地、重新生成在扣费前预校验、修正子表误用 `deleted`；㉕ 7.10 清单 upsert 改为 8.0 别名语法并复位 `deleted`；㉖ 7.19 补改密/重置密码同样使 JWT 失效 | 深度语义审查（第三轮 + 第四轮） |
 | V1.1 认证验证码 | 2026-11-01 | 注册验证与找回密码改为 6 位邮箱验证码（Redis 存 HMAC 摘要、10 分钟、5 次试错、分层发信限流）；注册改为“注册前校验验证码”，删除 `verify-email`/`resend-verify`/`forgot-password`，新增 `/auth/send-code`；删除独立验证页；开发环境验证码只写日志；前端新增独立管理员登录入口与会话保持策略 | 认证体验对齐常见网站（change-06） |
+| V1.1.1 邮件发信修复 | 2026-11-09 | ① SMTP 显式设置 `mail.smtp.localhost` 为发件人域名，避免 EHLO 反向 DNS 卡顿；② 验证码/重置密码发信同步等待上限由 10 秒放宽到 20 秒；③ 前端注册/找回密码对邮箱输入做 NFKC 归一化并去空白（全角 `＠`/`．` 容错） | 实测 Resend SMTP 建连认证耗时 16–21 秒，被 10 秒上限误判为发送失败 |
 
 ---
 

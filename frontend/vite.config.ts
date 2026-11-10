@@ -21,6 +21,15 @@ export default defineConfig({
       '/s/': {
         target: apiTarget,
         changeOrigin: true
+      },
+      // Swagger UI 与 OpenAPI 文档由后端提供；不代理会被 SPA fallback 到 index.html
+      '/swagger-ui': {
+        target: apiTarget,
+        changeOrigin: true
+      },
+      '/v3/api-docs': {
+        target: apiTarget,
+        changeOrigin: true
       }
     }
   }

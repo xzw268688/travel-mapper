@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { register, sendCode } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
 import AuthShell from '../components/AuthShell.vue'
+import { isValidEmail, normalizeEmail } from '../utils/email'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -37,7 +38,7 @@ onBeforeUnmount(() => {
 })
 
 function validEmail(): boolean {
-  errors.email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) ? '' : '请输入正确的邮箱'
+  errors.email = isValidEmail(form.email) ? '' : '请输入正确的邮箱'
   return !errors.email
 }
 
@@ -49,7 +50,7 @@ async function requestCode(): Promise<void> {
   }
   sending.value = true
   try {
-    const result = await sendCode(form.email.trim(), 'VERIFY')
+    const result = await sendCode(normalizeEmail(form.email), 'VERIFY')
     if (!result.emailSent) {
       formError.value = '验证码发送失败，请检查邮件配置或稍后重试'
       return
@@ -86,7 +87,7 @@ async function submit(): Promise<void> {
   try {
     await register({
       username: form.username.trim(),
-      email: form.email.trim(),
+      email: normalizeEmail(form.email),
       password: form.password,
       agreeTerms: form.agreeTerms,
       code: form.code.trim()

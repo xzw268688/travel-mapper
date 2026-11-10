@@ -66,6 +66,27 @@ curl -H 'Authorization: Bearer <token>' http://localhost:8080/api/user/profile
 
 开发期默认 `MAIL_ENABLED=false`，验证码只打印在后端日志。需要真实发信时可在后台「配置 → 邮件 SMTP」填写主机、端口、账号、密码、发件人并启用，保存后立即热加载，无需重启；密码留空表示保留原值。未保存过 DB 配置时使用环境变量 `MAIL_*` 作为默认值。
 
+### Resend 示例
+
+| 字段 | 值 |
+|---|---|
+| 主机 | `smtp.resend.com` |
+| 端口 | `587`（STARTTLS） |
+| 用户名 | `resend` |
+| 密码 | Resend API Key（`re_` 开头，不是登录密码） |
+| 发件人 | 已在 Resend 验证的域名下的地址，如 `noreply@example.com` |
+| 认证 / STARTTLS | 均开启 |
+
+> 当前实现只支持 STARTTLS（587/25），未开启 `mail.smtp.ssl.enable`，**不支持 465 隐式 TLS**。
+> Resend 要求发件域名在后台完成 SPF/DKIM 验证；未验证时 SMTP 认证能通过，但发信会被服务端拒绝（通常 550）。
+
+### 发信超时与排查
+
+- 每次发信单独建连：连接、读、写各 10 秒超时，验证码/重置密码接口最多同步等待 20 秒。超时返回 `emailSent=false`，但邮件可能已实际投递，重试前先确认收件箱。
+- 后端显式把 `mail.smtp.localhost` 设为发件人域名作为 EHLO 域名。未显式设置时 JavaMail 会调用 `InetAddress.getLocalHost().getCanonicalHostName()` 做反向 DNS，部分网络下这一步会卡 10 秒以上，直接把正常发送拖成超时。
+- 排查入口：后端日志搜 `mail sender reloaded host=... port=...`（确认热加载生效）和 `verification email send failed`（含 SMTP 服务端返回码与完整异常栈）。
+- 前端注册 / 找回密码会在校验与提交前对邮箱做 NFKC 归一化并去除空白，中文输入法下的全角 `＠`、`．` 或误输入的空格不会触发「请输入正确的邮箱」。
+
 ## LLM / 搜索配置
 
 种子配置中 `llm.provider=qwen`、`search.provider=tavily`，API Key 为空。填写后即时热加载：
@@ -93,7 +114,7 @@ cp .env.example .env
 npm run dev
 ```
 
-开发服务器 `http://localhost:5173`，`/api` 默认代理到 `http://localhost:8080`；可用 `VITE_API_TARGET=http://localhost:8090` 指向另一个后端实例。
+开发服务器 `http://localhost:5173`，`/api`、`/swagger-ui`、`/v3/api-docs` 默认代理到 `http://localhost:8080`；可用 `VITE_API_TARGET=http://localhost:8090` 指向另一个后端实例。后台「监控 → 接口文档」的 Swagger UI 外链因此可直接在 5173 同源打开；修改 `vite.config.ts` 的代理后需要重启 dev server。
 
 - `/` 世界地图：三态着色、悬浮计数、点击国家打开旅行/城市抽屉。
 - `/plan` 行程规划：AI 生成 / 手动规划切换、草稿微调（天/景点增删改排、跨天移动）、保存、清单/官方链接。

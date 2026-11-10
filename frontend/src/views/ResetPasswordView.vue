@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { resetPassword, sendCode } from '../api/auth'
 import AuthShell from '../components/AuthShell.vue'
+import { isValidEmail, normalizeEmail } from '../utils/email'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,9 +33,7 @@ onBeforeUnmount(() => {
 })
 
 function validEmail(): boolean {
-  emailError.value = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())
-    ? ''
-    : '请输入正确的邮箱'
+  emailError.value = isValidEmail(email.value) ? '' : '请输入正确的邮箱'
   return !emailError.value
 }
 
@@ -45,7 +44,7 @@ async function requestCode(): Promise<void> {
   }
   sending.value = true
   try {
-    const result = await sendCode(email.value.trim(), 'RESET')
+    const result = await sendCode(normalizeEmail(email.value), 'RESET')
     if (!result.emailSent) {
       formError.value = '验证码发送失败，请检查邮件配置或稍后重试'
       return
@@ -74,7 +73,7 @@ async function submit(): Promise<void> {
   }
   submitting.value = true
   try {
-    await resetPassword(email.value.trim(), code.value.trim(), password.value)
+    await resetPassword(normalizeEmail(email.value), code.value.trim(), password.value)
     await router.push({ name: 'login', query: { reset: '1' } })
   } catch (error) {
     formError.value = (error as Error).message || '重置失败'

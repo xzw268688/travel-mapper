@@ -76,8 +76,11 @@ public class MailSenderHolder implements EmailSender, ReloadableProvider {
         mailProperties.put("mail.smtp.connectiontimeout", "10000");
         mailProperties.put("mail.smtp.timeout", "10000");
         mailProperties.put("mail.smtp.writetimeout", "10000");
-        // QQ/部分服务商与 JavaMail 默认 TLS 协商不兼容时，固定使用 TLSv1.2。
-        mailProperties.put("mail.smtp.ssl.protocols", "TLSv1.2");
+        // 允许 JavaMail 在 TLSv1.2/TLSv1.3 间协商。
+        mailProperties.put("mail.smtp.ssl.protocols", "TLSv1.2 TLSv1.3");
+        // 不显式指定时 JavaMail 用 InetAddress.getLocalHost().getCanonicalHostName()
+        // 生成 EHLO 域名，部分网络下反向 DNS 查询会卡十几秒，直接拖垮发送超时。
+        mailProperties.put("mail.smtp.localhost", ehloHost(from));
         current = new SmtpEmailSender(sender, from);
         smtpEnabled = true;
         log.info("mail sender reloaded host={} port={} auth={} starttls={}",
@@ -95,5 +98,15 @@ public class MailSenderHolder implements EmailSender, ReloadableProvider {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    /** EHLO 域名取发件人域；取不到时用 localhost（服务端通常不校验）。 */
+    private String ehloHost(String from) {
+        int at = from.lastIndexOf('@');
+        if (at < 0 || at == from.length() - 1) {
+            return "localhost";
+        }
+        String domain = from.substring(at + 1).replaceAll("[<>\\s]", "");
+        return domain.isEmpty() ? "localhost" : domain;
     }
 }

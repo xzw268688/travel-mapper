@@ -10,6 +10,8 @@
 - `TravelMapper DB  V1.0.md` — 数据库设计
 - `docs/architecture/doc-code-map.md` — 文档与代码对照
 - `docs/ops/local-development.md` — 本地开发与测试
+- `docs/ops/deployment.md` — 生产部署（2C2G 单机 Docker）
+- `deploy/` — 生产编排、Nginx、发布脚本参考
 - `openspec/` — 当前生效的规格与变更记录
 
 ## 快速开始

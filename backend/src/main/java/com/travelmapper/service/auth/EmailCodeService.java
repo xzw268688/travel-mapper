@@ -38,7 +38,8 @@ public class EmailCodeService {
 
     public enum Scene {
         VERIFY,
-        RESET
+        RESET,
+        CHANGE_EMAIL
     }
 
     private static final int CODE_TTL_SECONDS = 600;
@@ -66,7 +67,8 @@ public class EmailCodeService {
     private final AppProperties properties;
     private final SecureRandom random = new SecureRandom();
     private final byte[] hmacKey;
-    private final ExecutorService mailExecutor = Executors.newFixedThreadPool(2, task -> {
+    // 按需创建线程，避免个别卡住的 SMTP 连接耗尽发送池、阻塞后续邮件。
+    private final ExecutorService mailExecutor = Executors.newCachedThreadPool(task -> {
         Thread thread = new Thread(task, "mail-sender");
         thread.setDaemon(true);
         return thread;
@@ -113,9 +115,17 @@ public class EmailCodeService {
         boolean sent = true;
         Future<?> future = null;
         try {
-            future = mailExecutor.submit(
-                    () -> emailSender.send(email, subject(scene), body(scene, code)));
-            future.get(10, TimeUnit.SECONDS);
+            future = mailExecutor.submit(() -> {
+                try {
+                    emailSender.send(email, subject(scene), body(scene, code));
+                } catch (RuntimeException ex) {
+                    log.error("verification email send failed scene={}", scene, ex);
+                    throw ex;
+                }
+            });
+            // SMTP 连接/读/写各有 10 秒超时，总等待必须留足一轮完整往返的余量，
+            // 否则慢网络下成功的发送也会被判成超时。
+            future.get(20, TimeUnit.SECONDS);
         } catch (TimeoutException ex) {
             if (future != null) {
                 future.cancel(true);
@@ -172,11 +182,19 @@ public class EmailCodeService {
     }
 
     private String subject(Scene scene) {
-        return scene == Scene.VERIFY ? "验证你的旅迹地图邮箱" : "重置你的旅迹地图密码";
+        return switch (scene) {
+            case VERIFY -> "验证你的旅迹地图邮箱";
+            case RESET -> "重置你的旅迹地图密码";
+            case CHANGE_EMAIL -> "修改你的旅迹地图邮箱";
+        };
     }
 
     private String body(Scene scene, String code) {
-        String action = scene == Scene.VERIFY ? "验证邮箱" : "重置密码";
+        String action = switch (scene) {
+            case VERIFY -> "验证邮箱";
+            case RESET -> "重置密码";
+            case CHANGE_EMAIL -> "修改邮箱";
+        };
         return "你的旅迹地图" + action + "验证码：" + code
                 + "，" + (CODE_TTL_SECONDS / 60) + " 分钟内有效。请勿向他人泄露。";
     }
