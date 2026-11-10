@@ -258,12 +258,30 @@ async function drawQr(): Promise<void> {
   }
 }
 
+async function ensurePosterImagesLoaded(root: HTMLElement): Promise<void> {
+  const images = Array.from(root.querySelectorAll('img'))
+  images.forEach((image) => image.setAttribute('loading', 'eager'))
+  await Promise.all(
+    images.map((image) =>
+      image.complete
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            image.addEventListener('load', () => resolve(), { once: true })
+            image.addEventListener('error', () => resolve(), { once: true })
+            // 触发懒加载图片开始请求，避免导出时出现空白。
+            image.src = image.src
+          })
+    )
+  )
+}
+
 async function download(): Promise<void> {
   if (!posterRef.value || !note.value) {
     return
   }
   rendering.value = true
   try {
+    await ensurePosterImagesLoaded(posterRef.value)
     // 按需加载，避免首屏携带 html2canvas
     const { default: html2canvas } = await import('html2canvas')
     // 预览在手机上会等比缩小；导出时临时去掉 transform，保证输出完整尺寸。
@@ -364,7 +382,14 @@ function formatDate(value: string | null | undefined): string {
         <p class="poster-summary">{{ share.summary }}</p>
 
         <div v-if="gallery.length" class="poster-gallery">
-          <img v-for="image in gallery" :key="image" :src="image" alt="旅途照片" />
+          <img
+            v-for="image in gallery"
+            :key="image"
+            :src="image"
+            alt="旅途照片"
+            loading="lazy"
+            decoding="async"
+          />
         </div>
 
         <canvas ref="routeCanvas" class="poster-route" />

@@ -37,6 +37,7 @@ backups/
 frontend/node_modules/
 frontend/dist/
 frontend/coverage/
+frontend/src/types/
 
 # Playwright
 frontend/e2e/.auth.json

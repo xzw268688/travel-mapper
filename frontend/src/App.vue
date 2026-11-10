@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { useAuthStore } from './stores/auth'
 import FeedbackDialog from './components/FeedbackDialog.vue'
 
@@ -51,7 +52,8 @@ function onUserCommand(command: string): void {
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'app-shell-bare': bare }">
+  <el-config-provider :locale="zhCn">
+    <div class="app-shell" :class="{ 'app-shell-bare': bare }">
     <header v-if="!bare" class="app-header">
       <button
         v-if="showBack"
@@ -140,5 +142,6 @@ function onUserCommand(command: string): void {
       <router-view />
     </main>
     <FeedbackDialog v-model="feedbackVisible" />
-  </div>
+    </div>
+  </el-config-provider>
 </template>

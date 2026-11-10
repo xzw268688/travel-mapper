@@ -117,6 +117,7 @@ async function submit(): Promise<void> {
           v-for="(image, index) in page.images"
           :key="image"
           :src="imageSrc(index)"
+          lazy
           fit="cover"
           style="width: 140px; height: 100px; border-radius: 6px"
           @error="onImageError(index)"

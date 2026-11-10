@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import * as echarts from 'echarts'
+import echarts, { type EChartsType } from '../utils/echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import CountryCitySelector from '../components/CountryCitySelector.vue'
 import { currentBeijingMonth, monthRange, todayInBeijing } from '../utils/datetime'
@@ -83,8 +83,8 @@ const form = reactive({
 const pendingTripId = ref<number | null>(null)
 const chartEl = ref<HTMLDivElement | null>(null)
 const categoryChartEl = ref<HTMLDivElement | null>(null)
-let chart: echarts.ECharts | null = null
-let categoryChart: echarts.ECharts | null = null
+let chart: EChartsType | null = null
+let categoryChart: EChartsType | null = null
 
 const PREF_KEY = 'tm_expense_prefs'
 

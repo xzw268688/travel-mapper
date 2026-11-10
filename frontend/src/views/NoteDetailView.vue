@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { formatDate as formatDateValue } from '../utils/datetime'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RichTextEditor from '../components/RichTextEditor.vue'
@@ -13,6 +13,7 @@ import {
   type NoteResponse
 } from '../api/notes'
 import { contentToPreview, hasContent, imageKeyFromSrc } from '../utils/noteContent'
+import { decorateLazyImages } from '../utils/lazyContentImages'
 import { sharePageUrl } from '../utils/share'
 
 const route = useRoute()
@@ -20,6 +21,7 @@ const router = useRouter()
 const noteId = computed(() => Number(route.params.id))
 
 const note = ref<NoteResponse | null>(null)
+const contentRef = ref<HTMLElement | null>(null)
 const loading = ref(true)
 const error = ref('')
 const editing = ref(false)
@@ -87,6 +89,12 @@ const shareUrl = computed(() => {
   const token = note.value?.share.token
   return token ? sharePageUrl(token) : ''
 })
+
+watch(
+  [renderedContent, editing],
+  () => decorateLazyImages(contentRef.value),
+  { flush: 'post' }
+)
 
 onMounted(load)
 
@@ -351,7 +359,7 @@ function formatDate(value: string | null | undefined): string {
         </template>
 
         <template v-else>
-          <article class="note-content" v-html="renderedContent" />
+          <article ref="contentRef" class="note-content" v-html="renderedContent" />
           <div v-if="galleryVideos.length" class="note-videos">
             <video
               v-for="video in galleryVideos"
@@ -369,6 +377,7 @@ function formatDate(value: string | null | undefined): string {
               :key="image.objectKey"
               :src="image.thumbUrl || image.url || ''"
               :preview-src-list="galleryImages.map((item) => item.url || '').filter(Boolean)"
+              lazy
               fit="cover"
               style="width: 140px; height: 100px; border-radius: 6px"
             />

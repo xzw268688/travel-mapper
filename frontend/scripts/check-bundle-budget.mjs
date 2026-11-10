@@ -4,7 +4,7 @@
  *
  * 用法：npm run build && npm run budget
  * 可用环境变量临时调整阈值（单位 KB，gzip 后）：
- *   BUDGET_ENTRY_KB=950 BUDGET_CHUNK_KB=950 BUDGET_FIRST_SCREEN_KB=1400
+ *   BUDGET_ENTRY_KB=400 BUDGET_CHUNK_KB=600 BUDGET_FIRST_SCREEN_KB=800
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -16,10 +16,12 @@ const distDir = path.join(root, 'dist')
 const manifestPath = path.join(distDir, '.vite', 'manifest.json')
 
 const budgets = {
-  entryKb: numberFromEnv('BUDGET_ENTRY_KB', 950),
-  chunkKb: numberFromEnv('BUDGET_CHUNK_KB', 950),
-  firstScreenKb: numberFromEnv('BUDGET_FIRST_SCREEN_KB', 1400)
+  entryKb: numberFromEnv('BUDGET_ENTRY_KB', 400),
+  chunkKb: numberFromEnv('BUDGET_CHUNK_KB', 600),
+  firstScreenKb: numberFromEnv('BUDGET_FIRST_SCREEN_KB', 800)
 }
+
+const HEAVY_MODULES = ['echarts', 'zrender', '@tiptap', 'prosemirror', 'richtexteditor']
 
 function numberFromEnv(name, fallback) {
   const raw = process.env[name]
@@ -108,6 +110,15 @@ const entryCssFiles = [...entryKeys].flatMap((key) => manifest[key].css ?? [])
 const entryJsBytes = entryJsFiles.reduce((sum, file) => sum + gzipSize(file), 0)
 const entryCssBytes = entryCssFiles.reduce((sum, file) => sum + gzipSize(file), 0)
 
+const mapViewKey = Object.keys(manifest)
+  .find((key) => key.endsWith('src/views/MapView.vue'))
+const mapViewKeys = mapViewKey ? collectImports(manifest, mapViewKey) : new Set()
+const firstScreenKeys = new Set([...entryKeys, ...mapViewKeys])
+const firstScreenJsFiles = [...firstScreenKeys]
+  .map((key) => manifest[key].file)
+  .filter((file) => file.endsWith('.js'))
+const firstScreenCssFiles = [...firstScreenKeys].flatMap((key) => manifest[key].css ?? [])
+
 const allJsFiles = listJsFiles(distDir)
 const chunkSizes = allJsFiles
   .map((file) => ({ file, gzip: gzipSize(file), raw: rawSize(file) }))
@@ -115,7 +126,9 @@ const chunkSizes = allJsFiles
 
 const worldFile = findWorldJson(manifest)
 const worldBytes = worldFile ? gzipSize(worldFile) : 0
-const firstScreenBytes = entryJsBytes + entryCssBytes + worldBytes
+const firstScreenJsBytes = firstScreenJsFiles.reduce((sum, file) => sum + gzipSize(file), 0)
+const firstScreenCssBytes = firstScreenCssFiles.reduce((sum, file) => sum + gzipSize(file), 0)
+const firstScreenBytes = firstScreenJsBytes + firstScreenCssBytes + worldBytes
 
 console.log('包体积明细（gzip，level 9）')
 console.log('----------------------------------------')
@@ -125,11 +138,20 @@ for (const file of entryJsFiles) {
 for (const file of entryCssFiles) {
   console.log(`入口 CSS  ${kb(gzipSize(file)).padStart(10)}  ${file}`)
 }
+if (mapViewKey) {
+  for (const key of mapViewKeys) {
+    const file = manifest[key].file
+    if (file.endsWith('.js')) {
+      console.log(`地图路由  ${kb(gzipSize(file)).padStart(10)}  ${file}`)
+    }
+  }
+}
 if (worldFile) {
   console.log(`地图数据  ${kb(worldBytes).padStart(10)}  ${worldFile}`)
 }
 console.log('----------------------------------------')
 console.log(`入口 JS 合计      ${kb(entryJsBytes)}  / 预算 ${budgets.entryKb} KB`)
+console.log(`首屏 JS+CSS      ${kb(firstScreenJsBytes + firstScreenCssBytes)}`)
 console.log(`首屏合计          ${kb(firstScreenBytes)}  / 预算 ${budgets.firstScreenKb} KB`)
 console.log('\n最大的 JS chunk（前 10）')
 for (const chunk of chunkSizes.slice(0, 10)) {
@@ -142,6 +164,15 @@ if (!worldFile) {
 }
 
 const failures = []
+const heavyInEntry = [...entryKeys].filter((key) =>
+  HEAVY_MODULES.some((name) => key.toLowerCase().includes(name))
+)
+if (heavyInEntry.length > 0) {
+  failures.push(`入口包含重依赖模块：${heavyInEntry.join(', ')}`)
+}
+if (!mapViewKey) {
+  failures.push('manifest 中找不到 src/views/MapView.vue，首屏预算无法计算')
+}
 if (entryJsBytes > budgets.entryKb * 1024) {
   failures.push(
     `入口 JS ${kb(entryJsBytes)} 超过预算 ${budgets.entryKb} KB（超出 ${kb(entryJsBytes - budgets.entryKb * 1024)}）`

@@ -1,4 +1,26 @@
-import { test } from '@playwright/test'
+import { test, type Page } from '@playwright/test'
+
+/** 让懒加载图片全部触发并等待完成，避免截图出现空白图位。 */
+async function settleImages(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const images = Array.from(document.images)
+    images.forEach((image) => image.setAttribute('loading', 'eager'))
+    window.scrollTo(0, document.body.scrollHeight)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    window.scrollTo(0, 0)
+    await Promise.all(
+      images.map((image) =>
+        image.complete
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              image.addEventListener('load', () => resolve(), { once: true })
+              image.addEventListener('error', () => resolve(), { once: true })
+            })
+      )
+    )
+  })
+  await page.waitForTimeout(200)
+}
 
 /**
  * 视觉验收截图：只生成图片，不做断言。
@@ -24,6 +46,7 @@ for (const width of [1440, 390]) {
         await page.goto(item.path)
         await page.locator(item.ready).first().waitFor({ state: 'visible', timeout: 20_000 })
         await page.waitForTimeout(600)
+        await settleImages(page)
         await page.screenshot({
           path: `test-results/screens/${item.name}-${width}.png`,
           fullPage: false
@@ -37,7 +60,8 @@ for (const width of [1440, 390]) {
       await page.getByRole('button', { name: '创建手动行程' }).click()
       await page.locator('.city-block').first().waitFor({ state: 'visible', timeout: 20_000 })
       await page.waitForTimeout(600)
-      await page.screenshot({
+      await settleImages(page)
+        await page.screenshot({
         path: `test-results/screens/plan-manual-${width}.png`,
         fullPage: false
       })
@@ -47,7 +71,8 @@ for (const width of [1440, 390]) {
       await page.goto('/expenses')
       await page.locator('.el-radio-button').filter({ hasText: '按日期' }).click()
       await page.waitForTimeout(800)
-      await page.screenshot({
+      await settleImages(page)
+        await page.screenshot({
         path: `test-results/screens/expenses-date-${width}.png`,
         fullPage: false
       })
@@ -71,7 +96,8 @@ for (const width of [1440, 390]) {
       await page.locator('.rich-editor-toolbar').getByRole('button', { name: 'AI 润色' }).click()
       await page.locator('.polish-panel').waitFor({ state: 'visible', timeout: 20_000 })
       await page.waitForTimeout(400)
-      await page.screenshot({
+      await settleImages(page)
+        await page.screenshot({
         path: `test-results/screens/notes-polish-${width}.png`,
         fullPage: false
       })
@@ -88,7 +114,8 @@ for (const width of [1440, 390]) {
       })
       await page.locator('.rich-editor-content video').waitFor({ state: 'visible', timeout: 30_000 })
       await page.waitForTimeout(400)
-      await page.screenshot({
+      await settleImages(page)
+        await page.screenshot({
         path: `test-results/screens/notes-video-${width}.png`,
         fullPage: false
       })
@@ -100,7 +127,8 @@ for (const width of [1440, 390]) {
       await page.locator('.map-legend .el-tag').filter({ hasText: '日本' }).first().click()
       await page.locator('.guide-section').waitFor({ state: 'visible', timeout: 20_000 })
       await page.waitForTimeout(600)
-      await page.screenshot({
+      await settleImages(page)
+        await page.screenshot({
         path: `test-results/screens/drawer-guide-${width}.png`,
         fullPage: false
       })
@@ -120,7 +148,8 @@ test.describe('screens-auth-1440', () => {
       await page.goto(item.path)
       await page.locator(item.ready).first().waitFor({ state: 'visible', timeout: 20_000 })
       await page.waitForTimeout(400)
-      await page.screenshot({ path: `test-results/screens/${item.name}-1440.png`, fullPage: false })
+      await settleImages(page)
+        await page.screenshot({ path: `test-results/screens/${item.name}-1440.png`, fullPage: false })
     })
   }
 })

@@ -47,26 +47,46 @@ npm run dev
 - `/expenses` 记账：新增/编辑/删除、国家/城市/旅行/分类/日期筛选、分页；快捷录入记住上次国家/币种/分类，金额支持 `10+2.5*2` 表达式；「明细 / 按日期」切换、月度合计、按日期/国家/城市/旅行汇总与分类占比饼图。
 - `/admin/*`（需 ADMIN）：顶栏拆为「管理」与「配置」两个菜单。
   - 管理：用户管理、卡密生成/导出/作废、城市维护、官方链接维护、汇率维护、内容下架/恢复。
-  - 配置（`/admin/settings?tab=llm|search|storage|mail`）：LLM、攻略搜索、对象存储、邮件 SMTP；保存后热加载。LLM 未配置时生成行程返回 `2012`。
+  - 配置（`/admin/settings?tab=llm|search|storage|mail|alert`）：LLM、攻略搜索、对象存储、邮件 SMTP、故障提醒；保存后热加载。LLM 未配置时生成行程返回 `2012`。
 - 行程草稿与已保存编辑页的景点支持同一天内拖拽排序；跨天请用“移到…”菜单。
 - `/share/:token` 公开只读分享页（无需登录，失效时展示“分享已失效”）；分享链接与海报二维码均指向该路由。
 - 城市字典：`V4__more_cities.sql` 预置 123 个中国常用地级市/旅游城市，以及日本、泰国、韩国、新加坡、法国、意大利、美国、澳大利亚的热门城市；其余城市可通过后台城市接口补充。
+
+## 测试与构建
+
+```bash
+npm run test:unit          # Vitest + happy-dom
+npm run typecheck
+npm run build              # vue-tsc + 生产构建，并生成 .vite/manifest.json
+npm run budget             # gzip 体积预算（入口 ≤400KB、单 chunk ≤600KB、首屏 ≤800KB）
+```
+
+体积预算会拒绝入口重新引入 ECharts、TipTap、ProseMirror 等重依赖。
 
 ## 浏览器 E2E
 
 ```bash
 npm run test:e2e        # Playwright + 本机 Chrome
 npm run test:e2e:headed
+E2E_PREVIEW=1 npm run test:e2e   # 针对 dist 生产构建（需先 npm run build）
 
 # 视觉验收截图（输出到 test-results/screens/）
 npx playwright test e2e/screens.spec.ts
 ```
 
-需要后端已启动。覆盖地图/抽屉（含国家攻略生成入口与缓存展示）、行程编辑、游记创建与分享、海报下载、公开分享页、后台页面。详见 `e2e/README.md`。
+需要后端已启动。覆盖地图/抽屉（含国家攻略生成入口与缓存展示）、行程编辑、游记创建与分享、海报下载、公开分享页、后台页面。`e2e/loading.spec.ts` 会校验登录页不加载地图/编辑器/后台/海报代码。详见 `e2e/README.md`。
+
+## 性能约定
+
+- 所有页面路由使用动态 `import()`，公开页不加载地图、编辑器、后台与海报代码。
+- Element Plus 通过 `unplugin-vue-components` / `unplugin-auto-import` 按需引入；语言包由 `App.vue` 的 `<el-config-provider>` 提供。
+- ECharts 通过 `src/utils/echarts.ts` 按需注册，仅地图页与记账页加载。
+- `vue`、`echarts`、`axios` 等稳定依赖做选择性 vendor 分包；TipTap 由 Rollup 自动生成异步 chunk，避免被入口预加载。
+- 游记列表、详情、分享与海报页图片启用原生懒加载；正文 `v-html` 图片在渲染后补齐 `loading="lazy"`。
 
 ## 地图底图
 
-默认使用本地 `public/world.json`（ECharts 4 的世界地图 GeoJSON，约 1MB），并合并 `public/antarctica.json` 显示南极洲（底图扩展到 -90°~90°，主图会整体缩放）；北极地区以地图顶部的可点击点标记展示。不再依赖外部 CDN，可用 `VITE_WORLD_GEO_URL` 覆盖。
+默认使用 `src/assets/world.json`（ECharts 世界地图 GeoJSON，约 1MB），并合并 `src/assets/antarctica.json` 显示南极洲（底图扩展到 -90°~90°，主图会整体缩放）；北极地区以地图顶部的可点击点标记展示。构建后输出为 `/assets/world-<hash>.json`，走 1 年 immutable 缓存，并与页面 API 并发加载。不再依赖外部 CDN，可用 `VITE_WORLD_GEO_URL` 覆盖。
 
 悬浮提示与悬停标签显示中文国家名，取值顺序：目录中文名 → `src/assets/world-names-zh.json` 内置对照表 → 底图原名。替换底图后运行 `node scripts/check-world-names.mjs` 检查是否有未翻译的要素。上线前仍必须按 SRS 7.3 确认底图合规来源与审图号。底图加载失败时会自动切换为国家列表，列出全部国家（未点亮国家为灰色，同样可点击查看详情）。
 

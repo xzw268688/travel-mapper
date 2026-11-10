@@ -1,34 +1,36 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createAuthGuard } from './guard'
-import LoginView from '../views/LoginView.vue'
-import RegisterView from '../views/RegisterView.vue'
-import ResetPasswordView from '../views/ResetPasswordView.vue'
-import AdminLoginView from '../views/AdminLoginView.vue'
-import ProfileView from '../views/ProfileView.vue'
-import MapView from '../views/MapView.vue'
-import PlanView from '../views/PlanView.vue'
-import ItineraryEditView from '../views/ItineraryEditView.vue'
-import TripDetailView from '../views/TripDetailView.vue'
-import NotesView from '../views/NotesView.vue'
-import NoteDetailView from '../views/NoteDetailView.vue'
-import ShareView from '../views/ShareView.vue'
-import PosterView from '../views/PosterView.vue'
-import ExpensesView from '../views/ExpensesView.vue'
-import AdminRatesView from '../views/AdminRatesView.vue'
-import AdminNotesView from '../views/AdminNotesView.vue'
-import AdminFeedbackView from '../views/AdminFeedbackView.vue'
-import AdminReportsView from '../views/AdminReportsView.vue'
-import AdminSettingsView from '../views/AdminSettingsView.vue'
-import AdminLogsView from '../views/AdminLogsView.vue'
-import AdminAnnouncementsView from '../views/AdminAnnouncementsView.vue'
-import AdminMonitorView from '../views/AdminMonitorView.vue'
-import AdminUsersView from '../views/AdminUsersView.vue'
-import AdminCardsView from '../views/AdminCardsView.vue'
-import AdminCitiesView from '../views/AdminCitiesView.vue'
-import AdminLinksView from '../views/AdminLinksView.vue'
 import { useAuthStore } from '../stores/auth'
 import { getStoredToken } from '../utils/authStorage'
+
+// 路由级懒加载：公开页不会下载地图、编辑器、后台或海报代码。
+const LoginView = () => import('../views/LoginView.vue')
+const RegisterView = () => import('../views/RegisterView.vue')
+const ResetPasswordView = () => import('../views/ResetPasswordView.vue')
+const AdminLoginView = () => import('../views/AdminLoginView.vue')
+const ProfileView = () => import('../views/ProfileView.vue')
+const MapView = () => import('../views/MapView.vue')
+const PlanView = () => import('../views/PlanView.vue')
+const ItineraryEditView = () => import('../views/ItineraryEditView.vue')
+const TripDetailView = () => import('../views/TripDetailView.vue')
+const NotesView = () => import('../views/NotesView.vue')
+const NoteDetailView = () => import('../views/NoteDetailView.vue')
+const ShareView = () => import('../views/ShareView.vue')
+const PosterView = () => import('../views/PosterView.vue')
+const ExpensesView = () => import('../views/ExpensesView.vue')
+const AdminRatesView = () => import('../views/AdminRatesView.vue')
+const AdminNotesView = () => import('../views/AdminNotesView.vue')
+const AdminFeedbackView = () => import('../views/AdminFeedbackView.vue')
+const AdminReportsView = () => import('../views/AdminReportsView.vue')
+const AdminSettingsView = () => import('../views/AdminSettingsView.vue')
+const AdminLogsView = () => import('../views/AdminLogsView.vue')
+const AdminAnnouncementsView = () => import('../views/AdminAnnouncementsView.vue')
+const AdminMonitorView = () => import('../views/AdminMonitorView.vue')
+const AdminUsersView = () => import('../views/AdminUsersView.vue')
+const AdminCardsView = () => import('../views/AdminCardsView.vue')
+const AdminCitiesView = () => import('../views/AdminCitiesView.vue')
+const AdminLinksView = () => import('../views/AdminLinksView.vue')
 
 const router = createRouter({
   history: createWebHistory(),

@@ -142,8 +142,9 @@ npm run dev
 - 开发环境预置管理员 `admin / Admin@123456`；管理员登录后导航栏显示“汇率”“内容管理”。
 - 游记正文中的图片以相对路径 `/objects/{objectKey}` 存储，后端清洗会保留相对链接；展示与编辑时替换为 600 秒签名 URL，保存前再还原为对象 Key。
 - 海报由 html2canvas 抓取包括签名图片在内的 DOM，对象存储必须允许前端域名跨域 GET（`Access-Control-Allow-Origin`），否则图片会导致截图失败。
-- 地图默认加载本地 `frontend/public/world.json`，可由 `VITE_WORLD_GEO_URL` 覆盖；上线前必须按 SRS 7.3 完成底图合规确认。加载失败时降级为国家列表，列出全部国家（灰色国家也可点击查看详情）。
-- 生产构建：`npm run build`（已通过 `vue-tsc --noEmit`）。移动端手势已启用 ECharts roam，仍需真机验收。
+- 地图默认加载 `frontend/src/assets/world.json`（构建后为 `/assets/world-<hash>.json`，1 年 immutable 缓存），可由 `VITE_WORLD_GEO_URL` 覆盖；底图与页面 API 并发加载。上线前必须按 SRS 7.3 完成底图合规确认。加载失败时降级为国家列表，列出全部国家（灰色国家也可点击查看详情）。
+- 路由全部懒加载，Element Plus/ECharts 按需引入；游记列表、详情、分享与海报页图片启用懒加载。新增页面请沿用 `() => import()`，避免把重依赖带回入口。
+- 生产构建与体积预算：`npm run build && npm run budget`。预算为入口 JS ≤400KB gzip、单 JS chunk ≤600KB、首屏 ≤800KB，并禁止入口包含 ECharts/TipTap。移动端手势已启用 ECharts roam，仍需真机验收。
 
 ## 配置中心（开发期身份头）
 

@@ -192,6 +192,8 @@ async function save(): Promise<void> {
             :src="coverSrc(item)"
             class="note-cover"
             alt=""
+            loading="lazy"
+            decoding="async"
             @error="markCoverFailed(item)"
           />
           <div v-else class="note-cover note-cover-empty">无封面</div>

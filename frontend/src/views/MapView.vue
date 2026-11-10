@@ -2,7 +2,7 @@
 import { formatDateTime } from '../utils/datetime'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import * as echarts from 'echarts'
+import echarts, { type EChartsType } from '../utils/echarts'
 import { ElMessage } from 'element-plus'
 import { getCountries } from '../api/catalog'
 import {
@@ -17,6 +17,8 @@ import type { Country, CountryDrawer, CountryStat } from '../api/types'
 import { useMapStore } from '../stores/map'
 import { newRequestId } from '../utils/uuid'
 import worldNamesZh from '../assets/world-names-zh.json'
+import worldGeoUrl from '../assets/world.json?url'
+import antarcticaUrl from '../assets/antarctica.json?url'
 
 const router = useRouter()
 const mapStore = useMapStore()
@@ -45,10 +47,11 @@ const guideStreamText = ref('')
 const guideError = ref('')
 let guideController: AbortController | null = null
 
-// 默认使用本地 GeoJSON，避免依赖外部 CDN；生产环境仍需按 SRS 7.3 确认底图来源与审图号。
-const WORLD_GEO_URL = import.meta.env.VITE_WORLD_GEO_URL || '/world.json'
+// 默认使用本地 GeoJSON（带内容哈希的长缓存资源），避免依赖外部 CDN；
+// 生产环境仍需按 SRS 7.3 确认底图来源与审图号。
+const WORLD_GEO_URL = import.meta.env.VITE_WORLD_GEO_URL || worldGeoUrl
 
-let chart: echarts.ECharts | null = null
+let chart: EChartsType | null = null
 let geoFeatures: any[] = []
 let countryByName = new Map<string, Country>()
 let countryByCode = new Map<string, Country>()
@@ -213,13 +216,25 @@ const statusTagType = (status: string): 'success' | 'warning' | 'info' =>
 const drawerStatusLabel = (status: string): string =>
   status === 'GREEN' ? '有游记' : status === 'YELLOW' ? '仅有行程' : '无记录'
 
+async function fetchWorldGeo(): Promise<any> {
+  const response = await fetch(WORLD_GEO_URL)
+  if (!response.ok) {
+    throw new Error('地图底图加载失败')
+  }
+  return response.json()
+}
+
 async function load(): Promise<void> {
   loading.value = true
   try {
+    // 底图与页面 API 并发加载，避免等接口返回后才开始下载 1MB GeoJSON。
+    const worldGeoPromise = fetchWorldGeo()
+    const polarPromise = loadPolarFeatures()
     const [countryList, mapStats] = await Promise.all([getCountries(), getMapStats()])
     countries.value = countryList
     stats.value = mapStats.countries
-    await initMap()
+    const [geo, polarFeatures] = await Promise.all([worldGeoPromise, polarPromise])
+    await initMap(geo, polarFeatures)
   } catch (error) {
     ElMessage.error((error as Error).message || '加载地图失败')
     fallback.value = true
@@ -228,7 +243,7 @@ async function load(): Promise<void> {
   }
 }
 
-const POLAR_GEO_URLS = ['/antarctica.json']
+const POLAR_GEO_URLS = [antarcticaUrl]
 
 async function loadPolarFeatures(): Promise<any[]> {
   const results = await Promise.allSettled(
@@ -274,15 +289,9 @@ function mergeGeoFeatures(base: any, extraFeatures: any[]): any {
   return { ...base, features }
 }
 
-async function initMap(): Promise<void> {
+async function initMap(geo: any, polarFeatures: any[]): Promise<void> {
   if (!chartEl.value) return
   try {
-    const response = await fetch(WORLD_GEO_URL)
-    if (!response.ok) {
-      throw new Error('地图底图加载失败')
-    }
-    const geo = await response.json()
-    const polarFeatures = await loadPolarFeatures()
     const mergedGeo = mergeGeoFeatures(geo, polarFeatures)
     echarts.registerMap('world', mergedGeo)
 

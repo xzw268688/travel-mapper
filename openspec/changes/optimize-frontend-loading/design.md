@@ -37,7 +37,7 @@
 
 ### 2. Element Plus 按需引入
 
-- 增加开发依赖 `unplugin-auto-import`、`unplugin-vue-components`，在 `vite.config.ts` 注册 `ElementPlusResolver({ importStyle: 'css' })`；生成的类型声明放到 `src/types/` 并纳入 `tsconfig`。
+- 增加开发依赖 `unplugin-auto-import`、`unplugin-vue-components`，在 `vite.config.ts` 注册 `ElementPlusResolver({ importStyle: 'css' })`；生成的类型声明放到 `src/types/`。`components.d.ts` 会生成供 IDE 参考，但因 Element Plus 表格插槽的严格 `DefaultRow` 类型与现有模板写法冲突，`vue-tsc` 通过 `tsconfig.exclude` 跳过该文件；运行时的组件解析不受影响。
 - `main.ts` 移除 `app.use(ElementPlus)` 与 `element-plus/dist/index.css`；改为在 `App.vue` 最外层使用 `<el-config-provider :locale="zhCn">` 提供中文语言包。
 - 现有 33 个文件中显式 `import { ElMessage, ElMessageBox } from 'element-plus'` 保持不动（便于按需摇树），在 `main.ts` 显式引入 `message` 与 `message-box` 的 CSS。
 - 替代方案：逐文件手写组件与样式导入。可控但改动面大、易漏，因此不选。
@@ -51,8 +51,9 @@
 
 ### 4. 选择性 vendor 分包
 
-- `vite.config.ts` 增加 `build.rollupOptions.output.manualChunks` 函数：将 `vue`/`vue-router`/`pinia` 归入 `vue`，`echarts`/`zrender` 归入 `echarts`，`@tiptap`/`prosemirror` 归入 `tiptap`，`axios` 单独。
+- `vite.config.ts` 增加 `build.rollupOptions.output.manualChunks` 函数：将 `vue`/`vue-router`/`pinia` 归入 `vue`，`echarts`/`zrender` 归入 `echarts`，`axios` 单独。
 - 不强制拆分 `element-plus`：按需引入后由 Rollup 依据实际使用自动形成共享 chunk，避免把全量组件提升为入口依赖。
+- 实测把 `@tiptap`/`prosemirror` 也放进 `manualChunks` 会让 Vite 把 TipTap chunk 作为入口静态依赖预加载，违背首屏目标；因此 TipTap 交给 Rollup 自动生成异步 chunk，仅在被游记编辑相关路由引用时加载。
 - 替代方案：按包全量分包。缓存粒度更粗，且可能让入口加载未使用组件，因此不选。
 
 ### 5. 地图数据哈希化与并发加载
