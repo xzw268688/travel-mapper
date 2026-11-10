@@ -50,25 +50,41 @@ echo "    $JAR_PATH"
 echo "==> 构建前端"
 (cd frontend && npm run build)
 
-echo "==> 上传后端 jar"
+echo "==> 服务器端备份（jar / 前端 / 数据库，各保留 3 份）"
+ssh "$REMOTE" "cd '$REMOTE_DIR' && mkdir -p releases && ts=\$(date +%Y%m%d%H%M%S) && \
+  cp -f java-app/app.jar releases/app-\$ts.jar && \
+  tar -C nginx-html -czf releases/frontend-\$ts.tgz . && \
+  docker exec mysql-db sh -c 'exec mysqldump -uroot -p\$MYSQL_ROOT_PASSWORD --single-transaction --quick travelmapper' | gzip > releases/db-\$ts.sql.gz && \
+  ls -t releases/app-*.jar | tail -n +4 | xargs -r rm -f && \
+  ls -t releases/frontend-*.tgz | tail -n +4 | xargs -r rm -f && \
+  ls -t releases/db-*.sql.gz | tail -n +4 | xargs -r rm -f && \
+  echo \"    backup ts=\$ts\""
+
+echo "==> 上传后端 jar 与回滚脚本"
 scp "$JAR_PATH" "$REMOTE:$REMOTE_DIR/java-app/app.jar"
+scp "$(dirname "$0")/rollback.sh" "$REMOTE:$REMOTE_DIR/rollback.sh"
 
 echo "==> 上传前端 dist"
 tar -C frontend/dist -czf - . \
-  | ssh "$REMOTE" "find '$REMOTE_DIR/nginx-html' -mindepth 1 -delete && tar -C '$REMOTE_DIR/nginx-html' -xzf -"
+  | ssh "$REMOTE" "rm -rf /tmp/tm-dist && mkdir -p /tmp/tm-dist && tar -C /tmp/tm-dist -xzf - \
+      && find '$REMOTE_DIR/nginx-html' -mindepth 1 -delete \
+      && cp -a /tmp/tm-dist/. '$REMOTE_DIR/nginx-html/' \
+      && rm -rf /tmp/tm-dist"
 
-echo "==> 重启 java-app"
+echo "==> 重启 java-app（只重建 java-app，不动 mysql/redis/nginx/cloudflared）"
 ssh "$REMOTE" "cd '$REMOTE_DIR' && docker compose up -d --build java-app && docker image prune -f"
 
 echo "==> 等待健康检查"
-for i in $(seq 1 30); do
+for i in $(seq 1 45); do
   status="$(ssh "$REMOTE" "docker inspect -f '{{.State.Health.Status}}' java-app 2>/dev/null || echo unknown")"
   if [ "$status" = "healthy" ]; then
     echo "    healthy"
+    echo "发布完成。配置（.env / MySQL / OSS / SMTP / LLM）未改动。"
+    echo "回滚：ssh $REMOTE 'cd $REMOTE_DIR && bash rollback.sh <timestamp>'"
     exit 0
   fi
-  if [ "$i" -eq 30 ]; then
-    echo "    60 秒内未变为 healthy，查看日志：" >&2
+  if [ "$i" -eq 45 ]; then
+    echo "    90 秒内未变为 healthy，查看日志：" >&2
     echo "    ssh $REMOTE 'docker logs --tail 100 java-app'" >&2
     exit 1
   fi

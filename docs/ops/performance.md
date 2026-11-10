@@ -63,6 +63,21 @@ mvn -Dtest=ItineraryPerformanceIT -Dperf.enabled=true test \
 
 全部达标。该测试默认不执行（类名以 `IT` 结尾且需 `-Dperf.enabled=true`），不会污染常规测试套件。
 
+## 前端体积基线（2026-11-10）
+
+构建命令：`cd frontend && npm run build && npm run budget`。体积为 gzip（level 9），由 `scripts/check-bundle-budget.mjs` 统计。
+
+| 指标 | 实测 | 预算 |
+|---|---|---|
+| 入口 JS 合计 | 159.1 KB | ≤ 400 KB |
+| 首屏 JS+CSS | 377.4 KB | — |
+| 首屏合计（含地图数据） | 652.1 KB | ≤ 800 KB |
+| 最大 JS chunk | 180.5 KB（ECharts） | ≤ 600 KB |
+
+- 入口未包含 ECharts / TipTap：ECharts 仅在 `/` 地图路由加载，RichTextEditor（106.3 KB）仅在游记编辑路由加载。
+- html2canvas 46.7 KB 仅在海报路由加载；`axios` 19.0 KB、`vue` 62.0 KB 为入口共享依赖。
+- 世界地图 GeoJSON 274.7 KB gzip，与页面 API 并发加载，失败时降级为国家列表。
+
 ## 说明
 
 - 这是单机串行基线，不代表生产并发能力；上线前建议用 k6/JMeter 基于同一套种子数据做并发压测。

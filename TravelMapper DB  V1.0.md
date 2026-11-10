@@ -83,10 +83,16 @@ API 使用 camelCase，数据库使用 snake_case，由 MyBatis-Plus 的 `map-un
 -- 1) 排序规则：把 utf8mb4_0900_ai_ci 全部替换为 utf8mb4_unicode_ci
 -- 2) 7.8 的 upsert 改为传统写法：
 INSERT INTO trip_checklist
-  (user_id, country_code, itinerary_id, item_key, checked, deleted)
-VALUES (?, ?, ?, ?, ?, 0)
+  (user_id, country_code, itinerary_id, item_key, checked,
+   title, description, days_before, sort_order, custom, deleted)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 ON DUPLICATE KEY UPDATE
   checked = VALUES(checked),
+  title = VALUES(title),
+  description = VALUES(description),
+  days_before = VALUES(days_before),
+  sort_order = VALUES(sort_order),
+  custom = VALUES(custom),
   deleted = 0;
 ```
 
@@ -167,35 +173,36 @@ ON DUPLICATE KEY UPDATE
 
 ## 3. 表清单与删除策略
 
-共 **21 张表**（另有 1 张可选历史表）。
+共 **25 张表**（另有 1 张可选历史表）。
 
 | # | 表名 | 中文名 | 软删除 | 说明 |
 |---|---|---|---|---|
-| 1 | `user` | 用户 | ✅ | 用户与管理员共用，`role` 区分 |
+| 1 | `user` | 用户 | ✅ | 用户与管理员共用，`role` 区分；含 TOTP 列与 `token_version` |
 | 2 | `email_token` | 邮箱令牌 | ❌ | 用 `used` 标记一次性 |
-| 3 | `country` | 国家字典 | ❌ | 国家名、洲别；接口 `countryName` 的来源 |
-| 4 | `city` | 城市 | ❌ | 只停用不删除 |
-| 5 | `trip` | 旅行 | ✅ | 多次旅行归组 |
-| 6 | `itinerary` | 行程 | ✅ | 仅持久化已保存行程 |
-| 7 | `itinerary_day` | 行程天 | ❌ | 物理删除（重新生成/增删天时替换） |
-| 8 | `itinerary_spot` | 景点 | ❌ | 物理删除 |
-| 9 | `country_official_link` | 国家官方链接 | ❌ | 管理员可硬删除 |
-| 10 | `trip_checklist` | 行前清单 | ✅ | 注销时置 `deleted=1` |
-| 11 | `travel_note` | 游记 | ✅ | 含下架标记 `takedown`（与 `deleted` 独立） |
-| 12 | `note_share` | 分享令牌 | ❌ | 用 `revoked` 标记 |
-| 13 | `expense` | 消费 | ✅ | 汇率快照随行 |
-| 14 | `exchange_rate` | 汇率 | ❌ | 只更新，不删除 |
-| 15 | `card_key` | 卡密 | ❌ | 用 `status` 状态机 |
-| 16 | `quota_pack` | 次数包批次 | ❌ | 支撑 365 天过期与先进先出扣减 |
-| 17 | `quota_ledger` | 额度流水 | ❌ | 只追加，不清洗 |
-| 18 | `sys_config` | 系统配置 | ❌ | 键值表 |
-| 19 | `audit_log` | 操作日志（含用户操作） | ❌ | 只追加，30 天保留；`actor_role` 写入时快照 |
-| 20 | `feedback` | 用户反馈 | ❌ | 用户提交、管理员处理；注销时清空内容 |
-| 21 | `note_report` | 游记举报 | ❌ | 分享页提交、管理员处理；保留快照 |
-| 22 | `exchange_rate_history` | 汇率变更历史 | ❌ | **可选**，见 6.3 |
+| 3 | `user_recovery_code` | 二次验证恢复码 | ❌ | 只存 BCrypt 哈希，使用后物理删除 |
+| 4 | `country` | 国家字典 | ❌ | 国家名、洲别；接口 `countryName` 的来源 |
+| 5 | `city` | 城市 | ❌ | 只停用不删除 |
+| 6 | `trip` | 旅行 | ✅ | 多次旅行归组 |
+| 7 | `itinerary` | 行程 | ✅ | 仅持久化已保存行程 |
+| 8 | `itinerary_day` | 行程天 | ❌ | 物理删除（重新生成/增删天时替换） |
+| 9 | `itinerary_spot` | 景点 | ❌ | 物理删除 |
+| 10 | `country_official_link` | 国家官方链接 | ❌ | 管理员可硬删除 |
+| 11 | `trip_checklist` | 行前清单 | ✅ | 默认 10 项 + 自定义项；注销时置 `deleted=1` |
+| 12 | `travel_note` | 游记 | ✅ | 含下架标记 `takedown`（与 `deleted` 独立）与媒体审核时间 |
+| 13 | `note_share` | 分享令牌 | ❌ | 用 `revoked` 标记 |
+| 14 | `expense` | 消费 | ✅ | 汇率快照随行 |
+| 15 | `exchange_rate` | 汇率 | ❌ | 只更新，不删除 |
+| 16 | `card_key` | 卡密 | ❌ | 用 `status` 状态机 |
+| 17 | `quota_pack` | 次数包批次 | ❌ | 支撑 365 天过期与先进先出扣减 |
+| 18 | `quota_ledger` | 额度流水 | ❌ | 只追加，不清洗 |
+| 19 | `sys_config` | 系统配置 | ❌ | 键值表 |
+| 20 | `audit_log` | 操作日志（含用户操作） | ❌ | 只追加，30 天保留；`actor_role` 写入时快照 |
+| 21 | `feedback` | 用户反馈 | ❌ | 用户提交、管理员处理；注销时清空内容 |
+| 22 | `note_report` | 游记举报 | ❌ | 分享页提交、管理员处理；保留快照 |
 | 23 | `login_log` | 登录日志 | ❌ | 只追加，90 天保留 |
 | 24 | `announcement` | 通知公告 | ✅ | 软删除；生效时间存 epoch 毫秒 |
 | 25 | `announcement_read` | 公告已读 | ❌ | 公告+用户唯一；删除公告时保留 |
+| 26 | `exchange_rate_history` | 汇率变更历史 | ❌ | **可选**，见 6.3 |
 
 ---
 
@@ -387,14 +394,19 @@ CREATE TABLE `country_official_link` (
   KEY `idx_country_sort` (`country_code`, `sort_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='国家官方链接（每国 ≤3 条，应用层限制）';
 
--- 行前清单勾选（固定 7 项）
+-- 行前清单（默认 10 项 + 自定义项）
 CREATE TABLE `trip_checklist` (
   `id`           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_id`      BIGINT UNSIGNED NOT NULL,
   `country_code` CHAR(2)         NOT NULL,
   `itinerary_id` BIGINT UNSIGNED NOT NULL,
-  `item_key`     VARCHAR(16)     NOT NULL COMMENT 'VISA/FLIGHT/HOTEL/INSURANCE/CURRENCY/PLUG/SIM',
+  `item_key`     VARCHAR(64)     NOT NULL COMMENT '默认项键或 CUSTOM_<uuid>',
   `checked`      TINYINT(1)      NOT NULL DEFAULT 0,
+  `title`        VARCHAR(64)     NULL,
+  `description`  VARCHAR(255)    NULL,
+  `days_before`  INT             NULL,
+  `sort_order`   INT             NOT NULL DEFAULT 0,
+  `custom`       TINYINT(1)      NOT NULL DEFAULT 0,
   `created_at`   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted`      TINYINT(1)      NOT NULL DEFAULT 0,
@@ -777,21 +789,24 @@ CREATE TABLE `announcement_read` (
 
 ## 6. 初始化数据
 
-### 6.1 行前清单项（不建表）
+### 6.1 行前清单项（默认项不建表）
 
-固定 7 项由后端枚举定义，**不入库**：
+默认 10 项由后端枚举定义，**不入库**：
 
-| `item_key` | 中文标签 |
-|---|---|
-| `VISA` | 签证已办 |
-| `FLIGHT` | 机票已订 |
-| `HOTEL` | 住宿已订 |
-| `INSURANCE` | 保险已买 |
-| `CURRENCY` | 货币已换 |
-| `PLUG` | 插头转换器已备 |
-| `SIM` | 电话卡/流量已办 |
+| `item_key` | 中文标签 | 提前天数 | 排序 |
+|---|---|---|---|
+| `VISA` | 签证 | 60 | 10 |
+| `FLIGHT` | 机票 | 45 | 20 |
+| `HOTEL` | 住宿 | 30 | 30 |
+| `INSURANCE` | 保险 | 30 | 40 |
+| `SIM` | 电话卡 / eSIM | 14 | 50 |
+| `CURRENCY` | 换汇与银行卡 | 14 | 60 |
+| `PLUG` | 转换头 + 插排 | 7 | 70 |
+| `APPS` | App 准备 | 7 | 80 |
+| `PACKING` | 必备物品 | 7 | 90 |
+| `CUSTOMS` | 入境卡与海关 | 1 | 100 |
 
-`trip_checklist` 只存用户**实际勾选过**的行；未勾选的项由接口补默认值。
+`trip_checklist` 只存用户**实际勾选或自定义**的行；自定义项 `item_key` 使用 `CUSTOM_<uuid>`，`custom=1`，标题与说明随行保存；未勾选的默认项由接口补默认值。
 
 ### 6.2 汇率初始数据
 
@@ -1132,10 +1147,16 @@ WHERE id = ? AND status = 'UNUSED'
 
 ```sql
 INSERT INTO trip_checklist
-  (user_id, country_code, itinerary_id, item_key, checked, deleted)
-VALUES (?, ?, ?, ?, ?, 0) AS new
+  (user_id, country_code, itinerary_id, item_key, checked,
+   title, description, days_before, sort_order, custom, deleted)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) AS new
 ON DUPLICATE KEY UPDATE
   checked = new.checked,
+  title = new.title,
+  description = new.description,
+  days_before = new.days_before,
+  sort_order = new.sort_order,
+  custom = new.custom,
   deleted = 0;
 ```
 
@@ -1306,6 +1327,9 @@ systemctl start travelmapper
 | 二次校验 | `country` | 明确全量 ISO 3166-1 导入、后台不提供国家增删 | 避免管理员新增城市时国家悬空 |
 | 用户反馈 | 新增 `feedback` 表 | 记录分类、标题、正文、联系方式、页面上下文、状态与内部备注；不存 IP、不做软删除；注销时清空内容与内部备注 | 建立用户反馈闭环（change: user-feedback） |
 | 内容审核与举报 | 新增 `note_report` 表 | 记录举报原因、说明、标题/纯文本/版本时间快照、状态与处理人；不存 IP、不做软删除；注销时匿名化举报人并清空快照 | 建立内容治理闭环（change: note-moderation） |
+| 账号安全 | `user`、`user_recovery_code` | `user` 新增 `totp_secret` / `totp_enabled` / `totp_confirmed_at`；新增一次性恢复码表，只存 BCrypt 哈希 | 账号安全自助（change: account-security-self-service） |
+| 媒体审核与缩略图 | `travel_note` | 新增 `media_reviewed_at` / `media_reviewed_by`；缩略图以 `<objectKey>.thumb.jpg` 派生，不新增字段 | 人工审核与列表缩略图（change: media-thumbnails-and-review） |
+| 日志与公告 | `login_log`、`announcement`、`announcement_read` | 新增登录日志、公告与已读表；日志分别按 30/90 天保留 | 运营与审计（change: admin-log-management / announcements） |
 
 ---
 
