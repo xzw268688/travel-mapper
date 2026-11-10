@@ -57,13 +57,16 @@
 ## 如何验证你读到的是对的
 
 ```bash
-# 后端全量测试
-cd backend && mvn test ...
+# 后端单元测试（不依赖 Docker）
+cd backend && mvn test
 
-# 前端构建
-cd frontend && npm run build
+# 后端单元 + 集成测试（Testcontainers 或 docs/ops/local-development.md 的外部容器模式）
+cd backend && mvn verify
 
-# 浏览器 E2E（需后端已启动）
+# 前端单元测试、构建与体积预算
+cd frontend && npm run test:unit && npm run build && npm run budget
+
+# 浏览器 E2E（需后端已启动；E2E_PREVIEW=1 测生产构建）
 cd frontend && npm run test:e2e
 
 # OpenSpec 主规格

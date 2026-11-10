@@ -5,32 +5,41 @@ import pkg from './package.json'
 // 默认代理到本机 8080；可用 VITE_API_TARGET 指向另一个后端实例（例如 E2E 用 8090）。
 const apiTarget = process.env.VITE_API_TARGET || 'http://localhost:8080'
 
+const proxy = {
+  '/api': {
+    target: apiTarget,
+    changeOrigin: true
+  },
+  // 注意使用 '/s/' 而不是 '/s'，否则会前缀匹配到 /src/...、/styles.css 等前端资源
+  '/s/': {
+    target: apiTarget,
+    changeOrigin: true
+  },
+  // Swagger UI 与 OpenAPI 文档由后端提供；不代理会被 SPA fallback 到 index.html
+  '/swagger-ui': {
+    target: apiTarget,
+    changeOrigin: true
+  },
+  '/v3/api-docs': {
+    target: apiTarget,
+    changeOrigin: true
+  }
+}
+
 export default defineConfig({
   plugins: [vue()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version)
   },
+  build: {
+    manifest: true
+  },
   server: {
     port: 5173,
-    proxy: {
-      '/api': {
-        target: apiTarget,
-        changeOrigin: true
-      },
-      // 注意使用 '/s/' 而不是 '/s'，否则会前缀匹配到 /src/...、/styles.css 等前端资源
-      '/s/': {
-        target: apiTarget,
-        changeOrigin: true
-      },
-      // Swagger UI 与 OpenAPI 文档由后端提供；不代理会被 SPA fallback 到 index.html
-      '/swagger-ui': {
-        target: apiTarget,
-        changeOrigin: true
-      },
-      '/v3/api-docs': {
-        target: apiTarget,
-        changeOrigin: true
-      }
-    }
+    proxy
+  },
+  preview: {
+    port: 5173,
+    proxy
   }
 })

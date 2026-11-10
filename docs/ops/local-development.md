@@ -167,19 +167,23 @@ curl -X PUT http://localhost:8080/api/admin/config/oss \
 
 ## 测试
 
-单元测试不依赖 Docker：
+后端测试按 JUnit 标签拆分：
+
+- `mvn test`：只跑单元测试，不依赖 Docker。所有集成测试继承 `AbstractIntegrationTest`，统一带 `@Tag("integration")`，不会被执行。
+- `mvn verify`：先跑单元测试，再由 Failsafe 执行集成测试。默认使用 Testcontainers；Windows 下 Testcontainers 与 Docker 29 命名管道不兼容时，使用下方外部容器模式。
 
 ```bash
 cd backend
-mvn -q -Dtest='AesCryptoServiceTest,SensitiveDataMaskerTest,SensitiveLogConverterTest,PageAndSortTest,ObjectKeyGeneratorTest,GuideLinkSanitizerTest,TimeoutSearchProviderTest,ChecklistItemTest,ErrorCodeTest' test
+mvn test
 ```
 
-集成测试需要 MySQL 8 / Redis / S3 兼容服务。当前环境 Testcontainers 与 Docker 29 命名管道不兼容，使用外部容器模式：
+集成测试需要 MySQL 8 / Redis / S3 兼容服务。外部容器模式：
 
 ```bash
 docker run -d --name tm-mysql -e MYSQL_ROOT_PASSWORD=root \
   -e MYSQL_DATABASE=travelmapper -e MYSQL_USER=travelmapper \
-  -e MYSQL_PASSWORD=travelmapper -p 13306:3306 mysql:8.0
+  -e MYSQL_PASSWORD=travelmapper -p 13306:3306 mysql:8.0 \
+  --default-time-zone=+08:00
 docker run -d --name tm-redis -p 16379:6379 redis:7-alpine redis-server --appendonly yes
 docker run -d --name tm-s3mock -p 19090:9090 \
   -e COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=travelmapper,travelmapper2 \
@@ -193,21 +197,68 @@ mvn -q \
   -Dtest.redis.host=127.0.0.1 -Dtest.redis.port=16379 \
   -Dtest.object-storage.endpoint=http://127.0.0.1:19090 \
   -Dtest.object-storage.access-key=test -Dtest.object-storage.secret-key=test \
-  test
+  verify
 ```
 
 S3Mock 不强制私有访问，私有桶用例会自动跳过。MinIO 镜像/Windows 二进制不可用时，可用 `scripts/storage/` 中的 SeaweedFS S3 网关完成私有桶验证（匿名 GET 返回 403），启动与测试命令见 `scripts/storage/README.md`。
 
-浏览器 E2E（Playwright + 本机 Chrome，需要后端已启动）：
+性能测试默认不执行，需要显式开启：
+
+```bash
+cd backend
+mvn -Dperf.enabled=true -Dtest=ItineraryPerformanceIT test
+```
+
+前端单元测试与体积预算：
 
 ```bash
 cd frontend
-E2E_BACKEND_LOG='D:/path/to/backend.log' npm run test:e2e
+npm run test:unit
+npm run test:unit:coverage
+npm run build
+npm run budget
 ```
 
-`E2E_BACKEND_LOG` 指向后端日志文件时，注册/找回密码用例会从中读取 `[auth-dev] ... code=...`；未设置时跳过这些用例。
+浏览器 E2E（Playwright，需要后端已启动）：
+
+```bash
+cd frontend
+E2E_BACKEND_LOG='D:/path/to/backend.log' npm run test:e2e        # 开发服务器
+E2E_BACKEND_LOG='D:/path/to/backend.log' E2E_PREVIEW=1 npm run test:e2e  # 生产构建（需先 npm run build）
+```
+
+`E2E_BACKEND_LOG` 指向后端日志文件时，注册/找回密码用例会从中读取 `[auth-dev] ... code=...`；未设置时跳过这些用例。`E2E_PREVIEW=1` 时 Playwright 使用 `vite preview` 托管的 `dist`，不会启动 dev server。
 
 详见 `frontend/e2e/README.md`。
+
+## CI 与分支保护
+
+仓库使用 GitHub Actions，工作流位于 `.github/workflows/`：
+
+- `ci.yml`：在 PR 与推送 `main`、`release/**` 时运行。
+  - `Backend unit tests`：`mvn test`（只跑单元测试）。
+  - `Backend integration tests`：`mvn verify`（Testcontainers；GitHub 托管 runner 自带 Docker）。
+  - `Frontend checks`：`npm ci`、Vitest 覆盖率、`vue-tsc` + 生产构建、体积预算。
+  - `CI gate`：汇总以上三个 job，任一失败则整体失败；建议作为分支保护的必需检查。
+- `e2e-nightly.yml`：每日 02:17（北京时间）与手动触发。启动 MySQL/Redis/MinIO，构建后端 jar 与前端生产包，以 `vite preview` 运行 Playwright；失败时上传 `playwright-report`、`test-results` 与后端日志。
+
+PR 合并前应确保 `CI gate` 绿灯。首次配置分支保护：GitHub 仓库 → Settings → Branches → Add branch protection rule，对 `main` 与 `release/*` 勾选 “Require status checks to pass before merging”，并选择 `CI gate`。
+
+## 发布
+
+`deploy/release.sh` 在构建前会检查当前 commit 的 `ci.yml` 结果：
+
+```bash
+REMOTE=root@your-server ./deploy/release.sh
+```
+
+- 只有当前 commit 存在 `ci.yml` 运行且结论为 success 时才继续。
+- 需要本机安装并登录 GitHub CLI（`gh auth login`）。
+- GitHub 故障或紧急回滚时可显式跳过校验（会打印警告）：
+
+```bash
+SKIP_CI_CHECK=1 REMOTE=root@your-server ./deploy/release.sh
+```
 
 旅行归组重算（一次性维护，会先备份数据库）：
 

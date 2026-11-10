@@ -62,6 +62,8 @@ function clearSendLimits(email: string): void {
 async function logout(page: import('@playwright/test').Page): Promise<void> {
   await page.locator('.user-menu').click()
   await page.getByRole('menuitem', { name: '退出登录' }).click()
+  // 退出包含一次服务端请求；等导航完成，避免随后 goto 被这次 push 覆盖。
+  await expect(page).toHaveURL(/\/login$/)
 }
 
 test('管理员入口：管理员登录后进入用户管理页', async ({ page }) => {

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { createAuthGuard } from './guard'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
 import ResetPasswordView from '../views/ResetPasswordView.vue'
@@ -66,28 +67,12 @@ const router = createRouter({
   ]
 })
 
-router.beforeEach(async (to) => {
-  if (to.meta.public) {
-    return true
-  }
-  const token = getStoredToken()
-  if (to.name !== 'login' && !token) {
-    return { name: 'login' }
-  }
-  if (to.name === 'login' && token) {
-    return { name: 'map' }
-  }
-  if (to.meta.admin && token) {
-    const auth = useAuthStore()
-    if (!auth.user) {
-      await auth.loadProfile()
-    }
-    if (auth.user?.role !== 'ADMIN') {
-      ElMessage.warning('需要管理员权限')
-      return { name: 'map' }
-    }
-  }
-  return true
-})
+router.beforeEach(
+  createAuthGuard({
+    getToken: getStoredToken,
+    getAuthStore: useAuthStore,
+    notify: (message) => ElMessage.warning(message)
+  })
+)
 
 export default router

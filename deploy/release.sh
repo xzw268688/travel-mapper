@@ -13,6 +13,34 @@ REMOTE_DIR="${REMOTE_DIR:-/root/my-docker-apps}"
 
 cd "$(dirname "$0")/.."
 
+echo "==> 校验 CI 状态"
+if [ "${SKIP_CI_CHECK:-0}" = "1" ]; then
+  echo "    ⚠ 已设置 SKIP_CI_CHECK=1，跳过 CI 校验（仅用于 GitHub 故障或紧急回滚）" >&2
+else
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "    未找到 gh，无法校验 CI。安装 GitHub CLI 或设置 SKIP_CI_CHECK=1。" >&2
+    exit 1
+  fi
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "    gh 未登录，无法校验 CI。运行 gh auth login 或设置 SKIP_CI_CHECK=1。" >&2
+    exit 1
+  fi
+  SHA="$(git rev-parse HEAD)"
+  ROW="$(gh run list --workflow=ci.yml --commit "$SHA" --limit 1 \
+    --json status,conclusion,url --jq '.[0] // empty | [.status,.conclusion,.url] | @tsv' 2>/dev/null || true)"
+  if [ -z "$ROW" ]; then
+    echo "    当前 commit $SHA 没有 ci.yml 运行记录。请先推送并等待 CI 完成。" >&2
+    exit 1
+  fi
+  IFS=$'\t' read -r CI_STATUS CI_CONCLUSION CI_URL <<< "$ROW"
+  if [ "$CI_STATUS" != "completed" ] || [ "$CI_CONCLUSION" != "success" ]; then
+    echo "    CI 未通过（status=$CI_STATUS conclusion=$CI_CONCLUSION）" >&2
+    [ -n "$CI_URL" ] && echo "    运行记录：$CI_URL" >&2
+    exit 1
+  fi
+  echo "    CI 绿灯：$CI_URL"
+fi
+
 echo "==> 构建后端"
 (cd backend && MAVEN_SKIP_RC=1 mvn -q -DskipTests package)
 

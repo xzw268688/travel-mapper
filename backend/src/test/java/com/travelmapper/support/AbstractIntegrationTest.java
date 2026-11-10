@@ -3,6 +3,7 @@ package com.travelmapper.support;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travelmapper.service.auth.EmailSender;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,6 +24,7 @@ import java.util.Set;
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Tag("integration")
 @Import(AbstractIntegrationTest.CapturingMailConfig.class)
 public abstract class AbstractIntegrationTest {
 

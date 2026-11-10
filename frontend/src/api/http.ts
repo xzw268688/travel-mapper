@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { type InternalAxiosRequestConfig } from 'axios'
 import { clearStoredToken, getStoredToken } from '../utils/authStorage'
 
 const http = axios.create({
@@ -6,39 +6,44 @@ const http = axios.create({
   timeout: 20000
 })
 
-http.interceptors.request.use((config) => {
+/** 为每个请求附加当前 token；单独导出便于单测。 */
+export function attachAuthHeader(
+  config: InternalAxiosRequestConfig
+): InternalAxiosRequestConfig {
   const token = getStoredToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
   return config
-})
+}
 
-http.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      clearStoredToken()
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login'
-      }
+/** 统一处理 401、二次验证引导与业务错误信息；单独导出便于单测。 */
+export function handleResponseError(error: any): Promise<never> {
+  if (error.response?.status === 401) {
+    clearStoredToken()
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login'
     }
-    // 管理员被要求先绑定二次验证：引导到个人中心账号安全区块。
-    if (error.response?.data?.code === 1009) {
-      sessionStorage.setItem('tm_notice', '请先绑定二次验证后再访问后台')
-      if (window.location.pathname !== '/profile') {
-        window.location.href = '/profile'
-      }
-    }
-    // 非 2xx 时 axios 只给出 "Request failed with status code xxx"，
-    // 优先展示后端 ApiResponse 里的业务 message。
-    const message = error.response?.data?.message
-    if (typeof message === 'string' && message.trim()) {
-      error.message = message
-    }
-    return Promise.reject(error)
   }
-)
+  // 管理员被要求先绑定二次验证：引导到个人中心账号安全区块。
+  if (error.response?.data?.code === 1009) {
+    sessionStorage.setItem('tm_notice', '请先绑定二次验证后再访问后台')
+    if (window.location.pathname !== '/profile') {
+      window.location.href = '/profile'
+    }
+  }
+  // 非 2xx 时 axios 只给出 "Request failed with status code xxx"，
+  // 优先展示后端 ApiResponse 里的业务 message。
+  const message = error.response?.data?.message
+  if (typeof message === 'string' && message.trim()) {
+    error.message = message
+  }
+  return Promise.reject(error)
+}
+
+http.interceptors.request.use(attachAuthHeader)
+
+http.interceptors.response.use((response) => response, handleResponseError)
 
 async function unwrap<T>(promise: Promise<{ data: { code: number; message: string; data: T } }>): Promise<T> {
   const response = await promise

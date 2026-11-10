@@ -249,7 +249,8 @@ test('游记视频上传、保存与播放', async ({ page }) => {
 
   await page.getByRole('button', { name: '保存并查看详情' }).click()
   await expect(page).toHaveURL(/\/notes\/\d+$/)
-  await expect(page.locator('.note-video')).toBeVisible({ timeout: 20_000 })
+  // 正文内嵌视频直接渲染在文章里，不重复出现在下方视频列表。
+  await expect(page.locator('.note-content video')).toBeVisible({ timeout: 20_000 })
 
   await page.getByRole('button', { name: '删除' }).click()
   await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
@@ -283,7 +284,7 @@ test('后台管理与配置菜单拆分', async ({ page }) => {
   await expect(page).toHaveURL(/\/admin\/settings\?tab=mail/)
   await expect(page.getByRole('tab', { name: '邮件 SMTP' })).toBeVisible()
   await expect(page.getByText('SMTP 主机')).toBeVisible()
-  await expect(page.getByRole('tab')).toHaveCount(4)
+  await expect(page.getByRole('tab')).toHaveCount(5)
 })
 
 test('后台汇率与内容管理页面可访问', async ({ page }) => {
