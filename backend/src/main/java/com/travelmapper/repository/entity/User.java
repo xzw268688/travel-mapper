@@ -26,6 +26,9 @@ public class User {
     private Boolean emailVerified;
     private LocalDateTime vipExpireAt;
     private Integer tokenVersion;
+    private String totpSecret;
+    private Boolean totpEnabled;
+    private LocalDateTime totpConfirmedAt;
     private LocalDateTime lastLoginAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

@@ -12,6 +12,9 @@ const loading = ref(false)
 const accountError = ref('')
 const passwordError = ref('')
 const formError = ref('')
+const step = ref<'credentials' | '2fa'>('credentials')
+const challengeToken = ref('')
+const twoFactorCode = ref('')
 
 async function submit(): Promise<void> {
   formError.value = ''
@@ -23,7 +26,13 @@ async function submit(): Promise<void> {
   loading.value = true
   try {
     const response = await auth.login(account.value.trim(), password.value, true)
-    if (response.user.role !== 'ADMIN') {
+    if (response.requires2fa) {
+      challengeToken.value = response.challengeToken ?? ''
+      twoFactorCode.value = ''
+      step.value = '2fa'
+      return
+    }
+    if (response.user?.role !== 'ADMIN') {
       auth.rejectNonAdmin()
       formError.value = '该账号没有管理员权限'
       return
@@ -34,6 +43,39 @@ async function submit(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+async function submitTwoFactor(): Promise<void> {
+  formError.value = ''
+  if (!twoFactorCode.value.trim()) {
+    formError.value = '请输入验证码或恢复码'
+    return
+  }
+  loading.value = true
+  try {
+    const response = await auth.completeTwoFactor(
+      challengeToken.value,
+      twoFactorCode.value.trim()
+    )
+    if (response.user?.role !== 'ADMIN') {
+      auth.rejectNonAdmin()
+      formError.value = '该账号没有管理员权限'
+      step.value = 'credentials'
+      return
+    }
+    await router.push('/admin/users')
+  } catch (error) {
+    formError.value = (error as Error).message || '二次验证失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+function backToCredentials(): void {
+  step.value = 'credentials'
+  challengeToken.value = ''
+  twoFactorCode.value = ''
+  formError.value = ''
 }
 </script>
 
@@ -47,7 +89,7 @@ async function submit(): Promise<void> {
       :title="formError"
       style="margin-bottom: 16px"
     />
-    <el-form label-position="top" @submit.prevent="submit">
+    <el-form v-if="step === 'credentials'" label-position="top" @submit.prevent="submit">
       <el-form-item label="管理员账号" :error="accountError">
         <el-input v-model="account" autocomplete="username" @input="accountError = ''" />
       </el-form-item>
@@ -64,6 +106,29 @@ async function submit(): Promise<void> {
       <el-button type="primary" :loading="loading" style="width: 100%" @click="submit">
         登录后台
       </el-button>
+    </el-form>
+    <el-form v-else label-position="top" @submit.prevent="submitTwoFactor">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="该管理员账号已开启二次验证，请输入认证器中的 6 位动态码或恢复码。"
+        style="margin-bottom: 16px"
+      />
+      <el-form-item label="动态码或恢复码">
+        <el-input
+          v-model="twoFactorCode"
+          maxlength="20"
+          placeholder="6 位动态码或 XXXX-XXXX"
+          @keyup.enter="submitTwoFactor"
+        />
+      </el-form-item>
+      <el-button type="primary" :loading="loading" style="width: 100%" @click="submitTwoFactor">
+        验证并进入后台
+      </el-button>
+      <div style="text-align: center; margin-top: 12px">
+        <el-button link type="primary" @click="backToCredentials">返回重新输入账号密码</el-button>
+      </div>
     </el-form>
   </AuthShell>
 </template>

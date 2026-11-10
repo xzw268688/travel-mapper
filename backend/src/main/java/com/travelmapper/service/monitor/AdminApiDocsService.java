@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.method.HandlerMethod;
@@ -29,13 +30,16 @@ public class AdminApiDocsService {
 
     private final RequestMappingHandlerMapping handlerMapping;
     private final ObjectMapper objectMapper;
+    private final boolean swaggerUiEnabled;
     private volatile CachedDocs cached;
 
     public AdminApiDocsService(
             @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping handlerMapping,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            @Value("${springdoc.swagger-ui.enabled:true}") boolean swaggerUiEnabled) {
         this.handlerMapping = handlerMapping;
         this.objectMapper = objectMapper;
+        this.swaggerUiEnabled = swaggerUiEnabled;
     }
 
     public JsonNode apiDocs() {
@@ -76,6 +80,7 @@ public class AdminApiDocsService {
             Map<String, Object> root = new LinkedHashMap<>();
             root.put("openapi", "3.0.1");
             root.put("info", Map.of("title", "TravelMapper API", "version", "1.0"));
+            root.put("x-swagger-ui-enabled", swaggerUiEnabled);
             root.put("paths", paths);
             JsonNode node = objectMapper.valueToTree(root);
             cached = new CachedDocs(node, System.currentTimeMillis() + CACHE_TTL_MS);

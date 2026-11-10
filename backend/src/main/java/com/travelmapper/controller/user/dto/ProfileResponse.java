@@ -11,6 +11,7 @@ public record ProfileResponse(
         String nickname,
         String avatarPreset,
         String role,
+        boolean twoFactorEnabled,
         LocalDateTime vipExpireAt,
         LocalDateTime createdAt,
         QuotaSummary quota) {

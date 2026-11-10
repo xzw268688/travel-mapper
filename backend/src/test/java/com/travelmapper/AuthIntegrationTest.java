@@ -2,7 +2,11 @@ package com.travelmapper;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.travelmapper.common.api.BusinessException;
+import com.travelmapper.common.security.JwtDenylistService;
+import com.travelmapper.common.security.JwtPayload;
 import com.travelmapper.controller.auth.dto.RegisterRequest;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import com.travelmapper.repository.entity.User;
 import com.travelmapper.service.auth.AuthService;
 import com.travelmapper.support.AuthTestSupport;
@@ -14,7 +18,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Date;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -34,6 +41,87 @@ class AuthIntegrationTest extends AuthTestSupport {
 
     @Autowired
     private AuthService authService;
+
+    @Autowired
+    private JwtDenylistService jwtDenylistService;
+
+    @Test
+    void revokedTokenIsRejected() throws Exception {
+        User user = createVerifiedUser("revoked");
+        String token = bearer(user).substring("Bearer ".length());
+        JwtPayload payload = jwtService.parse(token);
+        assertThat(payload.jti()).isNotBlank();
+
+        jwtDenylistService.revoke(payload.jti(), 600);
+
+        mockMvc.perform(get("/api/user/profile").header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(1006));
+    }
+
+    @Test
+    void logoutRevokesOnlyCurrentToken() throws Exception {
+        User user = createVerifiedUser("logout");
+        String tokenA = bearer(user);
+        String tokenB = bearer(user);
+
+        mockMvc.perform(post("/api/auth/logout").header("Authorization", tokenA))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/user/profile").header("Authorization", tokenA))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(1006));
+
+        mockMvc.perform(get("/api/user/profile").header("Authorization", tokenB))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void logoutAllRevokesEveryToken() throws Exception {
+        User user = createVerifiedUser("logoutall");
+        String tokenA = bearer(user);
+        String tokenB = bearer(user);
+
+        mockMvc.perform(post("/api/auth/logout-all").header("Authorization", tokenA))
+                .andExpect(status().isOk());
+
+        for (String token : new String[]{tokenA, tokenB}) {
+            mockMvc.perform(get("/api/user/profile").header("Authorization", token))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value(1006));
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT token_version FROM user WHERE id = ?", Integer.class, user.getId()))
+                .isEqualTo(2);
+        assertThat(count("audit_log", "user_id = ? AND action = 'AUTH_LOGOUT_ALL'", user.getId()))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void legacyTokenWithoutJtiRemainsUsableAndLogoutDoesNotFail() throws Exception {
+        User user = createVerifiedUser("legacy");
+        Instant now = Instant.now();
+        String legacyToken = Jwts.builder()
+                .subject(String.valueOf(user.getId()))
+                .claim("role", "USER")
+                .claim("tv", 1)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(600)))
+                .signWith(Keys.hmacShaKeyFor(
+                        TEST_JWT_SECRET.getBytes(StandardCharsets.UTF_8)))
+                .compact();
+        String bearer = "Bearer " + legacyToken;
+
+        mockMvc.perform(get("/api/user/profile").header("Authorization", bearer))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/auth/logout").header("Authorization", bearer))
+                .andExpect(status().isOk());
+
+        // 旧 Token 无法逐 Token 吊销，仍可用至自然过期
+        mockMvc.perform(get("/api/user/profile").header("Authorization", bearer))
+                .andExpect(status().isOk());
+    }
 
     @Test
     void registerVerifyLoginAndProfileFlow() throws Exception {

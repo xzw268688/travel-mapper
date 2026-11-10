@@ -6,7 +6,9 @@ public final class SecurityPaths {
     }
 
     public static boolean isPublic(String path, boolean devStubEnabled) {
-        if (path.startsWith("/api/auth/") && !path.equals("/api/auth/logout")) {
+        if (path.startsWith("/api/auth/")
+                && !path.equals("/api/auth/logout")
+                && !path.equals("/api/auth/logout-all")) {
             return true;
         }
         if (path.startsWith("/s/")) {

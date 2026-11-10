@@ -17,6 +17,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -67,5 +68,11 @@ public class AdminUserController {
     public ApiResponse<AdminQuotaResponse> adjustQuota(
             @PathVariable Long id, @Valid @RequestBody AdminQuotaRequest request) {
         return ApiResponse.ok(adminUserService.adjustQuota(CurrentUser.id(), id, request));
+    }
+
+    @PostMapping("/{id}/2fa/reset")
+    public ApiResponse<Void> resetTwoFactor(@PathVariable Long id) {
+        adminUserService.resetTwoFactor(CurrentUser.id(), id);
+        return ApiResponse.ok();
     }
 }

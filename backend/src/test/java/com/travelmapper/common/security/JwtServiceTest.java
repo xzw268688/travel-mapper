@@ -26,6 +26,15 @@ class JwtServiceTest {
         assertThat(payload.userId()).isEqualTo(42L);
         assertThat(payload.role()).isEqualTo("USER");
         assertThat(payload.tokenVersion()).isEqualTo(3);
+        assertThat(payload.jti()).isNotBlank();
+    }
+
+    @Test
+    void everyIssuedTokenGetsAUniqueJti() {
+        JwtService service = service(SECRET, 604800);
+        String first = service.issue(42L, "USER", 3);
+        String second = service.issue(42L, "USER", 3);
+        assertThat(service.parse(first).jti()).isNotEqualTo(service.parse(second).jti());
     }
 
     @Test

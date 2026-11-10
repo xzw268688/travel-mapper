@@ -23,6 +23,13 @@ http.interceptors.response.use(
         window.location.href = '/login'
       }
     }
+    // 管理员被要求先绑定二次验证：引导到个人中心账号安全区块。
+    if (error.response?.data?.code === 1009) {
+      sessionStorage.setItem('tm_notice', '请先绑定二次验证后再访问后台')
+      if (window.location.pathname !== '/profile') {
+        window.location.href = '/profile'
+      }
+    }
     // 非 2xx 时 axios 只给出 "Request failed with status code xxx"，
     // 优先展示后端 ApiResponse 里的业务 message。
     const message = error.response?.data?.message

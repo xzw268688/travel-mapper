@@ -28,9 +28,9 @@ function goBack(): void {
   }
 }
 
-function logout(): void {
-  auth.logout()
-  void router.push('/login')
+async function logout(): Promise<void> {
+  await auth.logout()
+  await router.push('/login')
 }
 
 function openAdmin(path: string): void {
@@ -39,7 +39,7 @@ function openAdmin(path: string): void {
 
 function onUserCommand(command: string): void {
   if (command === 'logout') {
-    logout()
+    void logout()
     return
   }
   if (command === 'feedback') {

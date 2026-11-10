@@ -15,6 +15,10 @@ public enum ErrorCode {
     JWT_INVALID(1006, "JWT 无效或过期", 401),
     ACCOUNT_DELETED(1007, "账号已注销", 403),
     ACCOUNT_ALREADY_EXISTS(1008, "用户名或邮箱已存在", 409),
+    TWO_FACTOR_REQUIRED(1009, "请先绑定二次验证", 403),
+    TWO_FACTOR_INVALID(1010, "二次验证码无效或已过期", 401),
+    TWO_FACTOR_ALREADY_ENABLED(1011, "二次验证已开启", 409),
+    TWO_FACTOR_NOT_ENABLED(1012, "二次验证未开启", 409),
 
     PARAM_INVALID(2001, "参数校验失败", 400),
     COUNTRY_OR_CITY_INVALID(2002, "国家/城市不存在或已停用", 400),

@@ -82,6 +82,7 @@ app:
     allow-insecure-dev-stub: ${ALLOW_INSECURE_DEV_STUB:false}
     jwt-secret: ${TRAVELMAPPER_JWT_SECRET:}
     jwt-ttl-seconds: ${TRAVELMAPPER_JWT_TTL:604800}
+    require-admin-2fa: ${REQUIRE_ADMIN_2FA:false}
     admin-username: ${TRAVELMAPPER_ADMIN_USERNAME:admin}
     admin-password: ${TRAVELMAPPER_ADMIN_PASSWORD:}
   mail:

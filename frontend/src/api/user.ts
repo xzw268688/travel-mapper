@@ -20,9 +20,20 @@ export interface ProfileResponse {
   nickname: string
   avatarPreset: string
   role: string
+  twoFactorEnabled: boolean
   vipExpireAt: string | null
   createdAt: string
   quota: QuotaSummary
+}
+
+export interface TokenResponse {
+  token: string
+  expiresIn: number
+}
+
+export interface TwoFactorSetupResponse {
+  secret: string
+  otpauthUri: string
 }
 
 export interface CardRedeemResponse {
@@ -55,4 +66,45 @@ export function redeemCard(code: string): Promise<CardRedeemResponse> {
 
 export function deleteAccount(body: { password: string; confirmText: string }): Promise<unknown> {
   return apiPost('/user/logout-account', body)
+}
+
+export function changePassword(body: {
+  currentPassword: string
+  newPassword: string
+}): Promise<TokenResponse> {
+  return apiPut<TokenResponse>('/user/password', body)
+}
+
+export function sendEmailChangeCode(email: string): Promise<{ emailSent: boolean }> {
+  return apiPost<{ emailSent: boolean }>('/user/email/send-code', { email })
+}
+
+export function changeEmail(body: {
+  newEmail: string
+  password: string
+  code: string
+}): Promise<TokenResponse> {
+  return apiPut<TokenResponse>('/user/email', body)
+}
+
+export function setupTwoFactor(): Promise<TwoFactorSetupResponse> {
+  return apiPost<TwoFactorSetupResponse>('/user/2fa/setup')
+}
+
+export function enableTwoFactor(code: string): Promise<{ recoveryCodes: string[] }> {
+  return apiPost<{ recoveryCodes: string[] }>('/user/2fa/enable', { code })
+}
+
+export function disableTwoFactor(body: {
+  password: string
+  code: string
+}): Promise<unknown> {
+  return apiPost('/user/2fa/disable', body)
+}
+
+export function regenerateRecoveryCodes(body: {
+  password: string
+  code: string
+}): Promise<{ recoveryCodes: string[] }> {
+  return apiPost<{ recoveryCodes: string[] }>('/user/2fa/recovery-codes', body)
 }

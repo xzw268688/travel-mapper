@@ -10,6 +10,7 @@ public record AdminUserDetailView(
         String email,
         String role,
         String status,
+        boolean twoFactorEnabled,
         LocalDateTime vipExpireAt,
         int freeUsedToday,
         int packBalance,

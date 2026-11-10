@@ -9,12 +9,15 @@ import com.travelmapper.controller.auth.dto.RegisterRequest;
 import com.travelmapper.controller.auth.dto.RegisterResponse;
 import com.travelmapper.controller.auth.dto.ResetPasswordRequest;
 import com.travelmapper.controller.auth.dto.SendCodeRequest;
+import com.travelmapper.controller.auth.dto.TwoFactorLoginRequest;
 import com.travelmapper.service.auth.AuthService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -49,6 +52,13 @@ public class AuthController {
                 request, clientIp(servletRequest), clientUserAgent(servletRequest)));
     }
 
+    @PostMapping("/login/2fa")
+    public ApiResponse<LoginResponse> loginTwoFactor(@Valid @RequestBody TwoFactorLoginRequest request,
+                                                     HttpServletRequest servletRequest) {
+        return ApiResponse.ok(authService.loginTwoFactor(
+                request, clientIp(servletRequest), clientUserAgent(servletRequest)));
+    }
+
     @PostMapping("/reset-password")
     public ApiResponse<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         authService.resetPassword(request);
@@ -56,10 +66,23 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ApiResponse<Void> logout() {
-        CurrentUser.id();
-        authService.logout();
+    public ApiResponse<Void> logout(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+        authService.logout(CurrentUser.id(), bearerToken(authorization));
         return ApiResponse.ok();
+    }
+
+    @PostMapping("/logout-all")
+    public ApiResponse<Void> logoutAll() {
+        authService.logoutAll(CurrentUser.id());
+        return ApiResponse.ok();
+    }
+
+    private String bearerToken(String authorization) {
+        if (authorization != null && authorization.startsWith("Bearer ")) {
+            return authorization.substring("Bearer ".length()).trim();
+        }
+        return null;
     }
 
     private String clientIp(HttpServletRequest request) {

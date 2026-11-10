@@ -76,7 +76,8 @@ class MonitoringIntegrationTest extends AuthTestSupport {
         mockMvc.perform(asAdmin(get("/api/admin/monitor/api-docs")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.openapi").isString())
-                .andExpect(jsonPath("$.data.paths").isMap());
+                .andExpect(jsonPath("$.data.paths").isMap())
+                .andExpect(jsonPath("$.data['x-swagger-ui-enabled']").value(true));
 
         mockMvc.perform(asUser(get("/api/admin/monitor/server")))
                 .andExpect(status().isForbidden())

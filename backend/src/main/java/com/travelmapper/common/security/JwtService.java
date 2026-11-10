@@ -13,9 +13,13 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
+import java.util.UUID;
 
 @Service
 public class JwtService {
+
+    public static final long TWO_FACTOR_CHALLENGE_TTL_SECONDS = 300;
+    public static final String PURPOSE_TWO_FACTOR = "2fa";
 
     private final SecretKey key;
     private final long ttlSeconds;
@@ -32,11 +36,26 @@ public class JwtService {
     public String issue(Long userId, String role, int tokenVersion) {
         Instant now = Instant.now();
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(String.valueOf(userId))
                 .claim("role", role)
                 .claim("tv", tokenVersion)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusSeconds(ttlSeconds)))
+                .signWith(key)
+                .compact();
+    }
+
+    /** 签发只用于二次验证的短期凭证，不能访问业务接口。 */
+    public String issueTwoFactorChallenge(Long userId, int tokenVersion) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .id(UUID.randomUUID().toString())
+                .subject(String.valueOf(userId))
+                .claim("tv", tokenVersion)
+                .claim("purpose", PURPOSE_TWO_FACTOR)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(TWO_FACTOR_CHALLENGE_TTL_SECONDS)))
                 .signWith(key)
                 .compact();
     }
@@ -50,7 +69,10 @@ public class JwtService {
             return new JwtPayload(
                     Long.valueOf(claims.getSubject()),
                     claims.get("role", String.class),
-                    tokenVersion);
+                    tokenVersion,
+                    claims.getId(),
+                    claims.getExpiration().toInstant().getEpochSecond(),
+                    claims.get("purpose", String.class));
         } catch (JwtException | IllegalArgumentException ex) {
             throw new BusinessException(ErrorCode.JWT_INVALID);
         }

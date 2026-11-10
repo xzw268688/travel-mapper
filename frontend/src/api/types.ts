@@ -23,9 +23,11 @@ export interface UserView {
 }
 
 export interface LoginResponse {
-  token: string
+  token: string | null
   expiresIn: number
-  user: UserView
+  user: UserView | null
+  requires2fa: boolean
+  challengeToken: string | null
 }
 
 export interface CountryStat {

@@ -77,6 +77,8 @@ const groups = computed<ApiGroup[]>(() => {
 
 const totalApis = computed(() => groups.value.reduce((sum, group) => sum + group.items.length, 0))
 
+const swaggerUiEnabled = computed(() => docs.value?.['x-swagger-ui-enabled'] === true)
+
 function methodTagType(method: string): 'success' | 'warning' | 'danger' | 'primary' | 'info' {
   if (method === 'GET') return 'success'
   if (method === 'POST') return 'primary'
@@ -97,7 +99,13 @@ function methodTagType(method: string): 'success' | 'warning' | 'danger' | 'prim
       />
       <span class="monitor-hint">共 {{ totalApis }} 个接口</span>
       <el-button @click="load">刷新</el-button>
-      <a class="api-docs-link" href="/swagger-ui.html" target="_blank" rel="noopener">
+      <a
+        v-if="swaggerUiEnabled"
+        class="api-docs-link"
+        href="/swagger-ui.html"
+        target="_blank"
+        rel="noopener"
+      >
         打开 Swagger UI 调试 ↗
       </a>
     </div>

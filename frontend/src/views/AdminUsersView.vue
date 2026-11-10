@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   adjustUserQuota,
   getUserDetail,
   listAdminUsers,
+  resetUserTwoFactor,
   setUserVip,
   updateUserStatus,
   type AdminUserDetailView,
@@ -43,8 +44,32 @@ const detailLoading = ref(false)
 const detail = ref<AdminUserDetailView | null>(null)
 const vipDate = ref('')
 const vipSaving = ref(false)
+const resettingTwoFactor = ref(false)
 
 onMounted(load)
+
+async function resetTwoFactor(): Promise<void> {
+  if (!detail.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认重置用户「${detail.value.username}」的二次验证？重置后该用户的登录会话会失效。`,
+      '重置二次验证',
+      { type: 'warning', confirmButtonText: '确认重置', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  resettingTwoFactor.value = true
+  try {
+    await resetUserTwoFactor(detail.value.id)
+    detail.value.twoFactorEnabled = false
+    ElMessage.success('二次验证已重置')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '重置二次验证失败')
+  } finally {
+    resettingTwoFactor.value = false
+  }
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -295,6 +320,23 @@ function formatTime(value: string | null): string {
             <el-descriptions-item label="旅行">{{ detail.tripCount }}</el-descriptions-item>
             <el-descriptions-item label="注册时间">{{ formatTime(detail.createdAt) }}</el-descriptions-item>
           </el-descriptions>
+
+          <div class="detail-section">
+            <div class="trip-title" style="font-size: 14px">二次验证</div>
+            <div class="meta">
+              状态：{{ detail.twoFactorEnabled ? '已开启' : '未开启' }}
+            </div>
+            <el-button
+              type="warning"
+              plain
+              size="small"
+              style="margin-top: 8px"
+              :loading="resettingTwoFactor"
+              @click="resetTwoFactor"
+            >
+              重置二次验证
+            </el-button>
+          </div>
 
           <div class="detail-section">
             <div class="trip-title" style="font-size: 14px">VIP</div>

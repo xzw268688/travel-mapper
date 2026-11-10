@@ -218,7 +218,10 @@ CREATE TABLE `user` (
   `status`         VARCHAR(16)     NOT NULL DEFAULT 'NORMAL' COMMENT 'NORMAL / BANNED / DELETED',
   `email_verified` TINYINT(1)      NOT NULL DEFAULT 0,
   `vip_expire_at`  DATETIME        NULL,
-  `token_version`  INT UNSIGNED    NOT NULL DEFAULT 1 COMMENT '封禁/改密/注销时 +1，使旧 JWT 失效',
+  `token_version`  INT UNSIGNED    NOT NULL DEFAULT 1 COMMENT '封禁/改密/改邮箱/注销时 +1，使旧 JWT 失效',
+  `totp_secret`    VARCHAR(255)    NULL COMMENT 'AES-GCM 密文；为空表示未绑定',
+  `totp_enabled`   TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '是否已确认绑定二次验证',
+  `totp_confirmed_at` DATETIME     NULL COMMENT '二次验证确认时间',
   `last_login_at`  DATETIME        NULL,
   `created_at`     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -245,6 +248,17 @@ CREATE TABLE `email_token` (
   KEY `idx_user_type` (`user_id`, `type`),
   KEY `idx_expire_used` (`expire_at`, `used`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='邮箱验证与重置令牌';
+
+-- TOTP 一次性恢复码：只存 BCrypt 哈希，使用后物理删除
+CREATE TABLE `user_recovery_code` (
+  `id`         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`    BIGINT UNSIGNED NOT NULL,
+  `code_hash`  VARCHAR(100)    NOT NULL COMMENT 'BCrypt 哈希',
+  `used_at`    DATETIME        NULL,
+  `created_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='TOTP 一次性恢复码';
 ```
 
 ### 4.2 城市与旅行

@@ -2,10 +2,18 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import QRCode from 'qrcode'
 import {
+  changeEmail,
+  changePassword,
   deleteAccount,
+  disableTwoFactor,
+  enableTwoFactor,
   getProfile,
   redeemCard,
+  regenerateRecoveryCodes,
+  sendEmailChangeCode,
+  setupTwoFactor,
   updateProfile,
   type CardRedeemResponse,
   type ProfileResponse
@@ -18,6 +26,7 @@ import {
   type FeedbackHistoryItem
 } from '../api/feedback'
 import FeedbackDialog from '../components/FeedbackDialog.vue'
+import { logoutAll } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -31,6 +40,20 @@ const avatarPreset = ref('preset_01')
 const cardCode = ref('')
 const redeeming = ref(false)
 const redeemResult = ref<CardRedeemResponse | null>(null)
+const loggingOutAll = ref(false)
+const passwordDialog = reactive({ visible: false, current: '', next: '', saving: false })
+const emailDialog = reactive({
+  visible: false,
+  email: '',
+  password: '',
+  code: '',
+  sending: false,
+  saving: false
+})
+const twoFactorSetup = reactive({ visible: false, secret: '', qr: '', code: '', saving: false })
+const recoveryDialog = reactive({ visible: false, codes: [] as string[] })
+const disableDialog = reactive({ visible: false, password: '', code: '', saving: false })
+const regenerateDialog = reactive({ visible: false, password: '', code: '', saving: false })
 const deleteDialog = reactive({ visible: false, password: '', confirmText: '', deleting: false })
 
 const feedbackDialogVisible = ref(false)
@@ -61,6 +84,11 @@ const quota = computed(() => profile.value?.quota)
 const isAdmin = computed(() => profile.value?.role === 'ADMIN')
 
 onMounted(() => {
+  const notice = sessionStorage.getItem('tm_notice')
+  if (notice) {
+    sessionStorage.removeItem('tm_notice')
+    ElMessage.warning(notice)
+  }
   void load()
   void loadFeedback()
 })
@@ -146,13 +174,206 @@ async function submitDelete(): Promise<void> {
   deleteDialog.deleting = true
   try {
     await deleteAccount({ password: deleteDialog.password, confirmText: deleteDialog.confirmText })
-    auth.logout()
+    auth.clearLocalSession()
     ElMessage.success('账号已注销')
     await router.push('/login')
   } catch (error) {
     ElMessage.error((error as Error).message || '注销失败')
   } finally {
     deleteDialog.deleting = false
+  }
+}
+
+async function logoutAllDevices(): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '将退出所有设备，当前设备也需要重新登录。',
+      '退出所有设备',
+      { type: 'warning', confirmButtonText: '确认退出', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  loggingOutAll.value = true
+  try {
+    await logoutAll()
+    ElMessage.success('已退出所有设备')
+    auth.clearLocalSession()
+    await router.push('/login')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '退出所有设备失败')
+  } finally {
+    loggingOutAll.value = false
+  }
+}
+
+function openPasswordDialog(): void {
+  passwordDialog.current = ''
+  passwordDialog.next = ''
+  passwordDialog.visible = true
+}
+
+async function submitPassword(): Promise<void> {
+  if (!passwordDialog.current || !passwordDialog.next) {
+    ElMessage.warning('请填写当前密码与新密码')
+    return
+  }
+  passwordDialog.saving = true
+  try {
+    const response = await changePassword({
+      currentPassword: passwordDialog.current,
+      newPassword: passwordDialog.next
+    })
+    auth.updateToken(response.token)
+    passwordDialog.visible = false
+    ElMessage.success('密码已修改，其他设备已下线')
+    await Promise.all([load(), auth.loadProfile()])
+  } catch (error) {
+    ElMessage.error((error as Error).message || '修改密码失败')
+  } finally {
+    passwordDialog.saving = false
+  }
+}
+
+function openEmailDialog(): void {
+  emailDialog.email = ''
+  emailDialog.password = ''
+  emailDialog.code = ''
+  emailDialog.visible = true
+}
+
+async function sendNewEmailCode(): Promise<void> {
+  if (!emailDialog.email.trim()) {
+    ElMessage.warning('请输入新邮箱')
+    return
+  }
+  emailDialog.sending = true
+  try {
+    const result = await sendEmailChangeCode(emailDialog.email.trim())
+    ElMessage.success(result.emailSent ? '验证码已发送，请查收新邮箱' : '验证码发送失败，请稍后重试')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '发送验证码失败')
+  } finally {
+    emailDialog.sending = false
+  }
+}
+
+async function submitEmail(): Promise<void> {
+  if (!emailDialog.email.trim() || !emailDialog.password || !emailDialog.code.trim()) {
+    ElMessage.warning('请填写新邮箱、当前密码与验证码')
+    return
+  }
+  emailDialog.saving = true
+  try {
+    const response = await changeEmail({
+      newEmail: emailDialog.email.trim(),
+      password: emailDialog.password,
+      code: emailDialog.code.trim()
+    })
+    auth.updateToken(response.token)
+    emailDialog.visible = false
+    ElMessage.success('邮箱已修改，其他设备已下线')
+    await Promise.all([load(), auth.loadProfile()])
+  } catch (error) {
+    ElMessage.error((error as Error).message || '修改邮箱失败')
+  } finally {
+    emailDialog.saving = false
+  }
+}
+
+async function openTwoFactorSetup(): Promise<void> {
+  try {
+    const setup = await setupTwoFactor()
+    twoFactorSetup.secret = setup.secret
+    twoFactorSetup.qr = await QRCode.toDataURL(setup.otpauthUri, { width: 220, margin: 1 })
+    twoFactorSetup.code = ''
+    twoFactorSetup.visible = true
+  } catch (error) {
+    ElMessage.error((error as Error).message || '初始化二次验证失败')
+  }
+}
+
+async function confirmTwoFactor(): Promise<void> {
+  if (!twoFactorSetup.code.trim()) {
+    ElMessage.warning('请输入认证器中的 6 位动态码')
+    return
+  }
+  twoFactorSetup.saving = true
+  try {
+    const result = await enableTwoFactor(twoFactorSetup.code.trim())
+    twoFactorSetup.visible = false
+    recoveryDialog.codes = result.recoveryCodes
+    recoveryDialog.visible = true
+    ElMessage.success('二次验证已开启')
+    await Promise.all([load(), auth.loadProfile()])
+  } catch (error) {
+    ElMessage.error((error as Error).message || '开启二次验证失败')
+  } finally {
+    twoFactorSetup.saving = false
+  }
+}
+
+function openDisableDialog(): void {
+  disableDialog.password = ''
+  disableDialog.code = ''
+  disableDialog.visible = true
+}
+
+async function submitDisable(): Promise<void> {
+  if (!disableDialog.password || !disableDialog.code.trim()) {
+    ElMessage.warning('请输入当前密码与动态码')
+    return
+  }
+  disableDialog.saving = true
+  try {
+    await disableTwoFactor({
+      password: disableDialog.password,
+      code: disableDialog.code.trim()
+    })
+    disableDialog.visible = false
+    ElMessage.success('二次验证已关闭')
+    await Promise.all([load(), auth.loadProfile()])
+  } catch (error) {
+    ElMessage.error((error as Error).message || '关闭二次验证失败')
+  } finally {
+    disableDialog.saving = false
+  }
+}
+
+function openRegenerateDialog(): void {
+  regenerateDialog.password = ''
+  regenerateDialog.code = ''
+  regenerateDialog.visible = true
+}
+
+async function submitRegenerate(): Promise<void> {
+  if (!regenerateDialog.password || !regenerateDialog.code.trim()) {
+    ElMessage.warning('请输入当前密码与动态码')
+    return
+  }
+  regenerateDialog.saving = true
+  try {
+    const result = await regenerateRecoveryCodes({
+      password: regenerateDialog.password,
+      code: regenerateDialog.code.trim()
+    })
+    regenerateDialog.visible = false
+    recoveryDialog.codes = result.recoveryCodes
+    recoveryDialog.visible = true
+    ElMessage.success('恢复码已重新生成，旧恢复码已失效')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '重新生成恢复码失败')
+  } finally {
+    regenerateDialog.saving = false
+  }
+}
+
+async function copyRecoveryCodes(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(recoveryDialog.codes.join('\n'))
+    ElMessage.success('恢复码已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动保存')
   }
 }
 
@@ -334,6 +555,50 @@ function planLabel(plan: string | undefined): string {
       />
     </el-card>
 
+    <el-card v-if="profile" style="margin-top: 16px">
+      <template #header><div class="trip-title">账号安全</div></template>
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="密码">
+          <el-button size="small" @click="openPasswordDialog">修改密码</el-button>
+        </el-descriptions-item>
+        <el-descriptions-item label="邮箱">
+          <span>{{ profile.email }}</span>
+          <el-button size="small" style="margin-left: 12px" @click="openEmailDialog">
+            修改邮箱
+          </el-button>
+        </el-descriptions-item>
+        <el-descriptions-item label="二次验证">
+          <el-tag :type="profile.twoFactorEnabled ? 'success' : 'info'" size="small">
+            {{ profile.twoFactorEnabled ? '已开启' : '未开启' }}
+          </el-tag>
+          <template v-if="!profile.twoFactorEnabled">
+            <el-button
+              size="small"
+              type="primary"
+              style="margin-left: 12px"
+              @click="openTwoFactorSetup"
+            >
+              开启二次验证
+            </el-button>
+          </template>
+          <template v-else>
+            <el-button size="small" style="margin-left: 12px" @click="openRegenerateDialog">
+              重新生成恢复码
+            </el-button>
+            <el-button size="small" type="danger" plain @click="openDisableDialog">
+              关闭二次验证
+            </el-button>
+          </template>
+        </el-descriptions-item>
+        <el-descriptions-item label="登录会话">
+          <span class="meta">退出所有设备后，包括当前设备在内的全部登录会话都会失效。</span>
+          <el-button style="margin-left: 12px" :loading="loggingOutAll" @click="logoutAllDevices">
+            退出所有设备
+          </el-button>
+        </el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
     <el-card style="margin-top: 16px">
       <template #header><div class="trip-title">危险操作</div></template>
       <el-alert
@@ -369,6 +634,170 @@ function planLabel(plan: string | undefined): string {
         <el-button @click="deleteDialog.visible = false">取消</el-button>
         <el-button type="danger" :loading="deleteDialog.deleting" @click="submitDelete">
           确认注销
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="passwordDialog.visible" title="修改密码" width="460px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="修改成功后其他设备将下线，当前设备保持登录。"
+        style="margin-bottom: 12px"
+      />
+      <el-form label-width="90px">
+        <el-form-item label="当前密码" required>
+          <el-input
+            v-model="passwordDialog.current"
+            type="password"
+            show-password
+            autocomplete="current-password"
+          />
+        </el-form-item>
+        <el-form-item label="新密码" required>
+          <el-input
+            v-model="passwordDialog.next"
+            type="password"
+            show-password
+            autocomplete="new-password"
+            placeholder="8-32 位，同时包含字母与数字"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="passwordDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="passwordDialog.saving" @click="submitPassword">
+          确认修改
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="emailDialog.visible" title="修改邮箱" width="480px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="需要验证新邮箱；修改成功后旧邮箱会收到通知，其他设备将下线。"
+        style="margin-bottom: 12px"
+      />
+      <el-form label-width="90px">
+        <el-form-item label="新邮箱" required>
+          <div style="display: flex; gap: 8px; width: 100%">
+            <el-input v-model="emailDialog.email" type="email" placeholder="new@example.com" />
+            <el-button :loading="emailDialog.sending" @click="sendNewEmailCode">
+              发送验证码
+            </el-button>
+          </div>
+        </el-form-item>
+        <el-form-item label="验证码" required>
+          <el-input v-model="emailDialog.code" maxlength="6" placeholder="6 位数字" />
+        </el-form-item>
+        <el-form-item label="当前密码" required>
+          <el-input v-model="emailDialog.password" type="password" show-password />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="emailDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="emailDialog.saving" @click="submitEmail">
+          确认修改
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="twoFactorSetup.visible" title="开启二次验证" width="480px">
+      <div style="text-align: center">
+        <img :src="twoFactorSetup.qr" alt="二次验证二维码" style="width: 220px; height: 220px" />
+      </div>
+      <div class="meta" style="margin: 8px 0">
+        用认证器 App 扫码，或手动输入密钥：<code>{{ twoFactorSetup.secret }}</code>
+      </div>
+      <el-form label-width="90px">
+        <el-form-item label="动态码" required>
+          <el-input
+            v-model="twoFactorSetup.code"
+            maxlength="6"
+            placeholder="认证器中的 6 位数字"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="twoFactorSetup.visible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="twoFactorSetup.saving"
+          @click="confirmTwoFactor"
+        >
+          确认开启
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="recoveryDialog.visible" title="恢复码（仅显示一次）" width="480px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="请立即保存这些恢复码。关闭本窗口后无法再次查看，每个恢复码只能使用一次。"
+        style="margin-bottom: 12px"
+      />
+      <div class="recovery-codes">
+        <code v-for="code in recoveryDialog.codes" :key="code">{{ code }}</code>
+      </div>
+      <template #footer>
+        <el-button @click="copyRecoveryCodes">复制全部</el-button>
+        <el-button type="primary" @click="recoveryDialog.visible = false">我已保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="disableDialog.visible" title="关闭二次验证" width="460px">
+      <el-alert
+        type="error"
+        :closable="false"
+        show-icon
+        title="关闭后账号将只剩密码一道防线。"
+        style="margin-bottom: 12px"
+      />
+      <el-form label-width="90px">
+        <el-form-item label="当前密码" required>
+          <el-input v-model="disableDialog.password" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="动态码" required>
+          <el-input v-model="disableDialog.code" maxlength="6" placeholder="6 位数字" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="disableDialog.visible = false">取消</el-button>
+        <el-button type="danger" :loading="disableDialog.saving" @click="submitDisable">
+          确认关闭
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="regenerateDialog.visible" title="重新生成恢复码" width="460px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="重新生成后，旧的恢复码全部失效。"
+        style="margin-bottom: 12px"
+      />
+      <el-form label-width="90px">
+        <el-form-item label="当前密码" required>
+          <el-input v-model="regenerateDialog.password" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="动态码" required>
+          <el-input v-model="regenerateDialog.code" maxlength="6" placeholder="6 位数字" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="regenerateDialog.visible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="regenerateDialog.saving"
+          @click="submitRegenerate"
+        >
+          重新生成
         </el-button>
       </template>
     </el-dialog>
@@ -452,5 +881,19 @@ function planLabel(plan: string | undefined): string {
 
 .quota-item strong {
   font-size: 18px;
+}
+
+.recovery-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.recovery-codes code {
+  padding: 8px 10px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  text-align: center;
+  letter-spacing: 1px;
 }
 </style>

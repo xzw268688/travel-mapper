@@ -22,15 +22,18 @@ public class RequestIdentityFilter extends OncePerRequestFilter {
 
     private final AppProperties properties;
     private final JwtService jwtService;
+    private final JwtDenylistService jwtDenylistService;
     private final UserStatusCache userStatusCache;
     private final ObjectMapper objectMapper;
     private final OnlineUserRegistry onlineUserRegistry;
 
     public RequestIdentityFilter(AppProperties properties, JwtService jwtService,
+                                 JwtDenylistService jwtDenylistService,
                                  UserStatusCache userStatusCache, ObjectMapper objectMapper,
                                  OnlineUserRegistry onlineUserRegistry) {
         this.properties = properties;
         this.jwtService = jwtService;
+        this.jwtDenylistService = jwtDenylistService;
         this.userStatusCache = userStatusCache;
         this.objectMapper = objectMapper;
         this.onlineUserRegistry = onlineUserRegistry;
@@ -48,7 +51,7 @@ public class RequestIdentityFilter extends OncePerRequestFilter {
         String authorization = request.getHeader("Authorization");
         if (authorization != null && authorization.startsWith("Bearer ")) {
             try {
-                identity = resolveJwt(authorization.substring("Bearer ".length()).trim());
+                identity = resolveJwt(authorization.substring("Bearer ".length()).trim(), adminPath);
             } catch (BusinessException ex) {
                 if (requiresAuth || adminPath) {
                     writeError(response, ex.getErrorCode());
@@ -75,8 +78,12 @@ public class RequestIdentityFilter extends OncePerRequestFilter {
         }
     }
 
-    private RequestIdentity resolveJwt(String token) {
+    private RequestIdentity resolveJwt(String token, boolean adminPath) {
         JwtPayload payload = jwtService.parse(token);
+        if (payload.purpose() != null) {
+            // 二次验证挑战凭证只能用于 /api/auth/login/2fa，不能访问业务接口。
+            throw new BusinessException(ErrorCode.JWT_INVALID);
+        }
         UserAuthSnapshot snapshot = userStatusCache.get(payload.userId());
         if (snapshot == null) {
             throw new BusinessException(ErrorCode.JWT_INVALID);
@@ -89,6 +96,13 @@ public class RequestIdentityFilter extends OncePerRequestFilter {
         }
         if (payload.tokenVersion() != snapshot.tokenVersion()) {
             throw new BusinessException(ErrorCode.JWT_INVALID);
+        }
+        if (jwtDenylistService.isRevoked(payload.jti())) {
+            throw new BusinessException(ErrorCode.JWT_INVALID);
+        }
+        if (adminPath && properties.getSecurity().isRequireAdmin2fa()
+                && "ADMIN".equals(snapshot.role()) && !snapshot.totpEnabled()) {
+            throw new BusinessException(ErrorCode.TWO_FACTOR_REQUIRED);
         }
         return new RequestIdentity(snapshot.userId(), snapshot.role());
     }

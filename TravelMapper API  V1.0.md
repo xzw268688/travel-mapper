@@ -51,12 +51,14 @@
 Authorization: Bearer <JWT>
 ```
 
-- JWT 载荷：`{ sub: userId, role: "USER"|"ADMIN", tv: tokenVersion, exp }`
+- JWT 载荷：`{ sub: userId, role: "USER"|"ADMIN", tv: tokenVersion, jti: tokenId, exp }`
+- `jti` 每次签发唯一，用于退出登录时逐 Token 吊销；不含 `jti` 的旧 Token 在有效期内仍兼容
 - **VIP 不是角色**：平台角色只有 `USER` / `ADMIN`；是否 VIP 由服务端按 `vip_expire_at > NOW()` 实时派生，接口中以 `plan: "FREE"|"VIP"` 返回
 - 有效期：7 天；无 refresh token（V1 简化，过期重新登录）
-- 服务端每次请求校验 `user.status` 与 `tv`（Redis 缓存 30s，封禁/注销主动失效）
+- 服务端每次请求校验 `user.status` 与 `tv`（Redis 缓存 30s，封禁/注销主动失效），并检查 Token 是否已被登出吊销
 - 分享页 `/s/{token}` **不需要** JWT
 - 后台接口 `/api/admin/**` 额外要求 `role=ADMIN`，否则返回 `4002`
+- **生产环境不公开接口文档**：`/swagger-ui.html`、`/swagger-ui/**`、`/v3/api-docs/**` 返回 404；后台「监控 → 接口文档」由管理员鉴权接口生成，不受影响
 
 ### 1.3 统一响应
 
@@ -141,6 +143,10 @@ Idempotency-Key: <uuid>
 | 1005 | 邮件发送过于频繁 | 429 | 注册、重发验证、找回密码 |
 | 1006 | JWT 无效或过期 | 401 | Token 失效 |
 | 1007 | 账号已注销 | 403 | 任意需登录接口 |
+| 1009 | 请先绑定二次验证 | 403 | 管理员访问 `/admin/**` |
+| 1010 | 二次验证码无效或已过期 | 401 | 二次验证登录、绑定/关闭 2FA |
+| 1011 | 二次验证已开启 | 409 | 重复开启 2FA |
+| 1012 | 二次验证未开启 | 409 | 关闭/重生成恢复码 |
 | 2001 | 参数校验失败 | 400 | 通用 |
 | 2002 | 国家/城市不存在或已停用 | 400 | 城市选择、保存 |
 | 2003 | 行程不存在或无权访问 | 404 | 行程相关 |
@@ -250,6 +256,7 @@ Idempotency-Key: <uuid>
 - `VERIFY` 场景：未注册邮箱会收到验证码（注册前校验）；已注册且已验证的邮箱不发码。
 - `RESET` 场景：只有存在且未注销的账号会收到验证码。
 - 无论邮箱是否存在都返回成功，防止账号枚举。
+- SMTP 发信同步等待：连接/读/写各 10 秒超时，接口最多等待约 20 秒；`emailSent=false` 表示发送失败或超时，但邮件可能已实际投递，重试前先确认收件箱。
 - 开发环境（`MAIL_ENABLED=false`）验证码只打印在后端日志：`[auth-dev] scene=... email=... code=...`。
 
 ---
@@ -302,7 +309,31 @@ Idempotency-Key: <uuid>
 
 **错误**：`1001`、`1002`（邮箱未验证）、`1003`（封禁）、`1007`（已注销）、`5004`（登录限流）
 
-**说明**：连续失败 5 次锁定 15 分钟（Redis 计数），锁定期间返回 `1001` 或 `5004`。每次登录尝试（成功或失败）都会写入登录日志，可由管理员在 12.27 查看；登录日志写入失败不影响登录结果。
+**说明**：连续失败 5 次锁定 15 分钟（Redis 计数），锁定期间返回 `1001` 或 `5004`。每次登录尝试（成功或失败）都会写入登录日志，可由管理员在 12.27 查看；登录日志写入失败不影响登录结果。已开启二次验证的账号不返回 `token` 与 `user`，而返回 `requires2fa=true`、`challengeToken` 与 `expiresIn=300`，需继续调用 3.4.1。
+
+---
+
+### 3.4.1 二次验证登录
+
+`POST /auth/login/2fa` ｜ 无需鉴权
+
+**请求**
+
+```json
+{
+  "challengeToken": "eyJhbGciOi...",
+  "code": "123456"
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `challengeToken` | 3.4 返回的 5 分钟临时凭证 |
+| `code` | 认证器 6 位动态码，或一次性恢复码（`XXXXX-XXXXX`） |
+
+**响应**：同 3.4 正常登录；`requires2fa=false`
+
+**错误**：`1010`（凭证过期/重放/验证码错误/尝试 5 次后作废）
 
 ---
 
@@ -342,7 +373,15 @@ Idempotency-Key: <uuid>
 
 **响应**：`data: null`
 
-**说明**：JWT 无状态，服务端不改状态；前端清除本地 Token。可选实现：将当前 Token 加入 Redis 黑名单（TTL 剩余时长）。
+**说明**：服务端将当前 Token 的 `jti` 写入 Redis 黑名单，TTL 取该 Token 剩余有效期；此后携带同一 Token 的请求返回 `1006`。仅当前设备下线，其他设备已签发的 Token 不受影响。不含 `jti` 的旧 Token 无法单独吊销，仍可用至自然过期。前端在接口失败时也必须清除本地 Token。
+
+### 3.7.1 退出所有设备
+
+`POST /auth/logout-all` ｜ 需鉴权
+
+**响应**：`data: null`
+
+**说明**：该用户 `tokenVersion` 自增，全部已签发 JWT（包括当前设备）立即失效，后续请求返回 `1006`，需要重新登录。写入审计日志 `AUTH_LOGOUT_ALL`。
 
 ---
 
@@ -398,6 +437,61 @@ Idempotency-Key: <uuid>
 **响应**：返回更新后的 `user` 对象（同 3.8 的 `data`，不含 `quota`）
 
 **错误**：`2001`（昵称为空或头像不在预设内）
+
+---
+
+### 3.9.1 修改密码
+
+`PUT /user/password` ｜ 需鉴权
+
+```json
+{ "currentPassword": "Abc123456", "newPassword": "NewAbc123456" }
+```
+
+**响应**：`data: { "token": "eyJhbGciOi...", "expiresIn": 604800 }`；当前设备用新 Token，其他设备旧 Token 立即失效。
+
+**错误**：`1001`（当前密码错误）、`2001`（新密码不合规）
+
+**说明**：成功后写审计 `USER_PASSWORD_CHANGE` 并发送密码已修改通知邮件。
+
+---
+
+### 3.9.2 修改邮箱
+
+发送验证码：`POST /user/email/send-code` ｜ 需鉴权
+
+```json
+{ "email": "new@example.com" }
+```
+
+**说明**：新邮箱必须未被占用；验证码规则与发送限流同 3.2。**错误**：`1008`（邮箱已存在）、`2001`、`1005`、`5004`
+
+修改邮箱：`PUT /user/email` ｜ 需鉴权
+
+```json
+{ "newEmail": "new@example.com", "password": "Abc123456", "code": "123456" }
+```
+
+**响应**：`data: { "token": "...", "expiresIn": 604800 }`；其他设备旧 Token 立即失效。
+
+**错误**：`1001`（当前密码错误）、`1008`、`1004`、`2001`
+
+**说明**：旧邮箱只收变更通知，无需确认；写审计 `USER_EMAIL_CHANGE`。
+
+---
+
+### 3.9.3 二次验证管理
+
+| 接口 | 说明 |
+|---|---|
+| `POST /user/2fa/setup` | 生成密钥，返回 `{ secret, otpauthUri }`；已开启时返回 `1011` |
+| `POST /user/2fa/enable` | 请求 `{ code }`，返回 `{ recoveryCodes: [...] }`（10 个，仅显示一次） |
+| `POST /user/2fa/disable` | 请求 `{ password, code }`，关闭并删除恢复码 |
+| `POST /user/2fa/recovery-codes` | 请求 `{ password, code }`，重新生成 10 个恢复码，旧码全部失效 |
+
+**错误**：`1010`（动态码错误）、`1011`、`1012`、`1001`（密码错误）
+
+**说明**：TOTP 按 30 秒步长校验，允许前后各一个时间窗；关闭与重生成要求密码 + 动态码；所有变更写审计并发送通知邮件。
 
 ---
 
@@ -2773,6 +2867,8 @@ Idempotency-Key: 0b5c8e41-2f3a-4d5b-9c6e-7f8a9b0c1d2e
 - 保存后立即热加载，下一次发送验证码/重置密码邮件使用新配置
 - 启用 SMTP 后开发环境不再在日志打印验证码
 - 未配置 DB 值时使用环境变量 `MAIL_*` 作为默认值
+- 仅支持 STARTTLS（`starttls=true`，常用 587）；不支持 465 隐式 TLS
+- `from` 的域名需在邮件服务商完成验证（如 Resend 的 SPF/DKIM），否则登录认证通过但发信会被拒绝
 
 **错误**：`2001`（启用时缺主机/发件人非法/端口越界）、`4002`
 
@@ -3141,6 +3237,18 @@ TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00,
 **响应**：`data: { "userId": 12, "vipExpireAt": "2027-12-31T23:59:59" }`
 
 **说明**：该操作直接写 `vip_expire_at` 并记录 `audit_log`（`USER_VIP_SET`），**不写 `quota_ledger`**；按天数调整仍使用 12.11。
+
+**错误**：`2001`（用户不存在或已注销）、`4002`
+
+---
+
+### 12.11.3 重置用户二次验证
+
+`POST /admin/users/{id}/2fa/reset`
+
+**响应**：`data: null`
+
+**说明**：清空该用户 TOTP 密钥与全部恢复码、关闭二次验证；已绑定时使该用户所有 JWT 失效。写审计 `USER_2FA_RESET` 并通知用户；对未绑定用户幂等成功。用户详情新增 `twoFactorEnabled` 字段。
 
 **错误**：`2001`（用户不存在或已注销）、`4002`
 
@@ -4269,9 +4377,18 @@ location /api/ai/polish/stream {
 | 认证 | POST | `/auth/send-code` | 否 | — |
 | 认证 | POST | `/auth/login` | 否 | — |
 | 认证 | POST | `/auth/reset-password` | 否 | — |
+| 认证 | POST | `/auth/login/2fa` | 否 | — |
 | 认证 | POST | `/auth/logout` | 是 | — |
+| 认证 | POST | `/auth/logout-all` | 是 | — |
 | 用户 | GET | `/user/profile` | 是 | — |
 | 用户 | PUT | `/user/profile` | 是 | — |
+| 用户 | PUT | `/user/password` | 是 | — |
+| 用户 | POST | `/user/email/send-code` | 是 | — |
+| 用户 | PUT | `/user/email` | 是 | — |
+| 用户 | POST | `/user/2fa/setup` | 是 | — |
+| 用户 | POST | `/user/2fa/enable` | 是 | — |
+| 用户 | POST | `/user/2fa/disable` | 是 | — |
+| 用户 | POST | `/user/2fa/recovery-codes` | 是 | — |
 | 用户 | POST | `/user/logout-account` | 是 | — |
 | 国家 | GET | `/countries` | 是 | — |
 | 城市 | GET | `/cities` | 是 | — |
@@ -4350,6 +4467,7 @@ location /api/ai/polish/stream {
 | 后台 | PUT | `/admin/users/{id}/vip` | 管理员 | — |
 | 后台 | PUT | `/admin/users/{id}/status` | 管理员 | — |
 | 后台 | PUT | `/admin/users/{id}/quota` | 管理员 | — |
+| 后台 | POST | `/admin/users/{id}/2fa/reset` | 管理员 | — |
 | 后台 | GET/POST | `/admin/cities` | 管理员 | — |
 | 后台 | PUT | `/admin/cities/{id}` | 管理员 | — |
 | 后台 | GET/POST | `/admin/official-links` | 管理员 | — |

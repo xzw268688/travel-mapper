@@ -179,6 +179,7 @@ export interface AdminUserDetailView {
   email: string
   role: string
   status: string
+  twoFactorEnabled: boolean
   vipExpireAt: string | null
   freeUsedToday: number
   packBalance: number
@@ -270,6 +271,10 @@ export function adjustUserQuota(
 
 export function getUserDetail(id: number): Promise<AdminUserDetailView> {
   return apiGet<AdminUserDetailView>(`/admin/users/${id}`)
+}
+
+export function resetUserTwoFactor(id: number): Promise<void> {
+  return apiPost<void>(`/admin/users/${id}/2fa/reset`)
 }
 
 export function setUserVip(

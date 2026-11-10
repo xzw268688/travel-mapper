@@ -5,6 +5,12 @@ app:
     allow-insecure-dev-stub: false
   mail:
     log-verification-codes: false
+# 生产环境不公开 Swagger UI / OpenAPI 文档；后台「监控 → 接口文档」不依赖 springdoc。
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
 logging:
   level:
     com.travelmapper: INFO

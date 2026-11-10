@@ -28,6 +28,10 @@ public class AppProperties {
         private boolean allowInsecureDevStub = false;
         private String jwtSecret = "";
         private long jwtTtlSeconds = 604800;
+        /**
+         * 开启后未绑定 TOTP 的 ADMIN 无法访问 /api/admin/**；默认关闭，演示与生产按需配置。
+         */
+        private boolean requireAdmin2fa = false;
         private String adminUsername = "admin";
         private String adminPassword = "";
     }

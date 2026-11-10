@@ -7,15 +7,20 @@
 ## Requirements
 
 ### Requirement: Complete business schema
-系统 MUST 提供覆盖全部 V1.0 业务对象的 MySQL 8.0 表结构：`user`、`email_token`、`country`、`city`、`trip`、`itinerary`、`itinerary_day`、`itinerary_spot`、`country_official_link`、`trip_checklist`、`travel_note`、`note_share`、`expense`、`exchange_rate`、`card_key`、`quota_pack`、`quota_ledger`、`feedback`、`note_report`、`sys_config`、`audit_log`；可选 `exchange_rate_history` MUST NOT 阻塞建表。
+
+系统 MUST 提供覆盖全部 V1.0 业务对象的 MySQL 8.0 表结构：`user`、`user_recovery_code`、`email_token`、`country`、`city`、`trip`、`itinerary`、`itinerary_day`、`itinerary_spot`、`country_official_link`、`trip_checklist`、`travel_note`、`note_share`、`expense`、`exchange_rate`、`card_key`、`quota_pack`、`quota_ledger`、`feedback`、`note_report`、`sys_config`、`audit_log`；可选 `exchange_rate_history` MUST NOT 阻塞建表。`user` MUST 包含 `totp_secret`（密文）、`totp_enabled` 与 `totp_confirmed_at` 字段；`user_recovery_code` MUST 保存恢复码哈希、使用时间与所属用户。
 
 #### Scenario: Fresh database bootstrap
 - **WHEN** 在空数据库执行建表脚本
-- **THEN** 上述 21 张表全部创建成功，字符集为 utf8mb4，且脚本可重复执行而不因表已存在而失败
+- **THEN** 上述 22 张表全部创建成功，字符集为 utf8mb4，且脚本可重复执行而不因表已存在而失败
 
 #### Scenario: Schema covers documented fields and indexes
 - **WHEN** 对照 `TravelMapper DB V1.0.md` 第 4 章核对表结构
 - **THEN** 每张表的字段、唯一键和关键索引均存在，`amount_cny` 为 STORED 生成列
+
+#### Scenario: Account security fields exist
+- **WHEN** 检查 `user` 与 `user_recovery_code` 表结构
+- **THEN** 2FA 字段与恢复码哈希表可用，且不保存 TOTP 密钥或恢复码明文
 
 ### Requirement: Initial dictionary and configuration data
 系统 SHALL 提供可重复执行的初始化数据，至少包含国家字典、城市字典、汇率、预置管理员和 `sys_config` 默认项；行前清单的 7 个固定项 MUST 作为代码常量维护，不单独建表。
@@ -29,7 +34,8 @@
 - **THEN** 不产生重复的国家代码、城市代码、币种或配置键，脚本正常结束
 
 ### Requirement: Deletion strategy per table
-系统 MUST 按文档约定区分软删除与物理删除：带 `deleted` 的业务表默认查询排除已删除行；`itinerary_day`、`itinerary_spot`、`email_token`、`note_share`、`card_key`、`country_official_link`、`exchange_rate`、`quota_pack`、`quota_ledger`、`feedback`、`note_report`、`sys_config`、`audit_log` MUST NOT 依赖 `deleted` 标记。
+
+系统 MUST 按文档约定区分软删除与物理删除：带 `deleted` 的业务表默认查询排除已删除行；`itinerary_day`、`itinerary_spot`、`user_recovery_code`、`email_token`、`note_share`、`card_key`、`country_official_link`、`exchange_rate`、`quota_pack`、`quota_ledger`、`feedback`、`note_report`、`sys_config`、`audit_log` MUST NOT 依赖 `deleted` 标记。恢复码 MUST 在关闭 2FA、重新生成或管理员重置时物理删除。
 
 #### Scenario: Deleted parent hides children
 - **WHEN** 一条行程被软删除
@@ -46,6 +52,10 @@
 #### Scenario: Reports are never soft-deleted
 - **WHEN** 用户或管理员查询举报
 - **THEN** 查询不应用 `deleted` 过滤，举报记录始终存在且按状态与时间可见
+
+#### Scenario: Recovery codes are physically deleted
+- **WHEN** 用户关闭 2FA、重新生成恢复码或管理员重置 2FA
+- **THEN** 相关恢复码行被物理删除，不保留 `deleted` 标记
 
 ### Requirement: Money and exchange-rate snapshot integrity
 金额 MUST 以 `DECIMAL(12,2)` 存储，禁止浮点；每笔消费 MUST 保存保存时刻的汇率值快照，不得保存汇率表主键；`amount_cny` MUST 由数据库生成列计算，汇总 MUST 直接使用 `SUM(amount_cny)` 并忽略 NULL。

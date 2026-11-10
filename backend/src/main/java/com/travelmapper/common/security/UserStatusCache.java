@@ -41,7 +41,8 @@ public class UserStatusCache {
             return null;
         }
         UserAuthSnapshot snapshot = new UserAuthSnapshot(
-                user.getId(), user.getRole().name(), user.getStatus().name(), user.getTokenVersion());
+                user.getId(), user.getRole().name(), user.getStatus().name(), user.getTokenVersion(),
+                Boolean.TRUE.equals(user.getTotpEnabled()));
         try {
             redis.opsForValue().set(key, objectMapper.writeValueAsString(snapshot), TTL);
         } catch (Exception ex) {

@@ -1,5 +1,7 @@
 package com.travelmapper.service.admin;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.travelmapper.common.api.BusinessException;
 import com.travelmapper.common.api.ErrorCode;
 import com.travelmapper.common.api.PageRequest;
@@ -15,10 +17,13 @@ import com.travelmapper.controller.admin.dto.AdminVipRequest;
 import com.travelmapper.controller.admin.dto.AdminVipResponse;
 import com.travelmapper.service.card.CardKeyService;
 import com.travelmapper.repository.entity.User;
+import com.travelmapper.repository.entity.UserRecoveryCode;
 import com.travelmapper.repository.enums.QuotaType;
 import com.travelmapper.repository.enums.UserStatus;
 import com.travelmapper.repository.mapper.UserMapper;
+import com.travelmapper.repository.mapper.UserRecoveryCodeMapper;
 import com.travelmapper.service.audit.AuditLogService;
+import com.travelmapper.service.auth.SecurityNoticeService;
 import com.travelmapper.service.quota.QuotaService;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -39,16 +44,22 @@ public class AdminUserService {
     private final QuotaService quotaService;
     private final AuditLogService auditLogService;
     private final CardKeyService cardKeyService;
+    private final UserRecoveryCodeMapper recoveryCodeMapper;
+    private final SecurityNoticeService securityNoticeService;
 
     public AdminUserService(JdbcTemplate jdbcTemplate, UserMapper userMapper,
                             UserStatusCache userStatusCache, QuotaService quotaService,
-                            AuditLogService auditLogService, CardKeyService cardKeyService) {
+                            AuditLogService auditLogService, CardKeyService cardKeyService,
+                            UserRecoveryCodeMapper recoveryCodeMapper,
+                            SecurityNoticeService securityNoticeService) {
         this.jdbcTemplate = jdbcTemplate;
         this.userMapper = userMapper;
         this.userStatusCache = userStatusCache;
         this.quotaService = quotaService;
         this.auditLogService = auditLogService;
         this.cardKeyService = cardKeyService;
+        this.recoveryCodeMapper = recoveryCodeMapper;
+        this.securityNoticeService = securityNoticeService;
     }
 
     public PageResult<AdminUserView> list(String keyword, String status, PageRequest request) {
@@ -147,7 +158,7 @@ public class AdminUserService {
             return new AdminUserDetailView(
                     user.getId(), user.getUsername(), user.getNickname(), user.getEmail(),
                     user.getRole() == null ? null : user.getRole().name(),
-                    UserStatus.DELETED.name(), null, 0, 0, 0, 0, 0,
+                    UserStatus.DELETED.name(), false, null, 0, 0, 0, 0, 0,
                     user.getCreatedAt(), List.of());
         }
         PageRequest recent = new PageRequest();
@@ -157,6 +168,7 @@ public class AdminUserService {
                 user.getId(), user.getUsername(), user.getNickname(), user.getEmail(),
                 user.getRole() == null ? null : user.getRole().name(),
                 user.getStatus().name(),
+                Boolean.TRUE.equals(user.getTotpEnabled()),
                 user.getVipExpireAt(),
                 quotaService.freeUsedToday(userId),
                 quotaService.packBalance(userId),
@@ -180,6 +192,37 @@ public class AdminUserService {
         detail.put("expireAt", expireAt == null ? null : expireAt.toString());
         auditLogService.record(adminId, "USER_VIP_SET", "USER", userId, detail, null);
         return new AdminVipResponse(userId, expireAt);
+    }
+
+    /**
+     * 重置用户二次验证：清空密钥与恢复码，已绑定时使该用户所有会话失效。
+     */
+    @Transactional
+    public void resetTwoFactor(Long adminId, Long userId) {
+        User user = userMapper.selectByIdIncludingDeleted(userId);
+        if (user == null || user.getStatus() == UserStatus.DELETED) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "用户不存在或已注销");
+        }
+        boolean bound = Boolean.TRUE.equals(user.getTotpEnabled())
+                || (user.getTotpSecret() != null && !user.getTotpSecret().isBlank());
+        LambdaUpdateWrapper<User> update = new LambdaUpdateWrapper<User>()
+                .eq(User::getId, userId)
+                .set(User::getTotpSecret, null)
+                .set(User::getTotpEnabled, false)
+                .set(User::getTotpConfirmedAt, null);
+        if (bound) {
+            int nextVersion = (user.getTokenVersion() == null ? 1 : user.getTokenVersion()) + 1;
+            update.set(User::getTokenVersion, nextVersion);
+        }
+        userMapper.update(null, update);
+        recoveryCodeMapper.delete(new LambdaQueryWrapper<UserRecoveryCode>()
+                .eq(UserRecoveryCode::getUserId, userId));
+        userStatusCache.evict(userId);
+        auditLogService.record(adminId, "USER_2FA_RESET", "USER", userId,
+                Map.of("bound", bound), null);
+        if (bound) {
+            securityNoticeService.twoFactorResetByAdmin(user.getEmail());
+        }
     }
 
     private long countOwned(String table, Long userId) {
