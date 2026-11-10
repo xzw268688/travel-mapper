@@ -1,0 +1,225 @@
+# Expenses Accounting Specification
+
+## Purpose
+
+定义多币种消费记录与多维汇总口径：每笔消费保存汇率值快照，国家必选、城市可选，关联行程或旅行后自动归组，汇总始终以历史快照折算为 CNY。
+
+## Requirements
+
+### Requirement: Expense creation
+创建消费 MUST 校验：国家必填；城市可选但若提供必须属于该国家且已启用；币种为 ISO 4217；金额为两位小数字符串且允许负数；分类属于固定 7 类；消费日期不得晚于今天；备注 ≤100 字。保存时 MUST 写入当前汇率值快照，不得保存汇率 ID。
+
+#### Scenario: Valid expense is saved with snapshot
+- **WHEN** 用户提交合法 JPY 消费
+- **THEN** 保存成功，返回 `exchangeRateSnapshot` 与折算后的 `amountCny`
+
+#### Scenario: Missing country is rejected
+- **WHEN** 新增消费未选国家
+- **THEN** 系统返回 `2001`，不保存
+
+#### Scenario: Future date is rejected
+- **WHEN** 消费日期晚于今天
+- **THEN** 系统返回 `2001`
+
+#### Scenario: Missing rate is allowed
+- **WHEN** 币种尚未配置汇率
+- **THEN** 消费仍可保存，返回 `rateMissing=true`、`amountCny=null`
+
+#### Scenario: Negative amount is accepted
+- **WHEN** 用户录入负数金额表示退款
+- **THEN** 保存成功，折算金额同为负，汇总时冲减
+
+### Requirement: Expense association and grouping
+提供 `itineraryId` 时 MUST 以行程为准继承国家、城市与 `tripId`，入参冲突时忽略入参；未提供时 MAY 手动选择同国家的旅行或未归组；跨国家手动归组 MUST 返回 `2001`；默认选中该国家最近一次旅行。
+
+#### Scenario: Linked expense inherits trip
+- **WHEN** 消费关联某条行程
+- **THEN** 国家、城市与 `tripId` 来自行程，返回 `tripInherited=true`
+
+#### Scenario: City is optional without itinerary
+- **WHEN** 用户选择国家但不选择城市
+- **THEN** 消费允许保存，城市为空
+
+#### Scenario: Cross-country trip is rejected
+- **WHEN** 用户把日本消费归到泰国旅行
+- **THEN** 系统返回 `2001`
+
+### Requirement: Expense edit
+编辑 MUST 支持部分更新；币种或金额变化时 MUST 按当前汇率表重新计算快照；仅修改备注/分类/日期时 MUST 保留原快照；非本人或不存在的消费 MUST 返回 `2005`。
+
+#### Scenario: Amount change refreshes snapshot
+- **WHEN** 用户修改金额或币种
+- **THEN** 系统按当前汇率重新写入快照并更新 `amountCny`
+
+#### Scenario: Remark change keeps snapshot
+- **WHEN** 用户只修改备注
+- **THEN** 原 `exchangeRateSnapshot` 与 `amountCny` 保持不变
+
+#### Scenario: Other user's expense is hidden
+- **WHEN** 用户编辑他人消费
+- **THEN** 系统返回 `2005`
+
+### Requirement: Expense deletion
+删除 MUST 为软删除；汇总与列表 MUST 实时排除已删除记录；不保留历史汇总版本。
+
+#### Scenario: Deleted expense disappears from totals
+- **WHEN** 用户删除一笔消费
+- **THEN** 列表与汇总中不再包含该笔金额
+
+### Requirement: Expense listing
+列表 MUST 支持按国家、城市、旅行、未归组、日期区间和分类过滤，并分页；MUST 只返回本人未删除消费；响应 MUST 包含国家名、城市名、原币金额、快照汇率、CNY 金额和 `rateMissing`。
+
+#### Scenario: Filter by trip
+- **WHEN** 用户按 `tripId` 查询消费
+- **THEN** 只返回该旅行下的消费
+
+#### Scenario: Filter ungrouped
+- **WHEN** 用户使用 `ungrouped=true`
+- **THEN** 只返回 `trip_id IS NULL` 的消费
+
+### Requirement: Expense summary
+汇总 MUST 支持 `country`、`city`、`trip`、`date` 单维或多维分组，默认按国家；多维时 `key` MUST 用 `|` 拼接；金额 MUST 按历史快照折算为 CNY；负数 MUST 参与求和；软删除 MUST 排除；未配置汇率的记录 MUST NOT 计入总额，并返回 `hasUnconfiguredCurrency=true` 与币种列表；按国家或旅行汇总时 MUST 返回原币种明细。
+
+#### Scenario: Country summary
+- **WHEN** 用户按国家汇总
+- **THEN** 返回每个国家的 CNY 总额、分类小计和原币种明细
+
+#### Scenario: Multi-dimensional key
+- **WHEN** 用户按国家和城市分组
+- **THEN** 每组 `key` 形如 `JP|TYO`
+
+#### Scenario: Unconfigured currency is excluded
+- **WHEN** 汇总中存在未配置汇率的消费
+- **THEN** 该金额不计入 `totalCny`，并在 `unconfiguredCurrencies` 中列出币种
+
+#### Scenario: Refund offsets spending
+- **WHEN** 某分类存在负数消费
+- **THEN** 分类小计与总额按代数和计算
+
+#### Scenario: Trip summary
+- **WHEN** 用户按旅行汇总
+- **THEN** 未归组消费归入“未归组”，各旅行返回小计
+
+### Requirement: Expense isolation
+所有消费接口 MUST 按当前用户过滤；越权访问 MUST 返回 `2005`，不得暴露资源是否存在。
+
+#### Scenario: Cross-user summary is scoped
+- **WHEN** 用户请求消费汇总
+- **THEN** 结果只包含本人数据
+
+### Requirement: Date-grouped expense listing
+系统 MUST 提供按日期分组的消费查询，支持与国家、城市、旅行、未归组、分类和日期区间相同的筛选条件。结果 MUST 只包含本人未删除消费，按消费日期倒序分组，组内按创建时间/ID 倒序；每组 MUST 包含日期、当日 CNY 合计、当日原币种合计和消费明细。未配置汇率的记录 MUST NOT 计入 CNY 合计，但 MUST 仍出现在明细中并标记 `rateMissing=true`。每日合计 MUST 不受分页影响。
+
+#### Scenario: Expenses are grouped by day
+- **WHEN** 用户查看按日期分组的消费
+- **THEN** 同一天的消费聚合到同一组，日期从新到旧排列
+
+#### Scenario: Daily totals include all matching rows
+- **WHEN** 某天有多笔消费超过普通列表一页的量
+- **THEN** 当日合计仍包含该天全部匹配消费，不受分页限制
+
+#### Scenario: Missing rate does not break grouping
+- **WHEN** 某天包含未配置汇率的消费
+- **THEN** 该笔仍在组内展示且 `rateMissing=true`，但不计入当日 CNY 合计
+
+#### Scenario: Original currencies are summarized
+- **WHEN** 某天包含 JPY 与 CNY 消费
+- **THEN** 该组返回按币种汇总的原币金额，同时给出折算后的 CNY 合计
+
+#### Scenario: Filters apply to grouping
+- **WHEN** 用户按国家、分类或日期区间筛选后切换按日期视图
+- **THEN** 分组结果与明细列表使用相同的筛选条件
+
+### Requirement: Expense quick entry and amount expression
+新增消费 MUST 记住本机上次使用的国家、币种与分类，并在下一次新增时自动带出；编辑既有消费 MUST 使用该消费自身的值。金额输入 MUST 支持 `+ - * /` 与括号的安全表达式计算，提交前 MUST 换算为最多两位小数的金额字符串；表达式非法、除零或结果溢出 MUST 阻止保存并提示，MUST NOT 调用后端。负数汇总（退款）规则保持不变。
+
+#### Scenario: Last used fields are remembered
+- **WHEN** 用户上次以 JPY / 餐饮 / 日本保存消费，再次点击「记一笔」
+- **THEN** 表单默认带出日本、JPY、餐饮
+
+#### Scenario: Expression is evaluated
+- **WHEN** 用户输入 `12+3.5*2`
+- **THEN** 前端显示并提交 `19.00`
+
+#### Scenario: Invalid expression is blocked
+- **WHEN** 用户输入 `12++` 或 `1/0`
+- **THEN** 前端提示表达式无效，不发起保存请求
+
+#### Scenario: Edit keeps row values
+- **WHEN** 用户编辑一条既有消费
+- **THEN** 表单使用该记录的金额、币种、国家与分类，不被本机偏好覆盖
+
+### Requirement: Monthly total and category chart
+记账页 MUST 提供月份选择与「本月合计」卡片，展示所选月份在当前筛选条件下的 CNY 合计与原币种合计；默认当前月。汇总区 MUST 在现有分组柱状图之外提供分类占比图，分类金额 MUST 来自同一批汇总数据，按 CNY 聚合。
+
+#### Scenario: Monthly total is shown
+- **WHEN** 用户选择 2026-11 月
+- **THEN** 卡片显示该月 CNY 合计与原币种合计
+
+#### Scenario: Month defaults to current
+- **WHEN** 用户打开记账页
+- **THEN** 月份默认当前月，并展示本月合计
+
+#### Scenario: Category chart matches summary
+- **WHEN** 汇总数据包含交通、餐饮等分类
+- **THEN** 饼图展示各分类占 CNY 总额的比例，合计与汇总总额一致
+
+#### Scenario: Empty month degrades
+- **WHEN** 所选月份没有消费
+- **THEN** 合计显示 0，分类图显示空状态，不报错
+
+### Requirement: Expense page filter surface
+记账页筛选区 MUST 只展示国家、城市、旅行（归档）、分类、日期区间与「查询」「重置」；MUST NOT 展示「仅未归组」筛选。列表查询与重置 MUST NOT 发送 `ungrouped` 参数。后端 MAY 继续接受 `ungrouped` 参数以兼容旧客户端。
+
+#### Scenario: Ungrouped filter is not shown
+- **WHEN** 用户打开记账页
+- **THEN** 筛选区没有「仅未归组」选项
+
+#### Scenario: Query still works after removal
+- **WHEN** 用户按国家、分类或日期筛选并点击「查询」
+- **THEN** 列表与汇总按所选条件更新，不发送 `ungrouped`
+
+#### Scenario: Reset clears visible filters
+- **WHEN** 用户点击「重置」
+- **THEN** 国家、城市、旅行、分类与日期条件被清空并重新查询
+
+### Requirement: Summary and monthly total filter consistency
+汇总与月度合计 MUST 支持与列表相同范围的国家、城市、旅行、分类与日期过滤；非法 `category` MUST 返回 `2001`。前端执行查询时 MUST 同步刷新列表、汇总与月度合计，避免筛选条件只作用于列表。
+
+#### Scenario: Category filter applies to summary
+- **WHEN** 用户选择分类后查询
+- **THEN** 汇总与月度合计只统计该分类
+
+#### Scenario: City filter applies to summary
+- **WHEN** 用户选择城市后查询
+- **THEN** 汇总与月度合计只统计该城市
+
+#### Scenario: Invalid category is rejected
+- **WHEN** 请求汇总时传入未知分类
+- **THEN** 系统返回 `2001`
+
+### Requirement: Expense edit form retention
+编辑已有消费时 MUST 回填并保留其国家、城市与所属归档；只有在用户主动切换国家、且原城市或归档不属于新国家时 MUST 才清空对应字段。保存 MUST NOT 因回填过程丢失 `cityCode` 或 `tripId`。
+
+#### Scenario: Editing keeps city and trip
+- **WHEN** 用户打开一条带城市与归档的消费并直接保存
+- **THEN** 记录的城市与归档保持不变
+
+#### Scenario: Country change clears incompatible values
+- **WHEN** 用户把国家从泰国改为日本
+- **THEN** 不属于日本的城市与归档被清空，仍属于日本的值保留
+
+### Requirement: Expense page action separation
+记账页 MUST 将「记一笔」作为页面级主操作展示在记账卡片标题区域，MUST NOT 与筛选条件或「查询/重置」并列。筛选区 MUST 只包含筛选条件与「查询」「重置」按钮。两组操作在布局上 MUST 分区，使查询不会误触新增、新增不会误触查询。
+
+#### Scenario: Record button sits with the page title
+- **WHEN** 用户打开记账页
+- **THEN** 「记一笔」显示在记账卡片标题区域，筛选区只显示筛选条件与「查询」「重置」
+
+#### Scenario: Filters do not trigger creation
+- **WHEN** 用户点击「查询」或「重置」
+- **THEN** 只执行筛选或重置，不打开新增消费表单
+
+#### Scenario: Primary action opens the form
+- **WHEN** 用户点击标题栏的「记一笔」
+- **THEN** 打开新增消费表单，筛选条件保持不变

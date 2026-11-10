@@ -1,0 +1,144 @@
+name: E2E Nightly
+
+on:
+  schedule:
+    # 02:17 北京时间
+    - cron: '17 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Playwright against production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # 每次运行生成一次性凭据，避免仓库中出现固定密码/密钥。
+      # 这些值同时用于 MySQL/MinIO 容器、后端启动参数与 Playwright 登录。
+      - name: Generate ephemeral credentials
+        run: |
+          set -euo pipefail
+          admin_password="Admin$(openssl rand -hex 12)!9"
+          {
+            echo "TRAVELMAPPER_ADMIN_PASSWORD=${admin_password}"
+            echo "E2E_ADMIN_PASSWORD=${admin_password}"
+            echo "TRAVELMAPPER_JWT_SECRET=$(openssl rand -hex 32)"
+            echo "TRAVELMAPPER_AES_KEY=$(openssl rand -base64 32)"
+            echo "MINIO_ROOT_USER=e2e$(openssl rand -hex 6)"
+            echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 16)"
+          } >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Start dependencies
+        run: docker compose up -d mysql redis minio minio-init
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec tm-mysql mysqladmin ping -h127.0.0.1 -uroot -proot --silent; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL did not become ready" >&2
+          docker compose logs mysql
+          exit 1
+
+      - name: Build backend
+        working-directory: backend
+        run: mvn -B -q -DskipTests package
+
+      - name: Start backend
+        env:
+          SPRING_PROFILES_ACTIVE: local
+          SERVER_PORT: '8080'
+          DB_URL: jdbc:mysql://127.0.0.1:3306/travelmapper?useUnicode=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true
+          DB_USERNAME: travelmapper
+          DB_PASSWORD: travelmapper
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
+          # TRAVELMAPPER_ADMIN_PASSWORD / _JWT_SECRET / _AES_KEY 由上一步写入 $GITHUB_ENV
+          MAIL_ENABLED: 'false'
+          MAIL_LOG_VERIFICATION_CODES: 'true'
+          ALERT_ENABLED: 'false'
+        run: |
+          JAR="$(ls -1 backend/target/travelmapper-backend-*.jar | grep -v '\.original$' | head -1)"
+          nohup java -jar "$JAR" > backend-e2e.log 2>&1 &
+          echo $! > backend.pid
+
+      - name: Wait for backend
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/actuator/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend did not become healthy" >&2
+          tail -200 backend-e2e.log || true
+          exit 1
+
+      - name: Configure object storage
+        run: |
+          curl -fsS -X PUT http://localhost:8080/api/admin/config/oss \
+            -H 'Content-Type: application/json' \
+            -H 'X-User-Id: 1' -H 'X-User-Role: ADMIN' \
+            -d "{\"provider\":\"minio\",\"endpoint\":\"http://127.0.0.1:9000\",\"bucket\":\"travelmapper\",\"accessKey\":\"${MINIO_ROOT_USER}\",\"secretKey\":\"${MINIO_ROOT_PASSWORD}\",\"pathStyle\":true}"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E against production build
+        working-directory: frontend
+        env:
+          CI: 'true'
+          E2E_PREVIEW: '1'
+          E2E_BACKEND_LOG: ${{ github.workspace }}/backend-e2e.log
+          E2E_ADMIN_ACCOUNT: admin
+          # E2E_ADMIN_PASSWORD 由 Generate ephemeral credentials 步骤写入
+          E2E_REDIS_CONTAINER: tm-redis
+          E2E_MYSQL_CONTAINER: tm-mysql
+        run: npm run test:e2e
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-artifacts
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+            backend-e2e.log
+          retention-days: 7
+
+      - name: Stop backend and dependencies
+        if: always()
+        run: |
+          if [ -f backend.pid ]; then
+            kill "$(cat backend.pid)" || true
+          fi
+          docker compose down -v || true

@@ -1,0 +1,16 @@
+[
+  {
+    "code": "AQ",
+    "nameEn": "Antarctica",
+    "nameZh": "南极洲",
+    "continent": "ANTARCTICA",
+    "sortOrder": 1300
+  },
+  {
+    "code": "X3",
+    "nameEn": "Arctic",
+    "nameZh": "北极地区",
+    "continent": null,
+    "sortOrder": 1301
+  }
+]

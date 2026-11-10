@@ -1,0 +1,95 @@
+# 旅迹地图 Frontend
+
+Vue 3 + Vite + TypeScript + Pinia + Vue Router + Element Plus + ECharts.
+
+## 启动
+
+```bash
+npm install
+cp .env.example .env
+npm run dev
+```
+
+开发服务器默认 `http://localhost:5173`，`/api` 代理到后端 `http://localhost:8080`。
+
+## 登录入口与内置账号
+
+| 角色 | 登录地址 | 内置账号 | 说明 |
+|---|---|---|---|
+| 普通用户 | http://localhost:5173/login | 无内置账号 | 先到 `/register` 注册：填写邮箱 → 点“发送验证码” → 填 6 位验证码 → 设置密码；注册成功自动登录 |
+| 管理员 | http://localhost:5173/admin/login | `admin` / `Admin@123456` | 仅 `ADMIN` 角色可登录；普通用户在此登录会被拒绝并清除登录态 |
+
+- 管理员从 `/admin/login` 登录后进入用户管理页；普通用户从 `/login` 登录后进入地图首页。
+- 普通用户页面不展示管理员入口，需要直接访问 `/admin/login`。
+- 预置管理员来自数据库种子数据（`V2__seed.sql`），**生产首次部署必须修改密码**。
+- 开发环境 `MAIL_ENABLED=false` 时不发邮件，验证码只打印在后端日志：`[auth-dev] scene=... email=... code=...`。
+- 登录失败返回 `1001`；未验证邮箱 `1002`；封禁 `1003`；已注销 `1007`。
+- 登录页“保持登录”勾选时 Token 存 `localStorage`（关闭浏览器仍登录），不勾选存 `sessionStorage`（关闭标签页失效）；服务端 JWT 有效期固定 7 天。
+- 忘记密码：`/reset-password`（`/forgot-password` 会重定向到这里），用邮箱验证码 + 新密码重置，旧 JWT 立即失效。
+
+## 页面
+
+- `/login`、`/register`、`/reset-password`：登录、注册、找回密码（入口与账号见上一节）。
+- `/admin/login`：管理员登录入口。
+- `/profile` 个人中心：昵称/头像、额度明细、卡密兑换、注销账号。
+- `/` 世界地图：三态着色、悬浮计数、点击任意有名称的国家/地区打开抽屉（国家状态标签与图例一致：无记录/仅有行程/有游记；AI 国家攻略 + 进行中/计划中/已完成的旅行卡片）；右上角可切换「地图 / 时间线」。旅行状态默认按日期与游记/消费自动推导，手动标记优先；空旅行会自动清理。时间线按每条已保存行程展示并按年份分组，没有行程的旅行以“旅行（无行程）”兜底卡片出现。没有配置城市的新国家在规划/游记页会提示管理员补充城市。
+- 国家抽屉「AI 国家攻略」：国家介绍、推荐景点、旅游须知三块；无缓存时点击生成，SSE 流式展示，一次消耗 1 次额度；按国家全局缓存 24 小时，缓存命中直接展示且不扣额度。
+- `/plan` 行程规划：顶部可切换「AI 生成 / 手动规划」。
+  - AI 生成：多城市/天数/偏好生成；草稿支持天增删改排、景点增删改、天内排序与跨天移动，保存统一提交；十项可扩展行前清单（默认十项 + 自定义项，按行程保存）、官方链接兜底。行程生成不再产出行前准备文本；历史行程若已有旧数据仍只读展示。
+  - 手动规划：只选国家/城市/天数和开始日期，本地生成空白草稿，逐天添加景点；不调用 AI、不消耗额度，保存复用同一归档与点亮流程。切换模式会二次确认并清空未保存草稿。
+- `/itineraries/:id` 已保存行程编辑：基本信息、景点/天 CRUD、跨天移动、AI 重新生成（保留手动景点并提示合并）、删除行程；地图抽屉中的行程可直接进入。
+- `/trips/:id` 旅行详情：概览与汇总、状态切换、行程/游记全部、最近 10 条消费；可跳转各页继续录入。地图抽屉展示旅行卡片（名称、日期、行程数、游记数、花费），点击进入旅行详情；未加入旅行的记录以顶部汇总提示展示。
+- 归档自动完成：同国家行程间隔 ≤30 天归为同一次；游记与消费按日期自动归类（前后各 30 天），匹配不到时自动新建归档。界面不再要求手动选择；记账页仍可按归档筛选查看。
+- `/notes` 游记：TipTap 图文/视频编辑器（标题/加粗/列表/引用/链接/图片/视频，粘贴或拖拽图片、压缩后直传），保存后跳转详情。
+- 编辑器内 AI 润色：选中文本后点击工具栏「AI 润色」，流式预览完成后原位替换；支持风格选择、取消（先调用 `/api/ai/cancel`）与失败重试。独立 `/polish` 页面已删除。
+- `/notes/:id` 游记详情/编辑：封面、视频播放、可见性、关联旅行、分享管理、下架状态；分享页只展示文字与图片，不展示视频；支持按 ID 打开和生成海报。
+- `/poster/:id?` 游记海报：自动确保分享令牌、拉取地图统计、Canvas 足迹连线、二维码、html2canvas 下载 PNG。
+- `/expenses` 记账：新增/编辑/删除、国家/城市/旅行/分类/日期筛选、分页；快捷录入记住上次国家/币种/分类，金额支持 `10+2.5*2` 表达式；「明细 / 按日期」切换、月度合计、按日期/国家/城市/旅行汇总与分类占比饼图。
+- `/admin/*`（需 ADMIN）：顶栏拆为「管理」与「配置」两个菜单。
+  - 管理：用户管理、卡密生成/导出/作废、城市维护、官方链接维护、汇率维护、内容下架/恢复。
+  - 配置（`/admin/settings?tab=llm|search|storage|mail|alert`）：LLM、攻略搜索、对象存储、邮件 SMTP、故障提醒；保存后热加载。LLM 未配置时生成行程返回 `2012`。
+- 行程草稿与已保存编辑页的景点支持同一天内拖拽排序；跨天请用“移到…”菜单。
+- `/share/:token` 公开只读分享页（无需登录，失效时展示“分享已失效”）；分享链接与海报二维码均指向该路由。
+- 城市字典：`V4__more_cities.sql` 预置 123 个中国常用地级市/旅游城市，以及日本、泰国、韩国、新加坡、法国、意大利、美国、澳大利亚的热门城市；其余城市可通过后台城市接口补充。
+
+## 测试与构建
+
+```bash
+npm run test:unit          # Vitest + happy-dom
+npm run typecheck
+npm run build              # vue-tsc + 生产构建，并生成 .vite/manifest.json
+npm run budget             # gzip 体积预算（入口 ≤400KB、单 chunk ≤600KB、首屏 ≤800KB）
+```
+
+体积预算会拒绝入口重新引入 ECharts、TipTap、ProseMirror 等重依赖。
+
+## 浏览器 E2E
+
+```bash
+npm run test:e2e        # Playwright + 本机 Chrome
+npm run test:e2e:headed
+E2E_PREVIEW=1 npm run test:e2e   # 针对 dist 生产构建（需先 npm run build）
+
+# 视觉验收截图（输出到 test-results/screens/）
+npx playwright test e2e/screens.spec.ts
+```
+
+需要后端已启动。覆盖地图/抽屉（含国家攻略生成入口与缓存展示）、行程编辑、游记创建与分享、海报下载、公开分享页、后台页面。`e2e/loading.spec.ts` 会校验登录页不加载地图/编辑器/后台/海报代码。详见 `e2e/README.md`。
+
+## 性能约定
+
+- 所有页面路由使用动态 `import()`，公开页不加载地图、编辑器、后台与海报代码。
+- Element Plus 通过 `unplugin-vue-components` / `unplugin-auto-import` 按需引入；语言包由 `App.vue` 的 `<el-config-provider>` 提供。
+- ECharts 通过 `src/utils/echarts.ts` 按需注册，仅地图页与记账页加载。
+- `vue`、`echarts`、`axios` 等稳定依赖做选择性 vendor 分包；TipTap 由 Rollup 自动生成异步 chunk，避免被入口预加载。
+- 游记列表、详情、分享与海报页图片启用原生懒加载；正文 `v-html` 图片在渲染后补齐 `loading="lazy"`。
+
+## 地图底图
+
+默认使用 `src/assets/world.json`（ECharts 世界地图 GeoJSON，约 1MB），并合并 `src/assets/antarctica.json` 显示南极洲（底图扩展到 -90°~90°，主图会整体缩放）；北极地区以地图顶部的可点击点标记展示。构建后输出为 `/assets/world-<hash>.json`，走 1 年 immutable 缓存，并与页面 API 并发加载。不再依赖外部 CDN，可用 `VITE_WORLD_GEO_URL` 覆盖。
+
+悬浮提示与悬停标签显示中文国家名，取值顺序：目录中文名 → `src/assets/world-names-zh.json` 内置对照表 → 底图原名。替换底图后运行 `node scripts/check-world-names.mjs` 检查是否有未翻译的要素。上线前仍必须按 SRS 7.3 确认底图合规来源与审图号。底图加载失败时会自动切换为国家列表，列出全部国家（未点亮国家为灰色，同样可点击查看详情）。
+
+## 移动端
+
+ECharts `roam` 已开启双指缩放/单指拖拽，地图容器设置 `touch-action: none`。仍需要在 iOS Safari 15+、Android Chrome 100+ 与微信内置浏览器做一次真机验收。

@@ -1,0 +1,153 @@
+# 适配服务器 /root/my-docker-apps 的现有结构：
+#   nginx（8080:80） + cloudflared（Cloudflare Tunnel） + java-app + mysql + redis
+# 公网 TLS 由 Cloudflare 终止，Nginx 只监听 80。
+#
+# 1.8 GiB 机器，当前 nginx + cloudflared + 系统已占用约 490 MiB。
+# 新增容器内存上限：
+#   java-app 640m + mysql 384m + redis 96m = 1120m
+# 总计约 1.6 GiB，留约 260 MiB 余量 + 4G swap 兜底。
+name: my-docker-apps
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    # 保留你现有的 tunnel token；不要提交到仓库。
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - web-net
+    mem_limit: 64m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx-conf:/etc/nginx/conf.d
+      - ./nginx-html:/usr/share/nginx/html
+    depends_on:
+      - java-app
+    networks:
+      - web-net
+    mem_limit: 64m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  java-app:
+    build: ./java-app
+    container_name: java-app
+    restart: unless-stopped
+    # 不映射端口：只让 Nginx 在 web-net 内访问。
+    env_file:
+      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:mysql://mysql:3306/${DB_NAME:-travelmapper}?useUnicode=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      DB_HOST: mysql
+      DB_PORT: 3306
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - web-net
+    mem_limit: 640m
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-db
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+08:00
+      # 小内存关键项：关 performance_schema；buffer pool 128M 够个人库。
+      - --performance-schema=OFF
+      - --innodb-buffer-pool-size=128M
+      - --innodb-buffer-pool-instances=1
+      - --innodb-log-buffer-size=16M
+      - --max-connections=30
+      - --table-open-cache=200
+      - --tmp-table-size=16M
+      - --max-heap-table-size=32M
+      - --skip-name-resolve
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${DB_NAME:-travelmapper}
+      MYSQL_USER: ${DB_USERNAME:-travelmapper}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - web-net
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-db
+    restart: unless-stopped
+    # 关 RDB，避免 fork 时内存翻倍；noeviction 保证验证码/限流键不被淘汰。
+    command: >
+      sh -c 'exec redis-server --appendonly yes --appendfsync everysec
+      --save "" --maxmemory 64mb --maxmemory-policy noeviction'
+    volumes:
+      - redis-data:/data
+    networks:
+      - web-net
+    mem_limit: 96m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  web-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:

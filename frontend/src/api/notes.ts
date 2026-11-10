@@ -1,0 +1,196 @@
+import { apiDelete, apiGet, apiPost, apiPut } from './http'
+
+export interface NoteImage {
+  objectKey: string
+  url: string | null
+  thumbUrl?: string | null
+}
+
+export interface NoteCreate {
+  title: string
+  content: string
+  images: string[]
+  videos: string[]
+  coverImage: string | null
+  countryCode: string
+  cityCode: string
+  itineraryId?: number | null
+  tripId?: number | null
+  visibility: 'PRIVATE' | 'SHARED'
+}
+
+export interface NoteResponse {
+  id: number
+  title: string
+  content: string
+  images: NoteImage[]
+  videos: NoteImage[]
+  coverImage: string | null
+  countryCode: string
+  countryName: string
+  cityCode: string
+  cityName: string
+  cityDisabled: boolean
+  itineraryId: number | null
+  tripId: number | null
+  tripName: string | null
+  visibility: string
+  share: { active: boolean; token: string | null; url: string | null; expireAt: string | null }
+  takedown: boolean
+  takedownReason: string | null
+  takedownAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ShareResponse {
+  token: string
+  url: string
+  fullUrl: string
+  expireAt: string | null
+  created: boolean
+}
+
+export interface SharePage {
+  title: string
+  summary: string
+  coverImageUrl: string | null
+  coverThumbUrl: string | null
+  images: string[]
+  imageThumbs: string[]
+  countryCode: string
+  countryName: string
+  cityCode: string
+  cityName: string
+  createdAt: string
+  nicknameMasked: string
+}
+
+export interface PresignResponse {
+  objectKey: string
+  uploadUrl: string
+  method: string
+  headers: Record<string, string>
+  expireAt: string
+}
+
+export function presignUpload(
+  bizType: 'NOTE_IMAGE' | 'NOTE_VIDEO',
+  contentType: string,
+  size: number,
+  thumbOf?: string
+): Promise<PresignResponse> {
+  return apiPost<PresignResponse>('/upload/presign', {
+    bizType,
+    contentType,
+    size,
+    ...(thumbOf ? { thumbOf } : {})
+  })
+}
+
+async function uploadFile(
+  file: File,
+  bizType: 'NOTE_IMAGE' | 'NOTE_VIDEO',
+  label: string,
+  contentTypeOverride?: string,
+  thumbOf?: string
+): Promise<string> {
+  const contentType = contentTypeOverride || file.type
+  const presigned = await presignUpload(bizType, contentType, file.size, thumbOf)
+  const response = await fetch(presigned.uploadUrl, {
+    method: presigned.method || 'PUT',
+    headers: presigned.headers,
+    body: file
+  })
+  if (!response.ok) {
+    throw new Error(`${label}上传失败`)
+  }
+  return presigned.objectKey
+}
+
+export function uploadImage(file: File): Promise<string> {
+  return uploadFile(file, 'NOTE_IMAGE', '图片')
+}
+
+/** 为已上传图片上传缩略图；失败不影响原图与游记保存。 */
+export function uploadImageThumbnail(file: File, originalKey: string): Promise<string> {
+  return uploadFile(file, 'NOTE_IMAGE', '缩略图', 'image/jpeg', originalKey)
+}
+
+export function uploadVideo(file: File): Promise<string> {
+  // 部分 iOS 文件选择器对 .mov 返回空 MIME，按扩展名补成 video/quicktime。
+  const contentType = file.type
+    || (file.name.toLowerCase().endsWith('.mov') ? 'video/quicktime' : '')
+  return uploadFile(file, 'NOTE_VIDEO', '视频', contentType)
+}
+
+export interface NoteListItem {
+  id: number
+  title: string
+  summary: string
+  coverImageUrl: string | null
+  coverThumbUrl: string | null
+  countryCode: string
+  countryName: string
+  cityCode: string
+  cityName: string
+  visibility: string
+  takenDown: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface NoteListResult {
+  total: number
+  page: number
+  size: number
+  list: NoteListItem[]
+}
+
+export function listNotes(params: {
+  keyword?: string
+  from?: string
+  to?: string
+  page?: number
+  size?: number
+}): Promise<NoteListResult> {
+  return apiGet<NoteListResult>('/notes', params)
+}
+
+export function createNote(body: NoteCreate): Promise<{ id: number; tripId: number | null; tripInherited: boolean; countryStatusAfter: string }> {
+  return apiPost('/notes', body)
+}
+
+export function getNote(id: number): Promise<NoteResponse> {
+  return apiGet<NoteResponse>(`/notes/${id}`)
+}
+
+export function updateNote(id: number, body: Record<string, unknown>): Promise<NoteResponse> {
+  return apiPut<NoteResponse>(`/notes/${id}`, body)
+}
+
+export function deleteNote(id: number): Promise<{
+  noteId: number
+  countryStatusAfter: string
+  sharesRevoked: number
+  tripDeleted: boolean
+}> {
+  return apiDelete(`/notes/${id}`)
+}
+
+export function shareNote(id: number, expireDays: number): Promise<ShareResponse> {
+  return apiPost<ShareResponse>(`/notes/${id}/share`, { expireDays })
+}
+
+export function revokeShare(id: number): Promise<{ revoked: number }> {
+  return apiDelete<{ revoked: number }>(`/notes/${id}/share`)
+}
+
+export async function fetchSharePage(token: string): Promise<SharePage> {
+  const response = await fetch(`/s/${encodeURIComponent(token)}`)
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok || body.code !== 0) {
+    throw new Error(body.message || '分享已失效')
+  }
+  return body.data as SharePage
+}

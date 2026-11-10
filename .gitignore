@@ -22,3 +22,31 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# Maven / Spring Boot
+backend/target/
+*.log
+
+# Local secrets and backups
+.env
+backend/.env
+frontend/.env
+backups/
+
+# Frontend build output and dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/src/types/
+
+# Playwright
+frontend/e2e/.auth.json
+frontend/e2e/.state.json
+frontend/test-results/
+frontend/playwright-report/
+
+# IDE
+.idea/
+
+# Playwright stray output at repo root
+test-results/
