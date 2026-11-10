@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { EditorContent, useEditor } from '@tiptap/vue-3'
 import { mergeAttributes, Node, type Editor as CoreEditor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
@@ -7,8 +8,8 @@ import Image from '@tiptap/extension-image'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
 import { cancelPolish, polishStream } from '../api/ai'
-import { uploadImage, uploadVideo } from '../api/notes'
-import { compressImage } from '../utils/image'
+import { uploadImage, uploadImageThumbnail, uploadVideo } from '../api/notes'
+import { compressImage, createThumbnail } from '../utils/image'
 import { contentToPreview, previewToContent } from '../utils/noteContent'
 import { newRequestId } from '../utils/uuid'
 
@@ -189,6 +190,12 @@ async function insertImageFile(file: File): Promise<void> {
   try {
     const compressed = await compressImage(file)
     const objectKey = await uploadImage(compressed)
+    try {
+      const thumb = await createThumbnail(compressed)
+      await uploadImageThumbnail(thumb, objectKey)
+    } catch {
+      emit('error', '缩略图上传失败，列表将使用原图')
+    }
     const previewUrl = URL.createObjectURL(compressed)
     blobUrls.push(previewUrl)
     keyByUrl[previewUrl] = objectKey
@@ -218,6 +225,17 @@ async function insertVideoFile(file: File): Promise<void> {
   if (videoCount() >= props.maxVideos) {
     emit('error', `每篇游记最多插入 ${props.maxVideos} 个视频`)
     return
+  }
+  if (isMov) {
+    try {
+      await ElMessageBox.confirm(
+        'MOV 视频在部分安卓/Chrome 设备可能无法播放，建议先在相册中导出 MP4。仍要上传吗？',
+        'MOV 兼容性提示',
+        { type: 'warning', confirmButtonText: '仍然上传', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
   }
   uploading.value = true
   try {

@@ -85,6 +85,57 @@ class NoteModerationIntegrationTest extends AuthTestSupport {
     }
 
     @Test
+    void mediaReviewQueueFiltersMarksAndResetsOnEdit() throws Exception {
+        User author = createVerifiedUser("mod_media");
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String title = "含媒体待审核_" + suffix;
+        long noteId = createNote(author, title, "<p>带图片的游记正文。</p>");
+        String mediaKey = "note/" + author.getId() + "/2025/06/" + UUID.randomUUID() + ".jpg";
+        jdbcTemplate.update("UPDATE travel_note SET images_json = ?, cover_image = ? WHERE id = ?",
+                "[\"" + mediaKey + "\"]", mediaKey, noteId);
+
+        mockMvc.perform(asAdmin(get("/api/admin/notes"))
+                        .param("keyword", title)
+                        .param("mediaReview", "PENDING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].hasMedia").value(true));
+
+        mockMvc.perform(asAdmin(put("/api/admin/notes/" + noteId + "/media-review")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.reviewed").value(true))
+                .andExpect(jsonPath("$.data.reviewedAt").isString());
+        mockMvc.perform(asAdmin(get("/api/admin/notes"))
+                        .param("keyword", title)
+                        .param("mediaReview", "PENDING"))
+                .andExpect(jsonPath("$.data.total").value(0));
+        mockMvc.perform(asAdmin(get("/api/admin/notes"))
+                        .param("keyword", title)
+                        .param("mediaReview", "REVIEWED"))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        mockMvc.perform(asAdmin(put("/api/admin/notes/" + noteId + "/media-review")))
+                .andExpect(status().isOk());
+        assertThat(count("audit_log", "action = 'NOTE_MEDIA_REVIEW' AND target_id = ?", noteId))
+                .isEqualTo(1);
+
+        mockMvc.perform(withToken(put("/api/notes/" + noteId), author)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"images\":[]}"))
+                .andExpect(status().isOk());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT media_reviewed_at FROM travel_note WHERE id = ?",
+                java.sql.Timestamp.class, noteId)).isNull();
+
+        String plainTitle = "无媒体游记_" + suffix;
+        createNote(author, plainTitle, "<p>没有媒体的正文。</p>");
+        mockMvc.perform(asAdmin(get("/api/admin/notes"))
+                        .param("keyword", plainTitle)
+                        .param("mediaReview", "PENDING"))
+                .andExpect(jsonPath("$.data.total").value(0));
+    }
+
+    @Test
     void noteTitleIsSensitiveWordFilteredAndTruncated() throws Exception {
         User author = createVerifiedUser("mod_title");
         String original = jdbcTemplate.query(

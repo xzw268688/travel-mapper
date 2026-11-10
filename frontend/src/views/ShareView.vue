@@ -9,6 +9,8 @@ const route = useRoute()
 const page = ref<SharePage | null>(null)
 const error = ref('')
 const loading = ref(true)
+const failedThumbs = ref(new Set<number>())
+const coverThumbFailed = ref(false)
 const reportDialog = reactive({
   visible: false,
   submitting: false,
@@ -26,6 +28,32 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+function coverSrc(): string {
+  if (!page.value) {
+    return ''
+  }
+  if (!coverThumbFailed.value && page.value.coverThumbUrl) {
+    return page.value.coverThumbUrl
+  }
+  return page.value.coverImageUrl || ''
+}
+
+function onCoverError(): void {
+  coverThumbFailed.value = true
+}
+
+function imageSrc(index: number): string {
+  const thumbs = page.value?.imageThumbs ?? []
+  if (!failedThumbs.value.has(index) && thumbs[index]) {
+    return thumbs[index]
+  }
+  return page.value?.images[index] || ''
+}
+
+function onImageError(index: number): void {
+  failedThumbs.value.add(index)
+}
 
 function openReport(): void {
   reportDialog.reason = 'ABUSE'
@@ -77,18 +105,20 @@ async function submit(): Promise<void> {
       </div>
       <p style="line-height: 1.8">{{ page.summary }}</p>
       <img
-        v-if="page.coverImageUrl"
-        :src="page.coverImageUrl"
+        v-if="coverSrc()"
+        :src="coverSrc()"
         alt="封面"
         style="max-width: 100%; border-radius: 8px"
+        @error="onCoverError"
       />
       <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px">
         <el-image
-          v-for="image in page.images"
+          v-for="(image, index) in page.images"
           :key="image"
-          :src="image"
+          :src="imageSrc(index)"
           fit="cover"
           style="width: 140px; height: 100px; border-radius: 6px"
+          @error="onImageError(index)"
         />
       </div>
       <div style="margin-top: 16px; text-align: right">

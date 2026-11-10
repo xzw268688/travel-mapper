@@ -366,7 +366,7 @@ function formatDate(value: string | null): string {
             <el-image
               v-for="image in galleryImages"
               :key="image.objectKey"
-              :src="image.url || ''"
+              :src="image.thumbUrl || image.url || ''"
               :preview-src-list="galleryImages.map((item) => item.url || '').filter(Boolean)"
               fit="cover"
               style="width: 140px; height: 100px; border-radius: 6px"

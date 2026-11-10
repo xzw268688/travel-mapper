@@ -6,21 +6,25 @@
 
 ```
 note/{userId}/{yyyy}/{MM}/{uuid}.{ext}
+note/{userId}/{yyyy}/{MM}/{uuid}.{ext}.thumb.jpg
 ```
 
 - `userId`：上传者 ID；保存游记时后端强制要求 objectKey 以此前缀开头。
 - `yyyy/MM`：上传日期（北京时间）。
 - `{uuid}`：服务端生成，禁止使用用户原始文件名。
+- `.thumb.jpg`：客户端为图片生成的缩略图，Key 固定派生自原图，不单独入库。
 
 媒体类型与扩展名：
 
 | 媒体 | bizType | contentType | 扩展名 | 单文件上限 | 上传签名 TTL |
 |---|---|---|---|---|---|
 | 图片 | `NOTE_IMAGE` | `image/jpeg` / `image/png` / `image/webp` | jpg / png / webp | 5MB | 300 秒 |
-| 视频 | `NOTE_VIDEO` | `video/mp4` / `video/webm` | mp4 / webm | 100MB | 1800 秒 |
+| 图片缩略图 | `NOTE_IMAGE` + `thumbOf` | `image/jpeg` | `.thumb.jpg` | 512KB | 300 秒 |
+| 视频 | `NOTE_VIDEO` | `video/mp4` / `video/webm` / `video/quicktime` | mp4 / webm / mov | 100MB | 1800 秒 |
 
 - 每篇游记最多 20 张图片、3 个视频。
-- 不做视频转码；浏览器直接播放原文件。
+- 缩略图由前端在压缩后生成（480px、JPEG 0.8），通过 `thumbOf={原图 Key}` 申请签名；服务端只接受当前用户前缀内的原图 Key。
+- 不做视频转码；MOV 在部分 Android/Chrome 设备可能无法播放，前端选择 MOV 时必须弹确认提示，取消则不上传。
 - EXIF GPS 剥离由前端 canvas 压缩完成，仅对图片有效。
 
 ## 数据库字段
@@ -31,14 +35,16 @@ note/{userId}/{yyyy}/{MM}/{uuid}.{ext}
 | `travel_note.videos_json` | 视频 objectKey 数组（≤3，V8 迁移新增） |
 | `travel_note.cover_image` | 必须来自 `images_json`，不能是视频 |
 | `travel_note.content` | 正文 HTML，媒体以 `/objects/{objectKey}` 相对路径嵌入 |
+| `travel_note.media_reviewed_at` | 人工媒体审核时间；为空表示待审核 |
+| `travel_note.media_reviewed_by` | 审核管理员 ID |
 
 `videos_json` 与正文中的 `<video>` 节点同时写入：前者用于详情列表、封面校验和清理引用，后者用于渲染顺序。
 
 ## 签名与访问
 
 - 上传：客户端拿预签名 URL 直接 PUT 到对象存储，不经过后端。
-- 普通读取：图片/视频均为 600 秒预签名 GET URL。
-- 分享页：只展示标题、摘要、封面与最多 6 张图片；**不展示视频**。
+- 普通读取：图片/视频均为 600 秒预签名 GET URL；列表、详情网格与分享页优先使用 `.thumb.jpg` 的签名 URL，加载失败时前端回退原图。
+- 分享页：只展示标题、摘要、封面与最多 6 张图片（均优先缩略图）；**不展示视频**。
 - 存储桶必须私有，禁止匿名读。
 
 ## 保存时校验
@@ -50,7 +56,16 @@ note/{userId}/{yyyy}/{MM}/{uuid}.{ext}
 3. 任一不满足 → `2027`；存储未配置/HEAD 失败 → `5003`；
 4. 封面只允许来自图片列表。
 
+缩略图是派生对象，不参与保存校验；历史游记没有缩略图时，读取接口仍返回 `.thumb.jpg` 签名 URL，由前端加载失败后回退原图。
+
 历史游记如果引用了已被清理的对象，再次编辑保存会被拒绝；这是有意的数据完整性保护，需要恢复对象或从列表中移除该 key。
+
+## 人工媒体审核
+
+- 采用「先发后审」：含图片或视频的游记创建后立即按原可见性发布，同时进入后台待审核列表。
+- 管理员在「内容管理 → 媒体审核」筛选 `PENDING`，打开详情核对图片/视频后点击「标记已审核」；操作写审计日志 `NOTE_MEDIA_REVIEW`。
+- 编辑游记导致 `images` 或 `videos` 实际变化时，审核状态重置为待审核。
+- 不含媒体的游记不进入待审核列表；审核本身不改变可见性，违规内容仍通过下架/举报流程处理。
 
 ## 孤儿清理
 
@@ -62,6 +77,8 @@ note/{userId}/{yyyy}/{MM}/{uuid}.{ext}
   - `images_json`
   - `videos_json`
   - 正文中的 `/objects/{objectKey}` 引用
+
+- `{base}.thumb.jpg` 在原图 `{base}` 仍被引用时一并保留；原图成为孤儿时缩略图才被删除。
 
 清理任务必须可重复执行；删除失败不应影响其他对象。
 

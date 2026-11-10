@@ -223,6 +223,8 @@ public class NoteService {
                     note.getTitle(),
                     summary(note.getContentText(), 80),
                     note.getCoverImage() == null ? null : signUrl(note.getCoverImage(), 600),
+                    note.getCoverImage() == null ? null
+                            : signUrl(note.getCoverImage() + ".thumb.jpg", 600),
                     note.getCountryCode(),
                     catalogService.countryName(note.getCountryCode()),
                     note.getCityCode(),
@@ -265,6 +267,10 @@ public class NoteService {
                     ? normalizedVideos : parseVideos(note.getVideosJson());
             mediaValidator.validate(userId, effectiveImages, effectiveVideos);
         }
+        boolean mediaChanged = (normalizedImages != null
+                && !normalizedImages.equals(parseImages(note.getImagesJson())))
+                || (normalizedVideos != null
+                && !normalizedVideos.equals(parseVideos(note.getVideosJson())));
         List<String> changed = new ArrayList<>();
         if (request.getTitle() != null) {
             if (request.getTitle().isBlank() || request.getTitle().length() > 50) {
@@ -302,6 +308,12 @@ public class NoteService {
             changed.add("visibility");
         }
         noteMapper.updateById(note);
+        if (mediaChanged) {
+            noteMapper.update(null, new LambdaUpdateWrapper<TravelNote>()
+                    .eq(TravelNote::getId, id)
+                    .set(TravelNote::getMediaReviewedAt, null)
+                    .set(TravelNote::getMediaReviewedBy, null));
+        }
         auditLogService.record(userId, "NOTE_UPDATE", "NOTE", id,
                 Map.of("changed", changed), null);
         return toResponse(requireOwned(userId, id));
@@ -399,20 +411,27 @@ public class NoteService {
         }
         List<String> keys = parseImages(note.getImagesJson());
         List<String> images = new ArrayList<>();
+        List<String> imageThumbs = new ArrayList<>();
         for (int i = 0; i < keys.size() && i < MAX_SHARE_IMAGES; i++) {
-            String url = shareUrl(keys.get(i), share.getExpireAt());
+            String key = keys.get(i);
+            String url = shareUrl(key, share.getExpireAt());
             if (url != null) {
                 images.add(url);
+                imageThumbs.add(shareUrl(key + ".thumb.jpg", share.getExpireAt()));
             }
         }
         String cover = note.getCoverImage() == null ? null : shareUrl(note.getCoverImage(), share.getExpireAt());
+        String coverThumb = note.getCoverImage() == null ? null
+                : shareUrl(note.getCoverImage() + ".thumb.jpg", share.getExpireAt());
         String summary = note.getContentText() == null ? ""
                 : note.getContentText().substring(0, Math.min(200, note.getContentText().length()));
         return new ShareDtos.SharePageResponse(
                 note.getTitle(),
                 summary,
                 cover,
+                coverThumb,
                 images,
+                imageThumbs,
                 note.getCountryCode(),
                 catalogService.countryName(note.getCountryCode()),
                 note.getCityCode(),
@@ -422,7 +441,7 @@ public class NoteService {
     }
 
     /** 管理端内容列表：只返回元信息，不返回正文。 */
-    public PageResult<AdminNoteView> adminList(String keyword, String status,
+    public PageResult<AdminNoteView> adminList(String keyword, String status, String mediaReview,
                                                LocalDate from, LocalDate to,
                                                PageRequest request) {
         request.validate();
@@ -446,6 +465,18 @@ public class NoteService {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, "status 必须为 TAKEDOWN 或 NORMAL");
             }
         }
+        if (mediaReview != null && !mediaReview.isBlank()) {
+            String normalized = mediaReview.trim().toUpperCase(Locale.ROOT);
+            if ("PENDING".equals(normalized)) {
+                where.append(" AND (n.images_json IS NOT NULL OR n.videos_json IS NOT NULL)")
+                        .append(" AND n.media_reviewed_at IS NULL");
+            } else if ("REVIEWED".equals(normalized)) {
+                where.append(" AND n.media_reviewed_at IS NOT NULL");
+            } else {
+                throw new BusinessException(ErrorCode.PARAM_INVALID,
+                        "mediaReview 必须为 PENDING 或 REVIEWED");
+            }
+        }
         if (from != null) {
             where.append(" AND n.created_at >= ?");
             params.add(from.atStartOfDay());
@@ -461,8 +492,9 @@ public class NoteService {
         pageParams.add(request.offset());
         List<AdminNoteView> rows = jdbcTemplate.query(
                 "SELECT n.id, n.title, n.user_id, n.country_code, n.city_code, n.visibility, "
-                        + "n.takedown, n.takedown_reason, n.created_at, n.updated_at, "
-                        + "u.username, u.nickname" + where
+                        + "n.takedown, n.takedown_reason, n.media_reviewed_at, "
+                        + "(n.images_json IS NOT NULL OR n.videos_json IS NOT NULL) AS has_media, "
+                        + "n.created_at, n.updated_at, u.username, u.nickname" + where
                         + " ORDER BY n.created_at DESC, n.id DESC LIMIT ? OFFSET ?",
                 (rs, rowNum) -> {
                     String countryCode = rs.getString("country_code");
@@ -482,6 +514,9 @@ public class NoteService {
                             rs.getString("visibility"),
                             rs.getInt("takedown") == 1,
                             rs.getString("takedown_reason"),
+                            rs.getInt("has_media") == 1,
+                            rs.getTimestamp("media_reviewed_at") == null ? null
+                                    : rs.getTimestamp("media_reviewed_at").toLocalDateTime(),
                             rs.getTimestamp("created_at") == null ? null
                                     : rs.getTimestamp("created_at").toLocalDateTime(),
                             rs.getTimestamp("updated_at") == null ? null
@@ -508,7 +543,8 @@ public class NoteService {
 
         List<NoteDtos.ImageView> images = new ArrayList<>();
         for (String key : parseImages(note.getImagesJson())) {
-            images.add(new NoteDtos.ImageView(key, signUrl(key, 600)));
+            images.add(new NoteDtos.ImageView(key, signUrl(key, 600),
+                    signUrl(key + ".thumb.jpg", 600)));
         }
         List<NoteDtos.VideoView> videos = new ArrayList<>();
         for (String key : parseVideos(note.getVideosJson())) {
@@ -536,6 +572,8 @@ public class NoteService {
                 Boolean.TRUE.equals(note.getTakedown()),
                 note.getTakedownReason(),
                 note.getTakedownAt(),
+                note.getMediaReviewedAt(),
+                note.getMediaReviewedBy(),
                 note.getDeleted() != null && note.getDeleted() == 1,
                 note.getCreatedAt(),
                 note.getUpdatedAt());
@@ -560,6 +598,23 @@ public class NoteService {
     }
 
     @Transactional
+    public NoteDtos.MediaReviewResponse adminMarkMediaReviewed(Long adminId, Long noteId) {
+        TravelNote note = noteMapper.selectById(noteId);
+        if (note == null) {
+            throw new BusinessException(ErrorCode.NOTE_NOT_FOUND);
+        }
+        if (note.getMediaReviewedAt() != null) {
+            return new NoteDtos.MediaReviewResponse(noteId, true, note.getMediaReviewedAt());
+        }
+        LocalDateTime now = LocalDateTime.now();
+        note.setMediaReviewedAt(now);
+        note.setMediaReviewedBy(adminId);
+        noteMapper.updateById(note);
+        auditLogService.record(adminId, "NOTE_MEDIA_REVIEW", "NOTE", noteId, Map.of(), null);
+        return new NoteDtos.MediaReviewResponse(noteId, true, now);
+    }
+
+    @Transactional
     public NoteDtos.RestoreResponse adminRestore(Long adminId, Long noteId) {
         TravelNote note = noteMapper.selectById(noteId);
         if (note == null) {
@@ -578,7 +633,8 @@ public class NoteService {
         List<String> keys = parseImages(note.getImagesJson());
         List<NoteDtos.ImageView> images = new ArrayList<>();
         for (String key : keys) {
-            images.add(new NoteDtos.ImageView(key, signUrl(key, 600)));
+            images.add(new NoteDtos.ImageView(key, signUrl(key, 600),
+                    signUrl(key + ".thumb.jpg", 600)));
         }
         List<NoteDtos.VideoView> videos = new ArrayList<>();
         for (String key : parseVideos(note.getVideosJson())) {

@@ -19,6 +19,8 @@ import java.util.regex.Pattern;
 @Service
 public class StorageCleanupService {
 
+    private static final String THUMB_SUFFIX = ".thumb.jpg";
+
     private final StorageProviderHolder storage;
     private final TravelNoteMapper travelNoteMapper;
     private final ObjectMapper objectMapper;
@@ -46,7 +48,7 @@ public class StorageCleanupService {
         for (StorageProvider.StoredObject object : objects) {
             if (object.lastModified() != null
                     && object.lastModified().isBefore(cutoff)
-                    && !referenced.contains(object.key())) {
+                    && !isReferenced(object.key(), referenced)) {
                 provider.delete(object.key());
                 deleted++;
             }
@@ -72,6 +74,15 @@ public class StorageCleanupService {
             }
         }
         return keys;
+    }
+
+    /** 缩略图本身不被游记字段引用，原图仍被引用时必须保留。 */
+    private boolean isReferenced(String key, Set<String> referenced) {
+        if (referenced.contains(key)) {
+            return true;
+        }
+        return key.endsWith(THUMB_SUFFIX)
+                && referenced.contains(key.substring(0, key.length() - THUMB_SUFFIX.length()));
     }
 
     private void collectJsonKeys(Set<String> keys, List<String> jsonValues, String column) {

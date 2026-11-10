@@ -43,7 +43,7 @@ public final class NoteDtos {
         private Visibility visibility;
     }
 
-    public record ImageView(String objectKey, String url) {
+    public record ImageView(String objectKey, String url, String thumbUrl) {
     }
 
     public record ListItem(
@@ -51,6 +51,7 @@ public final class NoteDtos {
             String title,
             String summary,
             String coverImageUrl,
+            String coverThumbUrl,
             String countryCode,
             String countryName,
             String cityCode,
@@ -114,5 +115,8 @@ public final class NoteDtos {
     }
 
     public record RestoreResponse(Long noteId, boolean takedown) {
+    }
+
+    public record MediaReviewResponse(Long noteId, boolean reviewed, LocalDateTime reviewedAt) {
     }
 }

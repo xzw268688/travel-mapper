@@ -34,11 +34,24 @@
 - **THEN** 入库标题中的敏感词被替换为 `***`，且标题长度不超过 50 字
 
 ### Requirement: Image upload presign
-系统 MUST 只为 `NOTE_IMAGE` 提供上传签名，仅接受 `image/jpeg`、`image/png`、`image/webp`，单图 ≤5MB；签名有效期 300 秒；对象 Key MUST 遵循存储规范。EXIF GPS 剥离由前端压缩阶段完成。
+
+系统 MUST 只为 `NOTE_IMAGE` 提供上传签名，仅接受 `image/jpeg`、`image/png`、`image/webp`，单图 ≤5MB；签名有效期 300 秒；对象 Key MUST 遵循存储规范。EXIF GPS 剥离由前端压缩阶段完成。系统 MUST 支持为已上传图片生成缩略图上传签名：请求携带 `thumbOf` 时，`thumbOf` MUST 属于当前用户，Key MUST 固定为 `{thumbOf}.thumb.jpg`，内容类型 MUST 为 `image/jpeg`，大小 MUST ≤512KB，签名有效期 MUST 为 300 秒；`thumbOf` 不属于当前用户或携带在视频请求中 MUST 被拒绝。
 
 #### Scenario: Valid image gets presigned URL
 - **WHEN** 用户请求上传 2MB 的 JPEG
 - **THEN** 返回 `objectKey`、300 秒有效的上传 URL、`PUT` 方法与必要请求头
+
+#### Scenario: Valid thumbnail gets presigned URL
+- **WHEN** 用户为本人已上传图片请求缩略图签名
+- **THEN** 返回以 `{thumbOf}.thumb.jpg` 结尾的对象 Key 与 300 秒有效的上传 URL
+
+#### Scenario: Thumbnail for another user's object is rejected
+- **WHEN** 请求的 `thumbOf` 不以 `note/{当前userId}/` 开头
+- **THEN** 系统返回 `2001`，不生成签名
+
+#### Scenario: Oversized thumbnail is rejected
+- **WHEN** 缩略图超过 512KB
+- **THEN** 系统返回图片大小错误，不生成签名
 
 #### Scenario: SVG is rejected
 - **WHEN** 用户请求上传 `image/svg+xml`
@@ -68,11 +81,16 @@
 - **THEN** 游记保存成功，`trip_id` 为 NULL
 
 ### Requirement: Note detail
-详情 MUST 只返回本人未删除游记；非本人或不存在的游记 MUST 统一返回 `2004`；响应 MUST 包含签名图片 URL（600 秒）、国家/城市名、`cityDisabled`、关联行程/旅行信息、分享状态和 `takedown` 标记。
+
+详情 MUST 只返回本人未删除游记；非本人或不存在的游记 MUST 统一返回 `2004`；响应 MUST 包含签名图片 URL（600 秒）、缩略图签名 URL（600 秒）、国家/城市名、`cityDisabled`、关联行程/旅行信息、分享状态和 `takedown` 标记。每张图片 MUST 同时返回原图 `url` 与 `thumbUrl`；历史图片没有缩略图对象时 MUST 仍返回 `thumbUrl`，由客户端加载失败后回退原图。
 
 #### Scenario: Owner reads note detail
 - **WHEN** 用户读取自己的游记
-- **THEN** 返回完整游记与 600 秒图片签名 URL
+- **THEN** 返回完整游记、600 秒原图签名 URL 与缩略图签名 URL
+
+#### Scenario: Thumbnail URL degrades to original
+- **WHEN** 历史游记的图片没有缩略图对象
+- **THEN** 详情仍返回 `thumbUrl`，客户端加载失败时使用原图 `url`
 
 #### Scenario: Other user's note is hidden
 - **WHEN** 用户读取他人游记
@@ -124,14 +142,15 @@
 - **THEN** 系统返回 `2024`
 
 ### Requirement: Video upload presign
-系统 MUST 支持 `NOTE_VIDEO` 上传签名，接受 `video/mp4`、`video/webm` 与 `video/quicktime`，单个视频 MUST ≤100MB；视频上传签名有效期 MUST 为 1800 秒。对象 Key MUST 遵循 `note/{userId}/{yyyy}/{MM}/{uuid}.{ext}`，扩展名仅允许 mp4、webm、mov，MUST NOT 使用用户原始文件名。MOV/HEVC 视频可能无法在部分 Android/Chrome 设备播放，前端 MUST 在视频上传说明中提示该限制。
+
+系统 MUST 支持 `NOTE_VIDEO` 上传签名，接受 `video/mp4`、`video/webm` 与 `video/quicktime`，单个视频 MUST ≤100MB；视频上传签名有效期 MUST 为 1800 秒。对象 Key MUST 遵循 `note/{userId}/{yyyy}/{MM}/{uuid}.{ext}`，扩展名仅允许 mp4、webm、mov，MUST NOT 使用用户原始文件名。系统 MUST NOT 在服务端转码视频。MOV/HEVC 视频可能无法在部分 Android/Chrome 设备播放，前端 MUST 在选择 MOV 后、上传前展示确认提示，用户取消时 MUST NOT 上传，确认后才 MUST 继续。
 
 #### Scenario: Valid video gets 30-minute presigned URL
 - **WHEN** 用户请求上传 50MB 的 MP4
 - **THEN** 返回 `objectKey`、1800 秒有效的上传 URL、`PUT` 方法与必要请求头
 
 #### Scenario: Valid MOV gets presigned URL
-- **WHEN** iPhone 用户请求上传 `video/quicktime` 的 `.mov` 视频
+- **WHEN** iPhone 用户确认提示后请求上传 `video/quicktime` 的 `.mov` 视频
 - **THEN** 系统生成以 `.mov` 结尾的 objectKey 与 1800 秒有效的上传 URL
 
 #### Scenario: Unsupported video type is rejected
@@ -147,8 +166,12 @@
 - **THEN** 有效期仍为 300 秒
 
 #### Scenario: MOV playback caveat is shown
-- **WHEN** 用户准备上传视频
+- **WHEN** 用户选择 MOV 视频准备上传
 - **THEN** 页面提示 MOV/HEVC 在部分 Android/Chrome 设备可能无法播放，建议导出 MP4 分享
+
+#### Scenario: MOV playback caveat requires confirmation
+- **WHEN** 用户选择 MOV 视频准备上传
+- **THEN** 取消确认框后不上传，确认后才继续上传
 
 ### Requirement: Note video fields and validation
 游记创建与编辑 MUST 接受 `videos`（objectKey 数组），数量 MUST ≤3；未提供时 MUST 保持原值（创建时为空）。视频 MUST 以自定义视频节点嵌入正文，保存时以相对路径 `/objects/{objectKey}` 持久化，展示/编辑时 MUST 替换为 600 秒签名 URL。`coverImage` MUST 仍只允许来自 `images`。仅包含视频、没有文字的正文 MUST 被视为有效内容。分享页与海报的视频展示不在本要求范围内。
@@ -189,7 +212,8 @@
 - **THEN** 游记正常保存，媒体字段按原顺序返回
 
 ### Requirement: Note listing and search
-本人游记页 MUST 提供按创建时间倒序的分页列表，默认每页 10 条；MUST 支持关键字匹配标题或正文纯文本摘要、按创建日期区间（`from`/`to`，闭区间）筛选。列表项 MUST 返回游记 `id`、标题、摘要、封面签名 URL、国家与城市名称、可见性、下架状态与创建时间。列表 MUST 支持直接打开与删除本人游记。页面 MUST NOT 要求用户输入游记 ID 才能打开游记。
+
+本人游记页 MUST 提供按创建时间倒序的分页列表，默认每页 10 条；MUST 支持关键字匹配标题或正文纯文本摘要、按创建日期区间（`from`/`to`，闭区间）筛选。列表项 MUST 返回游记 `id`、标题、摘要、封面原图签名 URL、封面缩略图签名 URL、国家与城市名称、可见性、下架状态与创建时间。列表 MUST 支持直接打开与删除本人游记。页面 MUST NOT 要求用户输入游记 ID 才能打开游记。封面缩略图缺失时前端 MUST 回退原图或「无封面」占位。
 
 #### Scenario: Recent notes are listed newest first
 - **WHEN** 用户打开游记页
@@ -211,9 +235,13 @@
 - **WHEN** 用户想查看已有游记
 - **THEN** 直接从列表选择，页面不出现游记 ID 输入框
 
+#### Scenario: List uses cover thumbnail
+- **WHEN** 游记封面存在缩略图对象
+- **THEN** 列表优先加载 `coverThumbUrl`，不加载原图
+
 #### Scenario: Missing cover degrades
-- **WHEN** 封面文件不存在或签名失败
-- **THEN** 列表显示「无封面」占位，不展示破图
+- **WHEN** 封面文件或缩略图不存在、签名失败
+- **THEN** 列表依次回退原图与「无封面」占位，不展示破图
 
 ### Requirement: Editor toolbar guidance
 游记编辑器工具栏的每个操作按钮 MUST 提供悬停提示，说明其用途；有条件限制的操作 MUST 在提示中说明条件（例如「AI 润色」需先选中 1–5000 字文本，「撤销/重做」在无历史时不可用）。提示 MUST NOT 依赖点击后才展示，且 MUST NOT 遮挡正文编辑区域。

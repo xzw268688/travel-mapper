@@ -3,6 +3,7 @@ import { apiDelete, apiGet, apiPost, apiPut } from './http'
 export interface NoteImage {
   objectKey: string
   url: string | null
+  thumbUrl?: string | null
 }
 
 export interface NoteCreate {
@@ -54,7 +55,9 @@ export interface SharePage {
   title: string
   summary: string
   coverImageUrl: string | null
+  coverThumbUrl: string | null
   images: string[]
+  imageThumbs: string[]
   countryCode: string
   countryName: string
   cityCode: string
@@ -74,19 +77,26 @@ export interface PresignResponse {
 export function presignUpload(
   bizType: 'NOTE_IMAGE' | 'NOTE_VIDEO',
   contentType: string,
-  size: number
+  size: number,
+  thumbOf?: string
 ): Promise<PresignResponse> {
-  return apiPost<PresignResponse>('/upload/presign', { bizType, contentType, size })
+  return apiPost<PresignResponse>('/upload/presign', {
+    bizType,
+    contentType,
+    size,
+    ...(thumbOf ? { thumbOf } : {})
+  })
 }
 
 async function uploadFile(
   file: File,
   bizType: 'NOTE_IMAGE' | 'NOTE_VIDEO',
   label: string,
-  contentTypeOverride?: string
+  contentTypeOverride?: string,
+  thumbOf?: string
 ): Promise<string> {
   const contentType = contentTypeOverride || file.type
-  const presigned = await presignUpload(bizType, contentType, file.size)
+  const presigned = await presignUpload(bizType, contentType, file.size, thumbOf)
   const response = await fetch(presigned.uploadUrl, {
     method: presigned.method || 'PUT',
     headers: presigned.headers,
@@ -102,6 +112,11 @@ export function uploadImage(file: File): Promise<string> {
   return uploadFile(file, 'NOTE_IMAGE', '图片')
 }
 
+/** 为已上传图片上传缩略图；失败不影响原图与游记保存。 */
+export function uploadImageThumbnail(file: File, originalKey: string): Promise<string> {
+  return uploadFile(file, 'NOTE_IMAGE', '缩略图', 'image/jpeg', originalKey)
+}
+
 export function uploadVideo(file: File): Promise<string> {
   // 部分 iOS 文件选择器对 .mov 返回空 MIME，按扩展名补成 video/quicktime。
   const contentType = file.type
@@ -114,6 +129,7 @@ export interface NoteListItem {
   title: string
   summary: string
   coverImageUrl: string | null
+  coverThumbUrl: string | null
   countryCode: string
   countryName: string
   cityCode: string

@@ -25,6 +25,8 @@ public record AdminNoteDetailView(
         boolean takedown,
         String takedownReason,
         LocalDateTime takedownAt,
+        LocalDateTime mediaReviewedAt,
+        Long mediaReviewedBy,
         boolean deleted,
         LocalDateTime createdAt,
         LocalDateTime updatedAt) {

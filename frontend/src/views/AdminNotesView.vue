@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getAdminNoteDetail,
   listAdminNotes,
+  markNoteMediaReviewed,
   restoreNote,
   takedownNote,
   type AdminNoteDetailView,
@@ -14,6 +15,7 @@ import { contentToPreview } from '../utils/noteContent'
 
 const keyword = ref('')
 const status = ref('')
+const mediaReview = ref('')
 const range = ref<[string, string] | null>(null)
 const page = ref(1)
 const size = ref(20)
@@ -52,6 +54,7 @@ async function load(): Promise<void> {
     const result = await listAdminNotes({
       keyword: keyword.value.trim() || undefined,
       status: status.value || undefined,
+      mediaReview: mediaReview.value || undefined,
       from: range.value?.[0],
       to: range.value?.[1],
       page: page.value,
@@ -74,8 +77,23 @@ function search(): void {
 function reset(): void {
   keyword.value = ''
   status.value = ''
+  mediaReview.value = ''
   range.value = null
   search()
+}
+
+async function markReviewed(note: { id: number }): Promise<void> {
+  acting.value = true
+  try {
+    await markNoteMediaReviewed(note.id)
+    await load()
+    await refreshDetail(note.id)
+    ElMessage.success('已标记媒体审核通过')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '标记审核失败')
+  } finally {
+    acting.value = false
+  }
 }
 
 async function openDetail(note: { id: number }): Promise<void> {
@@ -178,6 +196,10 @@ function visibilityLabel(value: string): string {
           <el-option label="正常" value="NORMAL" />
           <el-option label="已下架" value="TAKEDOWN" />
         </el-select>
+        <el-select v-model="mediaReview" placeholder="全部媒体" clearable style="width: 150px">
+          <el-option label="待审核" value="PENDING" />
+          <el-option label="已审核" value="REVIEWED" />
+        </el-select>
         <el-date-picker
           v-model="range"
           type="daterange"
@@ -208,6 +230,14 @@ function visibilityLabel(value: string): string {
           <template #default="{ row }">
             <el-tag :type="row.takenDown ? 'danger' : 'success'" size="small">
               {{ row.takenDown ? '已下架' : '正常' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="媒体审核" width="110">
+          <template #default="{ row }">
+            <span v-if="!row.hasMedia" class="meta">—</span>
+            <el-tag v-else :type="row.mediaReviewedAt ? 'success' : 'warning'" size="small">
+              {{ row.mediaReviewedAt ? '已审核' : '待审核' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -279,6 +309,16 @@ function visibilityLabel(value: string): string {
             </el-descriptions-item>
             <el-descriptions-item label="创建时间">{{ formatTime(detail.createdAt) }}</el-descriptions-item>
             <el-descriptions-item label="更新时间">{{ formatTime(detail.updatedAt) }}</el-descriptions-item>
+            <el-descriptions-item label="媒体审核">
+              <el-tag
+                v-if="detail.images.length || detail.videos.length"
+                :type="detail.mediaReviewedAt ? 'success' : 'warning'"
+                size="small"
+              >
+                {{ detail.mediaReviewedAt ? `已审核 ${formatTime(detail.mediaReviewedAt)}` : '待审核' }}
+              </el-tag>
+              <span v-else class="meta">无媒体</span>
+            </el-descriptions-item>
             <el-descriptions-item label="下架状态" :span="2">
               <el-tag :type="detail.takedown ? 'danger' : 'success'" size="small">
                 {{ detail.takedown ? '已下架' : '正常' }}
@@ -297,7 +337,7 @@ function visibilityLabel(value: string): string {
               <el-image
                 v-for="image in detail.images"
                 :key="image.objectKey"
-                :src="image.url || ''"
+                :src="image.thumbUrl || image.url || ''"
                 fit="cover"
                 style="width: 140px; height: 100px; border-radius: 6px"
               />
@@ -309,6 +349,17 @@ function visibilityLabel(value: string): string {
                 style="width: 220px; border-radius: 6px"
               />
             </div>
+            <el-button
+              v-if="!detail.mediaReviewedAt"
+              type="primary"
+              plain
+              size="small"
+              style="margin-top: 8px"
+              :loading="acting"
+              @click="markReviewed(detail)"
+            >
+              标记已审核
+            </el-button>
           </div>
 
           <div style="margin-top: 20px; display: flex; gap: 8px">

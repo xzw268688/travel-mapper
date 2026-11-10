@@ -30,6 +30,8 @@ public class TravelNote {
     private String takedownReason;
     private LocalDateTime takedownAt;
     private Long takedownBy;
+    private LocalDateTime mediaReviewedAt;
+    private Long mediaReviewedBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

@@ -425,6 +425,8 @@ CREATE TABLE `travel_note` (
   `takedown_reason` VARCHAR(255)    NULL,
   `takedown_at`     DATETIME        NULL,
   `takedown_by`     BIGINT UNSIGNED NULL,
+  `media_reviewed_at` DATETIME      NULL COMMENT '人工媒体审核时间；为空表示待审核',
+  `media_reviewed_by` BIGINT UNSIGNED NULL COMMENT '审核管理员 ID',
   `created_at`      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted`         TINYINT(1)      NOT NULL DEFAULT 0,
@@ -432,7 +434,8 @@ CREATE TABLE `travel_note` (
   KEY `idx_user_country` (`user_id`, `country_code`, `deleted`),
   KEY `idx_user_trip` (`user_id`, `trip_id`, `deleted`),
   KEY `idx_user_created` (`user_id`, `created_at`),
-  KEY `idx_takedown` (`takedown`, `deleted`)
+  KEY `idx_takedown` (`takedown`, `deleted`),
+  KEY `idx_media_review` (`media_reviewed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='游记';
 
 -- 分享令牌

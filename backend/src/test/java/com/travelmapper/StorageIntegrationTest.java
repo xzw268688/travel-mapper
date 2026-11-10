@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.net.URI;
 import java.net.URLDecoder;
@@ -33,6 +34,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -117,11 +119,15 @@ class StorageIntegrationTest extends AbstractIntegrationTest {
         String videoOrphan = "note/1/2025/06/" + UUID.randomUUID() + ".mp4";
         String videoReferenced = "note/1/2025/06/" + UUID.randomUUID() + ".mp4";
         String contentReferenced = "note/1/2025/06/" + UUID.randomUUID() + ".webm";
+        String thumbReferenced = referenced + ".thumb.jpg";
+        String thumbOrphan = orphan + ".thumb.jpg";
         upload(orphan);
         upload(referenced);
         upload(videoOrphan, "video/mp4");
         upload(videoReferenced, "video/mp4");
         upload(contentReferenced, "video/webm");
+        upload(thumbReferenced);
+        upload(thumbOrphan);
 
         TravelNote note = new TravelNote();
         note.setUserId(1L);
@@ -144,11 +150,66 @@ class StorageIntegrationTest extends AbstractIntegrationTest {
         assertThat(storageHolder.get().exists(referenced)).isTrue();
         assertThat(storageHolder.get().exists(videoReferenced)).isTrue();
         assertThat(storageHolder.get().exists(contentReferenced)).isTrue();
+        assertThat(storageHolder.get().exists(thumbReferenced)).isTrue();
+        assertThat(storageHolder.get().exists(thumbOrphan)).isFalse();
 
         travelNoteMapper.deleteById(note.getId());
         storageHolder.get().delete(referenced);
         storageHolder.get().delete(videoReferenced);
         storageHolder.get().delete(contentReferenced);
+        storageHolder.get().delete(thumbReferenced);
+    }
+
+    @Test
+    void noteResponsesExposeThumbnailUrls() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Long userId = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(MAX(id), 0) + 1000 FROM `user`", Long.class);
+        jdbcTemplate.update("INSERT INTO `user` (id, username, email, password_hash, nickname, "
+                        + "avatar_preset, role, status, email_verified, token_version, deleted) "
+                        + "VALUES (?, ?, ?, 'x', 'thumb', 'preset_01', 'USER', 'NORMAL', 1, 1, 0)",
+                userId, "thumb_" + suffix, "thumb_" + suffix + "@example.com");
+        String key = "note/" + userId + "/2025/06/" + UUID.randomUUID() + ".jpg";
+        upload(key);
+        String title = "缩略图测试_" + suffix;
+        String body = "{\"title\":\"" + title + "\",\"content\":\"<p>带缩略图的正文。</p>\","
+                + "\"images\":[\"" + key + "\"],\"coverImage\":\"" + key + "\","
+                + "\"countryCode\":\"JP\",\"cityCode\":\"TYO\",\"visibility\":\"PRIVATE\"}";
+        MvcResult created = mockMvc.perform(asUser(userId, post("/api/notes"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andReturn();
+        long noteId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(asUser(userId, org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/notes/" + noteId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.images[0].thumbUrl").value(containsString(".thumb.jpg")));
+        mockMvc.perform(asUser(userId, org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/notes"))
+                        .param("keyword", title))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].coverThumbUrl").value(containsString(".thumb.jpg")));
+
+        MvcResult share = mockMvc.perform(asUser(userId, post("/api/notes/" + noteId + "/share"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expireDays\":7}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String token = objectMapper.readTree(share.getResponse().getContentAsString())
+                .path("data").path("token").asText();
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/s/" + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.coverThumbUrl").value(containsString(".thumb.jpg")))
+                .andExpect(jsonPath("$.data.imageThumbs[0]").value(containsString(".thumb.jpg")));
+
+        jdbcTemplate.update("DELETE FROM note_share WHERE note_id = ?", noteId);
+        jdbcTemplate.update("DELETE FROM travel_note WHERE id = ?", noteId);
+        jdbcTemplate.update("DELETE FROM `user` WHERE id = ?", userId);
+        storageHolder.get().delete(key);
     }
 
     @Test
@@ -180,6 +241,32 @@ class StorageIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void presignsThumbnailForOwnImageAndRejectsOtherUsers() throws Exception {
+        String thumbOf = "note/2/2025/06/" + UUID.randomUUID() + ".jpg";
+        MvcResult result = mockMvc.perform(asUser(post("/api/upload/presign"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bizType\":\"NOTE_IMAGE\",\"contentType\":\"image/jpeg\","
+                                + "\"size\":1024,\"thumbOf\":\"" + thumbOf + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertThat(result.getResponse().getContentAsString()).contains(thumbOf + ".thumb.jpg");
+
+        mockMvc.perform(asUser(post("/api/upload/presign"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bizType\":\"NOTE_IMAGE\",\"contentType\":\"image/jpeg\","
+                                + "\"size\":1024,\"thumbOf\":\"note/999/2025/06/x.jpg\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(2001));
+
+        mockMvc.perform(asUser(post("/api/upload/presign"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bizType\":\"NOTE_IMAGE\",\"contentType\":\"image/jpeg\","
+                                + "\"size\":600000,\"thumbOf\":\"" + thumbOf + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(2019));
+    }
+
+    @Test
     void presignAcceptsQuickTimeVideoAndRejectsUnknownVideo() throws Exception {
         MvcResult quickTime = mockMvc.perform(asUser(post("/api/upload/presign"))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -193,6 +280,10 @@ class StorageIntegrationTest extends AbstractIntegrationTest {
                         .content("{\"bizType\":\"NOTE_VIDEO\",\"contentType\":\"video/x-msvideo\",\"size\":1024}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(2030));
+    }
+
+    private MockHttpServletRequestBuilder asUser(Long userId, MockHttpServletRequestBuilder builder) {
+        return builder.header("X-User-Id", String.valueOf(userId)).header("X-User-Role", "USER");
     }
 
     private void configureBucket(String bucket) {

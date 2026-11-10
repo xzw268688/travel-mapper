@@ -1980,7 +1980,8 @@ Idempotency-Key: <uuid>
 |---|---|---|
 | `bizType` | 是 | `NOTE_IMAGE` 或 `NOTE_VIDEO` |
 | `contentType` | 是 | 图片：`image/jpeg`、`image/png`、`image/webp`（**禁止 SVG**）；视频：`video/mp4`、`video/webm`、`video/quicktime`（MOV 在部分安卓/Chrome 可能无法播放） |
-| `size` | 是 | 图片 ≤ 5 MB（5242880 字节）；视频 ≤ 100 MB（104857600 字节） |
+| `size` | 是 | 图片 ≤ 5 MB（5242880 字节）；视频 ≤ 100 MB（104857600 字节）；缩略图 ≤ 512 KB |
+| `thumbOf` | 否 | 为本人已上传图片生成缩略图时传入原图 `objectKey`；Key 固定返回 `{thumbOf}.thumb.jpg`，仅允许 `image/jpeg` |
 
 **响应**
 
@@ -2002,12 +2003,14 @@ Idempotency-Key: <uuid>
 
 1. 前端调本接口拿 `uploadUrl`
 2. 前端**直接 PUT** 文件到 `uploadUrl`（带返回的 `headers`）
-3. 上传成功后，把 `objectKey` 写入游记的 `images[]` 或 `videos[]`，并在正文中插入 `/objects/{objectKey}`
+3. 图片上传成功后，可再用 `thumbOf={原图 objectKey}` 申请缩略图签名并上传 480px 小图；缩略图失败不影响原图
+4. 把 `objectKey` 写入游记的 `images[]` 或 `videos[]`，并在正文中插入 `/objects/{objectKey}`
 
 **说明**
 
-- 图片签名有效期 300 秒；视频签名有效期 1800 秒
-- 视频仅支持 mp4/webm，每篇游记最多 3 个；不做转码，浏览器直接播放原文件
+- 图片签名有效期 300 秒；视频签名有效期 1800 秒；缩略图 300 秒
+- 缩略图 Key 固定为 `{原图}.thumb.jpg`，服务端只校验归属、类型（`image/jpeg`）与大小（≤512KB），不接受任意 Key
+- 视频支持 mp4/webm/mov，每篇游记最多 3 个；不做转码，MOV 可能无法在部分安卓/Chrome 播放，前端选择 MOV 时须弹确认提示
 - 不经过后端，节省 2 核 4G 的带宽与内存
 - 前端仍应先做一次本地压缩与尺寸检查，降低失败率
 - EXIF GPS 剥离在前端压缩阶段完成（canvas 重绘天然丢失 EXIF），后端无法二次校验
@@ -2115,6 +2118,7 @@ Idempotency-Key: <uuid>
         "title": "东京散步",
         "summary": "正文前 80 字…",
         "coverImageUrl": "https://…600秒签名URL…",
+        "coverThumbUrl": "https://…缩略图600秒签名URL…",
         "countryCode": "JP",
         "countryName": "日本",
         "cityCode": "TYO",
@@ -2129,7 +2133,7 @@ Idempotency-Key: <uuid>
 }
 ```
 
-**说明**：只返回本人未删除游记；按创建时间倒序；签名 URL 不可用时 `coverImageUrl=null`。
+**说明**：只返回本人未删除游记；按创建时间倒序；签名 URL 不可用时 `coverImageUrl` / `coverThumbUrl` 为 `null`。前端优先加载 `coverThumbUrl`，失败后回退 `coverImageUrl`。
 
 ---
 
@@ -2148,7 +2152,11 @@ Idempotency-Key: <uuid>
     "title": "东京散步",
     "content": "<p>…</p>",
     "images": [
-      { "objectKey": "note/12/2025/06/a1.jpg", "url": "https://…签名URL…" }
+      {
+        "objectKey": "note/12/2025/06/a1.jpg",
+        "url": "https://…原图签名URL…",
+        "thumbUrl": "https://…缩略图签名URL…"
+      }
     ],
     "videos": [
       { "objectKey": "note/12/2025/06/c3.mp4", "url": "https://…600秒签名URL…" }
@@ -2180,7 +2188,8 @@ Idempotency-Key: <uuid>
 
 - 非本人访问返回 `2004`（不区分"不存在"与"无权"，防枚举）
 - `takedown=true` 表示已被管理员下架：本人可看、不可编辑、不可分享
-- 图片与视频 URL 均为 600 秒签名；分享页不展示视频
+- 图片与视频 URL 均为 600 秒签名；图片同时返回 `thumbUrl`（缩略图），无缩略图对象时前端回退原图
+- 分享页不展示视频
 
 **错误**：`2004`
 
@@ -2298,7 +2307,9 @@ Idempotency-Key: <uuid>
     "title": "东京散步",
     "summary": "第一天去了浅草寺，第二天去了表参道……",
     "coverImageUrl": "https://…签名URL…",
-    "images": ["https://…签名URL…"],
+    "coverThumbUrl": "https://…缩略图签名URL…",
+    "images": ["https://…原图签名URL…"],
+    "imageThumbs": ["https://…缩略图签名URL…"],
     "countryName": "日本",
     "cityName": "东京",
     "createdAt": "2025-06-08T10:00:00",
@@ -2309,7 +2320,7 @@ Idempotency-Key: <uuid>
 
 **白名单说明**
 
-**返回**：标题、摘要（纯文本前 200 字）、封面、最多 6 张图片、国家名、城市名、日期、脱敏昵称。
+**返回**：标题、摘要（纯文本前 200 字）、封面、最多 6 张图片（原图与缩略图 URL 平行返回，前端优先缩略图）、国家名、城市名、日期、脱敏昵称。
 
 **不返回**：正文全文、消费金额、`tripId`、旅行名称、用户 ID、邮箱、其他游记。
 
@@ -3480,7 +3491,7 @@ TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00,
 
 ### 12.14.1 内容列表
 
-`GET /admin/notes?keyword=东京&status=TAKEDOWN&from=2025-06-01&to=2025-06-30&page=1&size=20`
+`GET /admin/notes?keyword=东京&status=TAKEDOWN&mediaReview=PENDING&from=2025-06-01&to=2025-06-30&page=1&size=20`
 
 **查询参数**
 
@@ -3488,6 +3499,7 @@ TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00,
 |---|---|---|
 | `keyword` | 否 | 匹配标题或作者用户名/昵称 |
 | `status` | 否 | `NORMAL` / `TAKEDOWN` |
+| `mediaReview` | 否 | `PENDING`（含媒体且未审核）/ `REVIEWED`（已审核） |
 | `from` / `to` | 否 | 按创建时间筛选（`YYYY-MM-DD`） |
 
 **响应**
@@ -3513,6 +3525,8 @@ TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00,
         "visibility": "SHARED",
         "takenDown": true,
         "takedownReason": "违规内容",
+        "hasMedia": true,
+        "mediaReviewedAt": null,
         "createdAt": "2025-06-01T10:00:00",
         "updatedAt": "2025-06-02T10:00:00"
       }
@@ -3521,7 +3535,7 @@ TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00,
 }
 ```
 
-**说明**：只返回元信息，不返回正文；按创建时间倒序。
+**说明**：只返回元信息，不返回正文；按创建时间倒序。`hasMedia` 表示含图片或视频；`mediaReviewedAt` 为空表示待审核。
 
 ---
 
@@ -3627,6 +3641,33 @@ TM-A1B2-C3D4-E5F6,AI_QUOTA,100,2026-12-31 23:59:59,UNUSED,2025-06-01 10:00:00,
 
 - 恢复后本人可正常编辑
 - **原分享令牌仍然失效**，需用户重新生成分享（与设计文档 7.12 一致）
+
+---
+
+### 12.16.1 标记媒体已审核
+
+`PUT /admin/notes/{id}/media-review` ｜ 管理员
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "noteId": 11,
+    "reviewed": true,
+    "reviewedAt": "2025-06-02T10:00:00"
+  }
+}
+```
+
+**说明**
+
+- 采用「先发后审」：含媒体的游记创建后立即发布，同时进入 `PENDING` 列表
+- 标记后记录审核管理员与时间，写审计日志 `NOTE_MEDIA_REVIEW`
+- 编辑游记导致 `images` / `videos` 实际变化时，审核状态重置为待审核
+- 重复标记已审核幂等成功；不含媒体的游记不进入待审核列表
 
 **错误**：`2004`
 
@@ -4485,6 +4526,7 @@ location /api/ai/polish/stream {
 | 后台 | PUT | `/admin/notes/{id}/takedown` | 管理员 | — |
 | 后台 | DELETE | `/admin/cities/{id}` | 管理员 | — |
 | 后台 | PUT | `/admin/notes/{id}/restore` | 管理员 | — |
+| 后台 | PUT | `/admin/notes/{id}/media-review` | 管理员 | — |
 | 后台 | GET | `/admin/audit` | 管理员 | `action` / `userId` / `actorRole` / `targetType` / `from` / `to` / `page` / `size` |
 | 后台 | GET | `/admin/login-logs` | 管理员 | `username` / `userId` / `role` / `success` / `from` / `to` / `page` / `size` |
 | 后台 | GET/POST | `/admin/announcements` | 管理员 | 列表 `status` / `type` / `keyword` / `page` / `size` |

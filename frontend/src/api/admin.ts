@@ -202,6 +202,8 @@ export interface AdminNoteView {
   visibility: string
   takenDown: boolean
   takedownReason: string | null
+  hasMedia: boolean
+  mediaReviewedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -307,6 +309,12 @@ export function listCardRedemptions(
 
 export function listAdminNotes(params: Record<string, unknown>): Promise<PageResult<AdminNoteView>> {
   return apiGet<PageResult<AdminNoteView>>('/admin/notes', params)
+}
+
+export function markNoteMediaReviewed(
+  id: number
+): Promise<{ noteId: number; reviewed: boolean; reviewedAt: string }> {
+  return apiPut(`/admin/notes/${id}/media-review`, {})
 }
 
 export function listAuditLogs(params: Record<string, unknown>): Promise<PageResult<AdminAuditView>> {
@@ -474,6 +482,7 @@ export function updateAdminFeedback(
 export interface AdminNoteImageView {
   objectKey: string
   url: string | null
+  thumbUrl?: string | null
 }
 
 export interface AdminNoteDetailView {
@@ -496,6 +505,8 @@ export interface AdminNoteDetailView {
   takedown: boolean
   takedownReason: string | null
   takedownAt: string | null
+  mediaReviewedAt: string | null
+  mediaReviewedBy: number | null
   deleted: boolean
   createdAt: string
   updatedAt: string

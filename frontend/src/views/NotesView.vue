@@ -26,6 +26,7 @@ const page = ref(1)
 const pageSize = 10
 const loadingNotes = ref(false)
 const failedCovers = ref(new Set<number>())
+const failedThumbs = ref(new Set<number>())
 
 onMounted(() => {
   void loadNotes()
@@ -59,8 +60,22 @@ function resetSearch(): void {
   void loadNotes(true)
 }
 
-function markCoverFailed(id: number): void {
-  failedCovers.value.add(id)
+function coverSrc(item: NoteListItem): string {
+  if (failedCovers.value.has(item.id)) {
+    return ''
+  }
+  if (failedThumbs.value.has(item.id)) {
+    return item.coverImageUrl || ''
+  }
+  return item.coverThumbUrl || item.coverImageUrl || ''
+}
+
+function markCoverFailed(item: NoteListItem): void {
+  if (!failedThumbs.value.has(item.id) && item.coverThumbUrl) {
+    failedThumbs.value.add(item.id)
+    return
+  }
+  failedCovers.value.add(item.id)
 }
 
 function formatDate(value: string): string {
@@ -172,11 +187,11 @@ async function save(): Promise<void> {
         <el-empty v-if="!loadingNotes && notes.length === 0" description="还没有游记，先在下方发布一篇吧" />
         <div v-for="item in notes" :key="item.id" class="note-row">
           <img
-            v-if="item.coverImageUrl && !failedCovers.has(item.id)"
-            :src="item.coverImageUrl"
+            v-if="coverSrc(item)"
+            :src="coverSrc(item)"
             class="note-cover"
             alt=""
-            @error="markCoverFailed(item.id)"
+            @error="markCoverFailed(item)"
           />
           <div v-else class="note-cover note-cover-empty">无封面</div>
           <div class="note-main">

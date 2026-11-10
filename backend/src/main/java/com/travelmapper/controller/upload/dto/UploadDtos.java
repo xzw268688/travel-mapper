@@ -20,6 +20,8 @@ public final class UploadDtos {
         private String contentType;
         @NotNull
         private Long size;
+        /** 为已上传图片生成缩略图时传入原图 objectKey。 */
+        private String thumbOf;
     }
 
     public record PresignResponse(

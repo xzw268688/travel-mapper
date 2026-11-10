@@ -14,6 +14,8 @@ public record AdminNoteView(
         String visibility,
         boolean takenDown,
         String takedownReason,
+        boolean hasMedia,
+        LocalDateTime mediaReviewedAt,
         LocalDateTime createdAt,
         LocalDateTime updatedAt) {
 }

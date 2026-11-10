@@ -2,6 +2,15 @@
  * Canvas re-draw both compresses the image and drops EXIF metadata (including GPS).
  */
 export async function compressImage(file: File, maxWidth = 1600, quality = 0.85): Promise<File> {
+  return renderJpeg(file, maxWidth, quality)
+}
+
+/** 列表/分享页使用的小图，控制在 480px 内，显著降低移动端流量。 */
+export async function createThumbnail(file: File, maxWidth = 480, quality = 0.8): Promise<File> {
+  return renderJpeg(file, maxWidth, quality)
+}
+
+async function renderJpeg(file: File, maxWidth: number, quality: number): Promise<File> {
   if (!file.type.startsWith('image/')) {
     throw new Error('请选择图片文件')
   }

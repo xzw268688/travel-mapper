@@ -35,6 +35,7 @@ public class AdminNoteController {
     public ApiResponse<PageResult<AdminNoteView>> list(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) String mediaReview,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(defaultValue = "1") int page,
@@ -42,7 +43,8 @@ public class AdminNoteController {
         PageRequest request = new PageRequest();
         request.setPage(page);
         request.setSize(size);
-        return ApiResponse.ok(noteService.adminList(keyword, status, from, to, request));
+        return ApiResponse.ok(noteService.adminList(
+                keyword, status, mediaReview, from, to, request));
     }
 
     @GetMapping("/{id}")
@@ -60,5 +62,10 @@ public class AdminNoteController {
     @PutMapping("/{id}/restore")
     public ApiResponse<NoteDtos.RestoreResponse> restore(@PathVariable Long id) {
         return ApiResponse.ok(noteService.adminRestore(CurrentUser.id(), id));
+    }
+
+    @PutMapping("/{id}/media-review")
+    public ApiResponse<NoteDtos.MediaReviewResponse> mediaReview(@PathVariable Long id) {
+        return ApiResponse.ok(noteService.adminMarkMediaReviewed(CurrentUser.id(), id));
     }
 }
