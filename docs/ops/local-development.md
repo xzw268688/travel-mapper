@@ -251,10 +251,10 @@ E2E_BACKEND_LOG='D:/path/to/backend.log' E2E_PREVIEW=1 npm run test:e2e  # 生�
 
 - `ci.yml`：在 PR 与推送 `main`、`release/**` 时运行。
   - `Backend unit tests`：`mvn test`（只跑单元测试）。
-  - `Backend integration tests`：`mvn verify`（Testcontainers；GitHub 托管 runner 自带 Docker）。
+  - `Backend integration tests`：`mvn verify`（外部容器模式；runner 上的 MySQL/Redis/S3Mock service containers 提供依赖，避开 Docker 29 与 Testcontainers 的 API 协商问题）。
   - `Timezone matrix (UTC host and DB)`：`TZ=UTC` + `-Duser.timezone=UTC` + MySQL 默认 UTC，运行时区核心集成测试。
   - `Frontend checks`：`npm ci`、Vitest 覆盖率、`vue-tsc` + 生产构建、体积预算。
-  - `CI gate`：汇总以上三个 job，任一失败则整体失败；建议作为分支保护的必需检查。
+  - `CI gate`：汇总以上四个 job，任一失败则整体失败；建议作为分支保护的必需检查。
 - `e2e-nightly.yml`：每日 02:17（北京时间）与手动触发。启动 MySQL/Redis/MinIO，构建后端 jar 与前端生产包，以 `vite preview` 运行 Playwright；失败时上传 `playwright-report`、`test-results` 与后端日志。
 
 PR 合并前应确保 `CI gate` 绿灯。首次配置分支保护：GitHub 仓库 → Settings → Branches → Add branch protection rule，对 `main` 与 `release/*` 勾选 “Require status checks to pass before merging”，并选择 `CI gate`。
