@@ -156,14 +156,14 @@ docker exec nginx nginx -s reload
 
 公网 TLS 由 Cloudflare 终止，**不需要 certbot 和 443**：
 
-- Cloudflare Tunnel 的公共主机名 `xuzhiwei.icu` 回源到 `http://nginx:80`（compose 内网）或 `http://127.0.0.1:8080`
+- Cloudflare Tunnel 的公共主机名 `example.com` 回源到 `http://nginx:80`（compose 内网）或 `http://127.0.0.1:8080`
 - Nginx 继续用宿主 `8080:80` 映射，保持不变
 - 安全组只需放行 SSH（22）；Cloudflare Tunnel 是出站连接，不需要对外开放 80/443
 - 如果 Cloudflare 开启了「Authenticated Origin Pull」或 WAF，确认放行 API 与 SSE 路径
 
 ## 后台配置（首次登录后）
 
-登录 `https://xuzhiwei.icu/admin/login`，在「配置」里完成：
+登录 `https://example.com/admin/login`，在「配置」里完成：
 
 1. **对象存储**：填阿里云 OSS 的 S3 兼容 endpoint、region、bucket、AccessKey/SecretKey。
    OSS Bucket 需配置 CORS：允许站点域名 `PUT`、`GET`、`HEAD`，否则前端直传会被浏览器拦截。
@@ -216,7 +216,7 @@ ssh root@<server> "cd /root/my-docker-apps && ./scripts/backup.sh"
 
 ## 验收清单
 
-- [ ] `https://xuzhiwei.icu` 打开前端，刷新任意路由不 404
+- [ ] `https://example.com` 打开前端，刷新任意路由不 404
 - [ ] 注册能收到验证码，SMTP 日志无 `verification email send failed`
 - [ ] 登录 / 后台配置页可访问，`/api/admin/**` 未登录返回 403
 - [ ] AI 规划或文案润色有流式输出（SSE 正常）
