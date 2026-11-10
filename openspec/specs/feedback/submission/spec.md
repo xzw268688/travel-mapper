@@ -29,7 +29,7 @@
 - **THEN** 系统返回 `1006`，不保存任何数据
 
 ### Requirement: Daily submission limit
-同一用户 MUST 在每个自然日（服务器本地时区）内最多成功提交 5 条反馈。超过上限的提交 MUST 被拒绝且不落库，返回 `5004`（HTTP 429）。
+同一用户 MUST 在每个北京时间自然日（Asia/Shanghai）内最多成功提交 5 条反馈。超过上限的提交 MUST 被拒绝且不落库，返回 `5004`（HTTP 429）。
 
 #### Scenario: Fifth submission succeeds
 - **WHEN** 用户当天已提交 4 条反馈并提交第 5 条
@@ -42,6 +42,10 @@
 #### Scenario: Limit resets next day
 - **WHEN** 进入下一个自然日后用户再次提交
 - **THEN** 该次提交不受前一日计数影响
+
+#### Scenario: Limit resets at Beijing midnight
+- **WHEN** 北京时间跨过零点后用户再次提交，而服务器 JVM 默认时区为 UTC
+- **THEN** 该次提交不受前一日计数影响，立即按新的一天计数
 
 ### Requirement: Own feedback history
 用户 MUST 能分页查看本人提交的反馈，按创建时间倒序返回。列表项 MUST 包含分类、标题、正文、联系方式、状态、创建时间与更新时间；MUST NOT 包含管理员内部备注或处理人信息。查询 MUST 严格限定为当前登录用户的数据。

@@ -40,4 +40,4 @@
 - [x] 6.1 更新 `TravelMapper DB V1.0.md`、`TravelMapper API V1.0.md` 的时间口径说明（北京时间墙钟、无时区格式、按天边界）；验证与实现一致
 - [x] 6.2 在 `docs/ops/local-development.md` 记录开发库旧数据不迁移、可重置的说明；验证文档命令可执行
 - [x] 6.3 运行 `openspec validate unify-beijing-timezone-handling --strict` 通过
-- [ ] 6.4 运行后端单测、外部容器模式集成测试、UTC 矩阵与前端单测/构建，确认全绿并在 PR 中记录结果
+- [x] 6.4 运行后端单测、外部容器模式集成测试、UTC 矩阵与前端单测/构建，确认全绿并在 PR 中记录结果（2026-11-10：本地外部容器全量 181 个集成测试通过；CI `0b05610` 五个 job 全绿）

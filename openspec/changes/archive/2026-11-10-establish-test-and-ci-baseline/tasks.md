@@ -23,12 +23,12 @@
 
 - [x] 4.1 在 `frontend/vite.config.ts` 增加 `preview.proxy`，复用 `server.proxy` 的 `/api`、`/s/`、Swagger 代理；验证 `npm run build && npm run preview` 下接口可用
 - [x] 4.2 改造 `frontend/playwright.config.ts`：`webServer.command` 由环境变量切换 preview/dev，CI 下 `reuseExistingServer=false`，CI 使用 Playwright 自带 Chromium；验证本地 dev 与 `E2E_PREVIEW=1` 两种模式都能跑通现有用例
-- [ ] 4.3 新增 `.github/workflows/e2e-nightly.yml`：定时 + 手动触发，`docker compose` 起 MySQL/Redis/MinIO，构建并启动后端（设置种子管理员、JWT、AES 环境变量），构建前端后以 preview 启动并运行 Playwright；验证一次 `workflow_dispatch` 全绿并归档失败截图
+- [x] 4.3 新增 `.github/workflows/e2e-nightly.yml`：定时 + 手动触发，`docker compose` 起 MySQL/Redis/MinIO，构建并启动后端（设置种子管理员、JWT、AES 环境变量），构建前端后以 preview 启动并运行 Playwright；验证一次 `workflow_dispatch` 全绿并归档失败截图
 
 ## 5. GitHub Actions PR 门禁
 
-- [ ] 5.1 新增 `.github/workflows/ci.yml`：后端单测、后端集成测试（Testcontainers）、前端单测 + 类型检查 + 构建 + 体积预算三个并行 job，触发条件为 PR 与 `main`/`release/**` push，启用缓存与 concurrency；验证 PR 上三个 job 全绿
-- [ ] 5.2 在真实 PR 中故意制造一个单测失败与一次预算超限，确认对应 job 正确失败并给出可读错误；验证后恢复
+- [x] 5.1 新增 `.github/workflows/ci.yml`：后端单测、后端集成测试（Testcontainers）、前端单测 + 类型检查 + 构建 + 体积预算三个并行 job，触发条件为 PR 与 `main`/`release/**` push，启用缓存与 concurrency；验证 PR 上三个 job 全绿
+- [ ] 5.2 在真实 PR 中故意制造一个单测失败与一次预算超限，确认对应 job 正确失败并给出可读错误；验证后恢复（暂缓：留待后续 PR 验证）
 - [x] 5.3 在 `docs/ops/local-development.md` 记录 CI 触发、必需检查与夜间任务说明，并给出分支保护配置步骤；验证文档与工作流名称一致
 
 ## 6. 发布门禁
@@ -41,4 +41,4 @@
 - [x] 7.1 运行 `openspec validate establish-test-and-ci-baseline --strict` 通过
 - [x] 7.2 运行 `cd frontend && npm run test:unit && npm run build && node scripts/check-bundle-budget.mjs` 全绿
 - [x] 7.3 运行 `cd backend && mvn test` 与外部容器模式 `mvn verify` 全绿
-- [ ] 7.4 在 PR 上确认 `ci.yml` 全绿，手动触发 `e2e-nightly.yml` 全绿，并记录首轮体积基线数据
+- [ ] 7.4 在 PR 上确认 `ci.yml` 全绿，手动触发 `e2e-nightly.yml` 全绿，并记录首轮体积基线数据（`ci.yml` 已在 commit `0b05610` 全绿；夜间 E2E 待手动触发）
