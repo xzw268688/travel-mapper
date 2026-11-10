@@ -175,17 +175,53 @@ docker exec nginx nginx -s reload
 
 ## 日常发布
 
+**配置只存一次，发布只替换运行产物**，不需要每次重新配置：
+
+| 配置 | 存放位置 | 发布时是否变化 |
+|---|---|---|
+| 密钥、DB、Tunnel token | 服务器 `/root/my-docker-apps/.env` | 不变（只在密钥轮换时手动改） |
+| OSS / SMTP / LLM / 搜索 / 告警 | MySQL `sys_config`（数据卷） | 不变 |
+| 业务数据 | MySQL / Redis 数据卷 | 不变 |
+| 容器编排、Nginx | `docker-compose.yml`、`nginx-conf/` | 不变（只有基础设施调整才改） |
+| 后端 jar、前端 dist | `java-app/app.jar`、`nginx-html/` | **每次发布替换** |
+
+一条命令发布：
+
 ```bash
 REMOTE=root@<server> ./deploy/release.sh
 ```
 
-脚本依次：本地 `mvn package` → `npm run build` → 上传 jar 与 dist → `docker compose up -d --build java-app` → 等待 healthcheck。
+脚本流程：
 
-发布前建议先备份：
+1. 校验当前 commit 的 CI 必须为绿（`SKIP_CI_CHECK=1` 可跳过，仅限紧急情况）
+2. 本地 `mvn package` + `npm run build`（服务器不构建）
+3. 服务器端备份：当前 jar、前端 dist、数据库 dump 各存一份到 `releases/`，各保留 3 份
+4. 上传 jar 和 dist，只重建 `java-app`
+5. 等待 healthcheck 变 healthy
+
+数据库迁移由 Flyway 在应用启动时自动执行，不需要手工跑 SQL。
+
+### 回滚
 
 ```bash
-ssh root@<server> "cd /root/my-docker-apps && ./scripts/backup.sh"
+ssh root@<server> "cd /root/my-docker-apps && ls releases/"
+ssh root@<server> "cd /root/my-docker-apps && bash rollback.sh <timestamp>"
 ```
+
+`rollback.sh` 会恢复对应版本的 jar 和前端并重建 `java-app`。数据库默认不自动回滚；需要时按脚本末尾提示单独恢复。
+
+### 什么时候才需要登录服务器
+
+- 修改 `.env`（密钥、数据库密码、Cloudflare token）
+- 修改 `docker-compose.yml` 或 Nginx 配置
+- 数据库迁移失败、容器 OOM、磁盘清理
+- 首次配置或更换云服务
+
+### 不要做的事
+
+- 不要执行 `docker compose down`：会停掉 MySQL/Redis/Cloudflare Tunnel（数据不丢，但站点会中断）
+- 不要删除 `mysql-data` / `redis-data` 卷
+- 不要在服务器上跑 `mvn` / `npm`：2GB 内存会被构建过程打满
 
 ## 备份与恢复
 
