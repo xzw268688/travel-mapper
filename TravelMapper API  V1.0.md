@@ -2806,6 +2806,33 @@ Idempotency-Key: 0b5c8e41-2f3a-4d5b-9c6e-7f8a9b0c1d2e
 
 ---
 
+### 12.3.1 OSS 连接测试
+
+`POST /admin/config/oss/test` ｜ 管理员
+
+**请求**：字段同 12.3（`provider`、`endpoint`、`region`、`bucket`、`accessKey`、`secretKey`、`pathStyle`、`publicDomain`）。
+留空字段使用已保存配置；`accessKey` / `secretKey` 留空时同样复用已保存值。
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "ok": true,
+    "latencyMs": 128,
+    "message": "bucket 可访问"
+  }
+}
+```
+
+**说明**：同步探测对象存储连通性与 bucket 权限，不落库；超时或凭据错误返回 `ok=false`，`message` 给出原因。
+
+**错误**：`4002`
+
+---
+
 ### 12.4 搜索配置
 
 `GET /admin/config/search` ｜ `PUT /admin/config/search`
@@ -2882,6 +2909,36 @@ Idempotency-Key: 0b5c8e41-2f3a-4d5b-9c6e-7f8a9b0c1d2e
 - `from` 的域名需在邮件服务商完成验证（如 Resend 的 SPF/DKIM），否则登录认证通过但发信会被拒绝
 
 **错误**：`2001`（启用时缺主机/发件人非法/端口越界）、`4002`
+
+---
+
+### 12.4.3 故障提醒（飞书 Webhook）配置
+
+`GET /admin/config/alert` ｜ `PUT /admin/config/alert` ｜ `POST /admin/config/alert/test`
+
+**响应**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "enabled": true,
+    "webhookUrl": "https://open.feishu.cn/open-apis/bot/v2/hook/****",
+    "minIntervalSeconds": 300
+  }
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `enabled` | 是否启用故障提醒 |
+| `webhookUrl` | 飞书机器人 Webhook；AES 加密存储，读取掩码，PUT 留空保留原值 |
+| `minIntervalSeconds` | 同类提醒最小间隔秒，范围 1–3600 |
+
+**测试**：`POST /admin/config/alert/test` 需先启用并保存 Webhook，成功返回 `{ "sent": true }`；失败返回 `2001`。
+
+**错误**：`2001`（未启用、地址为空、地址非法或发送失败）、`4002`
 
 ---
 
@@ -4496,6 +4553,9 @@ location /api/ai/polish/stream {
 | 后台 | GET/PUT | `/admin/config/oss` | 管理员 | — |
 | 后台 | GET/PUT | `/admin/config/search` | 管理员 | — |
 | 后台 | GET/PUT | `/admin/config/mail` | 管理员 | — |
+| 后台 | POST | `/admin/config/oss/test` | 管理员 | 连接测试 |
+| 后台 | GET/PUT | `/admin/config/alert` | 管理员 | 飞书 Webhook |
+| 后台 | POST | `/admin/config/alert/test` | 管理员 | 发送测试消息 |
 | 后台 | POST | `/admin/cards/generate` | 管理员 | — |
 | 后台 | GET | `/admin/cards` | 管理员 | — |
 | 后台 | GET | `/admin/cards/export` | 管理员 | — |
@@ -4592,6 +4652,7 @@ location /api/ai/polish/stream {
 
 | 版本 | 修订内容 | 原因 |
 |---|---|---|
+| V1.12 存储与告警配置 | 新增 `POST /admin/config/oss/test` 连接测试、`GET/PUT /admin/config/alert` 与 `POST /admin/config/alert/test` 故障提醒配置；媒体缩略图沿用 `<objectKey>.thumb.jpg` 派生规则 | 对象存储可配置性验证与运行故障提醒（change: storage-connection-test / alert-webhook） |
 | V1.11 监控与公告 | 新增 `/admin/monitor/**` 监控接口、`/admin/announcements/**` 公告管理与 `/announcements/**` 用户公告；新增错误码 `2034`；操作日志新增 `USER_KICK`、`CACHE_CLEAR` 与 `ANNOUNCEMENT_*` | 管理端可观测与用户通知（change: admin-monitoring / announcements） |
 | V1.10 用户操作日志 | `GET /admin/audit` 增加 `actorRole` 筛选与 `actorRole` 响应字段；旅行/行程/游记/消费/清单/资料/反馈等用户操作写入 `audit_log` | 管理员可查看用户操作（change: admin-log-management） |
 | V1.9 日志管理 | 新增 `GET /admin/login-logs`；登录接口记录成功/失败登录日志；后台「审计日志」升级为「日志管理」（操作日志 + 登录日志两个页签） | 账号安全追溯（change: admin-log-management） |

@@ -54,7 +54,7 @@ Flyway 会自动建表并写入种子数据；`V4__more_cities.sql` 额外预置
 - Swagger UI：`http://localhost:8080/swagger-ui.html`
 - 预置管理员：`admin` / `Admin@123456`（生产首次部署必须修改）
 
-`.env` 必须包含 `TRAVELMAPPER_JWT_SECRET`（至少 32 字节）。change-02 起认证使用 JWT：
+`.env` 必须包含 `TRAVELMAPPER_JWT_SECRET`（至少 32 字节）。认证使用 JWT：
 
 ```bash
 # 登录（管理员）
@@ -131,12 +131,13 @@ npm run dev
 - `/` 世界地图：三态着色、悬浮计数、点击国家打开旅行/城市抽屉。
 - `/plan` 行程规划：AI 生成 / 手动规划切换、草稿微调（天/景点增删改排、跨天移动）、保存、清单/官方链接。
 - `/itineraries/:id` 已保存行程编辑：基本信息、景点/天 CRUD、重新生成与合并提示；地图抽屉可进入，保存/删除/重新生成后地图统计自动刷新。
+- `/trips/:id` 旅行详情：状态时间线、关联行程/游记/消费；可手动标记状态或恢复按日期自动推导。
 - `/notes` 游记：TipTap 图文/视频编辑器（粘贴/拖拽上传、压缩、直传）、编辑器内选中文本 AI 流式润色、保存并跳转详情。
 - `/notes/:id` 游记详情/编辑：可见性、关联旅行、封面、分享管理、下架状态；也可在 `/notes` 按 ID 打开。
 - `/poster/:id?` 游记海报：确保分享令牌、地图足迹 Canvas 连线、统计、二维码与 PNG 下载。
 - `/expenses` 记账：新增/编辑/删除、筛选、分页、快捷录入与金额表达式、「明细 / 按日期」切换、月度合计、按国家/城市/旅行/日期汇总与图表。
 - `/profile` 个人中心：昵称/头像、额度、卡密兑换、注销；`/forgot-password`、`/reset-password` 找回密码。
-- 导航“管理”菜单（ADMIN）：用户、卡密、城市、内容管理、反馈、举报、汇率、通知公告与日志管理（操作日志 / 登录日志）；另有「配置」与「监控」菜单（在线用户、服务/数据库/缓存/存储监控、接口文档）。地图首页会展示当前生效公告的横幅。
+- 导航“管理”菜单（ADMIN）：用户、卡密、城市、内容管理、官方链接、反馈、举报、汇率、通知公告与日志管理（操作日志 / 登录日志）；另有「配置」与「监控」菜单（在线用户、服务/数据库/缓存/存储监控、接口文档）。地图首页会展示当前生效公告的横幅。
 - `/admin/settings` 管理员 LLM/搜索配置：填写 OpenAI 兼容 Base URL、模型与 API Key；Key 留空会保留原 Key。生成行程提示 `2012` 或 HTTP 503 时先检查这里。
 - `/share/:token` 公开只读分享页；分享链接与海报二维码均指向该路由。后端 API 返回的 `share.url` 仍是 `/s/{token}`（契约字段），前端展示与二维码统一使用 `/share/{token}`。
 - 开发环境预置管理员 `admin / Admin@123456`；管理员登录后导航栏显示“汇率”“内容管理”。
@@ -148,7 +149,7 @@ npm run dev
 
 ## 配置中心（开发期身份头）
 
-change-01 尚未包含 JWT，后台接口通过临时开发头识别管理员；change-02 会替换为 JWT。
+本地默认 `SPRING_PROFILES_ACTIVE=local`，`application-local.yml` 开启 `admin-stub-enabled` 与 `allow-insecure-dev-stub`，可用 `X-User-Id` / `X-User-Role` 直接访问后台配置接口，便于调试。
 
 ```bash
 curl -H 'X-User-Id: 1' -H 'X-User-Role: ADMIN' \

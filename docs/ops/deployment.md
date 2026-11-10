@@ -10,7 +10,7 @@ Internet
        └─ nginx:80（宿主 8080:80）
             ├─ /                → nginx-html/（Vue 构建产物，容器内 /usr/share/nginx/html）
             ├─ /api/            → java-app:8080
-            ├─ /s/<token>       → java-app:8080（分享页）
+            ├─ /s/<token>       → java-app:8080（分享 API）
             └─ SSE              → /api/ai/polish/stream、/api/country-guide/stream
 
 web-net 内网：
@@ -221,7 +221,7 @@ ssh root@<server> "cd /root/my-docker-apps && ./scripts/backup.sh"
 - [ ] 登录 / 后台配置页可访问，`/api/admin/**` 未登录返回 403
 - [ ] AI 规划或文案润色有流式输出（SSE 正常）
 - [ ] 上传图片成功后能在游记中显示（OSS 直传 + CORS）
-- [ ] 分享链接 `/s/<token>` 可打开
+- [ ] 分享页面 `/share/<token>` 可打开；`/s/<token>` 返回 JSON（分享 API）
 - [ ] `docker compose ps` 全部 healthy
 - [ ] `/actuator/*`、`/swagger-ui/*`、`/v3/api-docs/*` 对外 404（生产 profile 已禁用 springdoc，不要配置反代）
 - [ ] 备份 cron 已执行且 OSS 上有加密文件

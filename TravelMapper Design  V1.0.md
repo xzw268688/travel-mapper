@@ -37,7 +37,7 @@
 | 后端框架 | SpringBoot 3 + Java 17 | 单体应用，不采用微服务 |
 | 数据访问 | MyBatis-Plus + 手写复杂 SQL | 简单 CRUD 用 MP，复杂统计手写 SQL/XML |
 | 代码简化 | Lombok | 减少样板代码 |
-| LLM 接入 | LangChain4j 作为 `LlmProvider` 实现之一 | 业务层不直接依赖 |
+| LLM 接入 | OpenAI 兼容 HTTP 适配器（保留 `LlmProvider` 接口） | 业务层不直接依赖；LangChain4j 可作为后续实现替换 |
 | 数据库 | MySQL 8.0 | 主数据存储 |
 | 缓存/锁 | Redis 7 | 额度计数、卡密幂等键、guides 缓存、preparations 缓存、取消标志、分布式锁、用户状态缓存 |
 | 对象存储 | 云 OSS（生产）/ MinIO（本地） | 按 S3 兼容协议抽象，见 4.1 |
@@ -92,6 +92,8 @@
                   └─────────────────┘
 ```
 
+> **时间约定**：全系统固定北京时间。数据库存无时区 `DATETIME` 墙钟；后端“现在/今天”统一由固定 `Asia/Shanghai` 的 `TimeProvider` 计算；前端只做格式化，不做时区转换。
+
 ---
 
 ## 3. 核心 ER 图（表结构概要）
@@ -126,7 +128,7 @@
 | 表 | 关键字段 | 说明 |
 |---|---|---|
 | `country_official_link` | id, country_code, title, url, sort_order | 管理员维护的国家-官方链接映射 |
-| `trip_checklist` | id, user_id, country_code, itinerary_id, item_key, checked, deleted | 固定 7 项清单，唯一键 `(user_id, country_code, itinerary_id, item_key)` |
+| `trip_checklist` | id, user_id, country_code, itinerary_id, item_key, checked, title, description, days_before, sort_order, custom, deleted | 默认 10 项 + 自定义项；唯一键 `(user_id, itinerary_id, item_key)` |
 
 ### 3.5 游记与分享
 
@@ -171,8 +173,12 @@
 | 记账 | 多币种、汇率快照、多维度汇总 | expense、exchange_rate |
 | 海报 | 前端 DOM 截图 + Canvas 连线图 + 二维码 | 前端资源、/api/map/stats、分享令牌 |
 | 卡密与额度 | 卡密生成/兑换、额度扣减、幂等、生成去重、取消标志 | card_key、quota_pack、quota_ledger、Redis |
+| 账号安全 | TOTP 二次验证、恢复码、改密/改邮箱、退出所有设备、注销 | user、user_recovery_code、Redis |
+| 内容治理 | 游客举报、媒体审核、下架/恢复 | note_report、travel_note、audit_log |
+| 运营 | 通知公告、用户反馈、登录日志 | announcement、announcement_read、feedback、login_log |
+| 监控与告警 | 在线用户、服务/数据库/缓存/存储快照、飞书故障提醒、数据保留清理 | Redis、OSHI、sys_config、audit_log、login_log |
 | 后台管理 | 配置、用户、内容、汇率、城市、官方链接 | sys_config、user、city、country_official_link、audit_log |
-| 通用能力 | 存储抽象、搜索抽象、审计、限流、异常、日志脱敏 | 全局 |
+| 通用能力 | 存储抽象、搜索抽象、审计、限流、异常、日志脱敏、固定北京时间 | 全局 |
 
 ### 4.1 存储抽象接口
 
@@ -370,6 +376,15 @@ record GuideLink(
 | GET/PUT | `/api/admin/exchange-rates` | 汇率维护（**新增币种时回填历史 NULL 快照**，见 7.15） |
 | PUT | `/api/admin/notes/{id}/takedown` | 内容下架（同时撤销全部分享令牌） |
 | PUT | `/api/admin/notes/{id}/restore` | 内容恢复（原分享令牌仍失效，需重新生成） |
+| PUT | `/api/admin/notes/{id}/media-review` | 标记媒体已审核 |
+| GET | `/api/admin/feedback` | 反馈列表（统计/详情/更新见接口文档 12.18–12.21） |
+| GET | `/api/admin/reports` | 举报列表（统计/详情/采纳/驳回见接口文档 12.22–12.26） |
+| GET/POST | `/api/admin/announcements` | 公告列表 / 新建（发布、下线、删除见接口文档 12.28） |
+| GET | `/api/admin/login-logs` | 登录日志 |
+| GET | `/api/admin/monitor/online-users` | 在线用户（服务/数据库/缓存/存储快照见接口文档 12.29） |
+| GET/PUT | `/api/admin/config/mail` | 邮件 SMTP 配置 |
+| GET/PUT | `/api/admin/config/alert` | 飞书故障提醒配置；`POST /api/admin/config/alert/test` 发送测试消息 |
+| POST | `/api/admin/config/oss/test` | OSS 连接测试 |
 
 ---
 
@@ -803,7 +818,7 @@ Provider 获取方式：
 ```
 数据来源：
   ├─ preparations：随 AI 行程生成，存 itinerary.preparations_json
-  ├─ 清单：固定 7 项枚举（VISA/FLIGHT/HOTEL/INSURANCE/CURRENCY/PLUG/SIM）
+  ├─ 清单：默认 10 项枚举（VISA/FLIGHT/HOTEL/INSURANCE/SIM/CURRENCY/PLUG/APPS/PACKING/CUSTOMS）+ 自定义项
   └─ 官方链接：country_official_link 表
 
 展示判断：
@@ -812,17 +827,20 @@ Provider 获取方式：
 清单读取（GET /api/prep/checklist?itineraryId=）：
   ├─ 校验 itinerary 属于当前用户
   ├─ 查 trip_checklist（user_id + country_code + itinerary_id）
-  ├─ 对未落库的 item_key 返回默认 checked=false
-  └─ 返回固定 7 项顺序列表
+  ├─ 对未落库的默认 item_key 返回默认 checked=false
+  └─ 返回默认 10 项 + 自定义项顺序列表
 
 清单勾选（PUT /api/prep/checklist）：
   ├─ 入参：itineraryId、itemKey、checked
-  ├─ 校验 itinerary 属于当前用户、itemKey 属于固定枚举
+  ├─ 校验 itinerary 属于当前用户、itemKey 属于默认枚举或 CUSTOM_ 前缀
   └─ upsert：
-      INSERT INTO trip_checklist(user_id, country_code, itinerary_id, item_key, checked)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO trip_checklist(user_id, country_code, itinerary_id, item_key, checked,
+                                 title, description, days_before, sort_order, custom)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       AS new
-      ON DUPLICATE KEY UPDATE checked = new.checked, deleted = 0;
+      ON DUPLICATE KEY UPDATE checked = new.checked, title = new.title,
+                             description = new.description, days_before = new.days_before,
+                             sort_order = new.sort_order, custom = new.custom, deleted = 0;
 
 官方链接（GET /api/prep/official-links?countryCode=）：
   ├─ 已配置：返回 [{title, url}]，最多 3 条，url 做 http/https + 长度校验
@@ -831,7 +849,7 @@ Provider 获取方式：
       前端展示"去搜索"按钮，新窗口打开并提示外部链接
 ```
 
-**关键点**：清单不预落库、勾选时 upsert；唯一键 `(user_id, country_code, itinerary_id, item_key)`；官方链接未配置时给通用搜索兜底，不报错；`preparations` 为空时整区不展示。
+**关键点**：默认项不预落库、勾选或自定义时 upsert；唯一键 `(user_id, itinerary_id, item_key)`；官方链接未配置时给通用搜索兜底，不报错；`preparations` 为空时整区不展示。
 
 ### 7.10.1 preparations 缓存机制
 
@@ -1458,6 +1476,7 @@ docker-compose（可选）：
 | V1.0 一致性修订 | 本次 | ① 新增 `country` 国家字典表；② 新增 `quota_pack` 批次表，解决次数包 365 天过期（7.2）；③ AI 生成去重改为「结果缓存 + 在途锁」，消除并发双扣（7.1）；④ 汇率新增时回填 NULL 快照，落实"补配置自动纳入"（7.15）；⑤ 新增行程增删天/改当天城市流程（7.22）与接口（5.4）；⑥ 补 `resend-verify`、`upload/presign`、`GET /expenses`、`countries`、城市/官方链接增删、`restore` 等接口；⑦ 错误码补齐 1008、2015–2026；⑧ 修正 7.6 地图 SQL 的 `MAX/MIN` 语义；⑨ 对象 Key 去掉不存在的 `noteId`；⑩ 取消事件统一为 `event: cancelled`；⑪ `itinerary.status` 只保留 `SAVED`；⑫ 补 `quota:req` 键；⑬ 新增第 11 章待补清单；⑭ **`role` 收敛为 `USER`/`ADMIN`，VIP 由 `vip_expire_at` 派生**；⑮ 行程天 API 字段统一为 `date`，DB 列 `visit_date` 用 `@TableField` 显式映射；⑯ 抽屉 `ungrouped` 补入**行程**，修复"删除旅行后行程从抽屉消失"；⑰ 明确多城市行程在每个涉足城市下各展示一次；⑱ 卡密兑换/管理调增**必须写入 `quota_pack` 批次**，并补 VIP 到期叠加公式；⑲ 注销清单补 `quota_pack` 与 `token_version`；⑳ 7.14 补 `unconfiguredCurrencies`；㉑ 7.22 明确单行程上限 15 天；㉒ 7.4 请求体与接口文档对齐；㉓ 7.5 补**跨国家挂载拦截**与**旅行日期区间派生维护**；㉔ 7.13 明确草稿页景点仅前端本地、重新生成在扣费前预校验、修正子表误用 `deleted`；㉕ 7.10 清单 upsert 改为 8.0 别名语法并复位 `deleted`；㉖ 7.19 补改密/重置密码同样使 JWT 失效 | 深度语义审查（第三轮 + 第四轮） |
 | V1.1 认证验证码 | 2026-11-01 | 注册验证与找回密码改为 6 位邮箱验证码（Redis 存 HMAC 摘要、10 分钟、5 次试错、分层发信限流）；注册改为“注册前校验验证码”，删除 `verify-email`/`resend-verify`/`forgot-password`，新增 `/auth/send-code`；删除独立验证页；开发环境验证码只写日志；前端新增独立管理员登录入口与会话保持策略 | 认证体验对齐常见网站（change-06） |
 | V1.1.1 邮件发信修复 | 2026-11-09 | ① SMTP 显式设置 `mail.smtp.localhost` 为发件人域名，避免 EHLO 反向 DNS 卡顿；② 验证码/重置密码发信同步等待上限由 10 秒放宽到 20 秒；③ 前端注册/找回密码对邮箱输入做 NFKC 归一化并去空白（全角 `＠`/`．` 容错） | 实测 Resend SMTP 建连认证耗时 16–21 秒，被 10 秒上限误判为发送失败 |
+| V1.2 运营与安全能力 | 2026-11-10 | ① 模块划分补账号安全、内容治理、运营、监控与告警；② 5.10 补反馈/举报/公告/登录日志/监控/邮件/告警/OSS 测试接口；③ LLM 接入改为 OpenAI 兼容 HTTP 适配器；④ 补充固定北京时间约定 | 实现与基线同步（account-security / media-review / feedback / moderation / announcements / monitoring / alert / timezone） |
 
 ---
 
